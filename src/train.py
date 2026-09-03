@@ -43,6 +43,8 @@ def forward_pass(model, batch, dt: float, device):
     imu = batch["imu"].to(device)              # (B, T, 6)
     speed_gt = batch["speed_gt"].to(device)     # (B, T)
     pos_gt = batch["pos_gt"].to(device)         # (B, T, 2)
+    v0 = batch["v0"].to(device)                 # (B,) true starting speed
+    theta0 = batch["theta0"].to(device)         # (B,) true starting heading
 
     corrections = model(imu)                    # (B, T, 2) -> [delta_v, delta_theta]
     delta_v, delta_theta = corrections[..., 0], corrections[..., 1]
@@ -50,8 +52,13 @@ def forward_pass(model, batch, dt: float, device):
     forward_accel = imu[..., 0] + delta_v        # residual added to raw forward accel
     yaw_rate = imu[..., 5] + delta_theta          # residual added to raw yaw rate (gz)
 
-    speed_pred = integrate_speed(forward_accel, dt)
-    heading_pred = integrate_heading(yaw_rate, dt)
+    # Start from the window's real initial state, not zero — a window is a
+    # random slice mid-drive, so the vehicle is essentially never stopped
+    # and facing the arbitrary "heading=0" reference right at the slice
+    # boundary. Integrating from zero here was the actual bug behind the
+    # drift plateau; see windowing.py's Window docstring for the full story.
+    speed_pred = integrate_speed(forward_accel, dt, v0=v0)
+    heading_pred = integrate_heading(yaw_rate, dt, theta0=theta0)
     pos_pred = dead_reckon_position(speed_pred, heading_pred, dt)
 
     return speed_pred, pos_pred, speed_gt, pos_gt
@@ -103,6 +110,13 @@ def main():
     ).to(device)
 
     opt = torch.optim.AdamW(model.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
+    # Flat LR the whole run was a real gap — a run showed steadily shrinking
+    # per-epoch improvement (-1.4% -> -0.6% -> -0.4% -> -0.2%...) consistent
+    # with the fixed step size overshooting near a minimum rather than the
+    # model having genuinely stopped learning. Cosine decay lets it keep
+    # taking finer steps as training progresses instead of asking one LR to
+    # work well for both the beginning and the end of the run.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg["train"]["epochs"])
     dt = 1.0 / cfg["data"]["sample_rate_hz"]
 
     best_val_drift = float("inf")
@@ -141,8 +155,9 @@ def main():
 
         dt_epoch = time.time() - t0
         print(f"epoch {epoch:03d} | train drift {train_metrics['drift_pct']:.2f}% "
-              f"| val drift {val_metrics['drift_pct']:.2f}% | {dt_epoch:.1f}s")
+              f"| val drift {val_metrics['drift_pct']:.2f}% | lr {scheduler.get_last_lr()[0]:.2e} | {dt_epoch:.1f}s")
         history.append({"epoch": epoch, "train": train_metrics, "val": val_metrics})
+        scheduler.step()
 
         if val_metrics["drift_pct"] < best_val_drift:
             best_val_drift = val_metrics["drift_pct"]

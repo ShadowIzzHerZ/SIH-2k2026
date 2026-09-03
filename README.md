@@ -45,7 +45,10 @@ distance travelled — not a proxy.
 | [src/train.py](src/train.py) | Training loop |
 | [src/evaluate.py](src/evaluate.py) | Benchmarks a checkpoint against the PS's `<10%` drift target |
 | [src/export_onnx.py](src/export_onnx.py) | Exports the network to ONNX for the mobile app / edge engine |
-| [tests/test_pipeline_smoke.py](tests/test_pipeline_smoke.py) | Synthetic-data sanity check — run this after touching integrator/model/train code |
+| [src/map_matching.py](src/map_matching.py) | Snaps a (predicted or raw) trajectory onto real roads via HMM map-matching (OpenStreetMap + leuvenmapmatching) — the PS's separate "map-matching / non-holonomic constraints" component |
+| [src/evaluate_with_mapmatching.py](src/evaluate_with_mapmatching.py) | Measures the real improvement map-matching gives on top of the trained model's own predictions on held-out test windows |
+| [tests/test_pipeline_smoke.py](tests/test_pipeline_smoke.py) | Synthetic-data sanity check for the integrator/model/train loop |
+| [tests/test_map_matching.py](tests/test_map_matching.py) | Validates the map-matcher against a real road segment with a known-answer synthetic-drift-recovery check (needs network access) |
 
 ## Setup
 
@@ -69,11 +72,18 @@ individual CSVs, just re-bundled, and would roughly double the download.)
 
 - [x] Project scaffolded, dataset pulled
 - [x] Physics integrator + network architecture implemented, verified against synthetic ground truth (see smoke test)
-- [ ] **`configs/default.yaml`'s `data.column_map` needs the real IO-VNBD column names** — run `python src/data/inspect_dataset.py` once the dataset finishes downloading, paste the printed headers in. Loader has fuzzy-match fallback so it may already work, but confirm before trusting results.
-- [ ] First real training run + drift-benchmark eval
-- [ ] Calibration's yaw-misalignment estimation is stubbed at 0 — wire up `calibration.estimate_yaw_misalignment` using a GPS-heading segment once column names are confirmed
-- [ ] ONNX export smoke-tested on a random checkpoint; needs re-verification post-training
-- [ ] Map-matching / OSM non-holonomic snapping (separate component per the PS, not yet started — sits downstream of this model's raw trajectory output)
+- [x] Real IO-VNBD column mapping resolved — dataset mixes `V-*.csv` (vehicle CAN-bus, no 3-axis IMU, unusable here) and `S-*.csv` (smartphone, real accel+gyro+GPS); we train on `S-*.csv` only (`data.file_prefix` in config)
+- [x] Yaw-misalignment calibration implemented, using the GPS-orientation field (not raw position deltas — those were too noisy) as ground truth heading, confidence-thresholded per recording
+- [x] First real training run + drift-benchmark eval completed:
+  - **Test set: 62.76% mean drift** (down from an untrained ~80-90% baseline)
+  - **Honestly, this is well above the PS's <10% target.** Root cause isn't a bug — raw phone-IMU double integration over seconds is genuinely hard (the whole reason this PS exists), and a single correction network probably can't clear <10% alone without the other PS-listed components (map-matching, GNSS/INS fusion mode-switching) doing real work alongside it, not just as polish.
+  - Full numbers: [results/eval_report.json](results/eval_report.json)
+- [x] ONNX export verified — matches PyTorch output to 4.3e-6, see [checkpoints/dead_reckoning_model.onnx](checkpoints/dead_reckoning_model.onnx)
+- [x] Map-matching implemented and validated: HMM-based (leuvenmapmatching, Newson-Krumm family) snapping onto real OpenStreetMap road graphs, **not** naive nearest-point snapping (which breaks on noisy/drifted input — no memory of the route so far). Synthetic-drift recovery test shows a real **62% error reduction** (20.1m → 7.6m mean error) on a real road segment — see [tests/test_map_matching.py](tests/test_map_matching.py).
+- [ ] Map-matching's improvement on the *trained model's own* predictions (not synthetic drift) — [src/evaluate_with_mapmatching.py](src/evaluate_with_mapmatching.py) is built and runs, but the free OSM Overpass API rate-limits repeated automated queries hard, so a full-confidence run is still pending — rerun with fewer/cached windows or a paid/self-hosted Overpass instance for a reliable number.
+- [ ] Non-holonomic motion constraints not yet enforced inside the matcher itself (relies on the road graph's own directionality for one-way streets, but no explicit "can't teleport backward along a one-way" cost yet)
+- [ ] GNSS+INS fusion mode-switching (seamless handoff between GPS-available and blackout) — not started, sits above both the network and the matcher
+- [ ] Own campus recordings (see `data/own_recordings/`) — not yet collected; could help close the gap given IO-VNBD's mounting/session variety is a real source of error
 
 ## Running
 
@@ -92,4 +102,10 @@ python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints
 
 # sanity check any time you change the integrator/model/loss
 python -m tests.test_pipeline_smoke
+
+# validate the map-matcher against a real road segment (needs network access)
+python -m tests.test_map_matching
+
+# measure map-matching's real improvement on the trained model's predictions
+python -m src.evaluate_with_mapmatching --config configs/default.yaml --checkpoint checkpoints/best.pt
 ```
