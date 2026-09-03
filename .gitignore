@@ -1,0 +1,18 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Dataset (huge, pulled via git-lfs from the IO-VNBD repo — don't duplicate in this repo's history)
+data/IO-VNBD/
+
+# Training artifacts
+checkpoints/*.pt
+checkpoints/*.onnx
+results/*.png
+results/*.csv
+results/*.json
+!results/.gitkeep
+
+.DS_Store

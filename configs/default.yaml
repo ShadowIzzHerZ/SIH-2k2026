@@ -1,0 +1,71 @@
+# SIH26168 — Dead Reckoning ML config
+# NOTE: column_map is filled in once we inspect the actual IO-VNBD CSV headers
+# (data is git-lfs, pulled separately — see README). Placeholder names below
+# are updated by src/data/inspect_dataset.py on first run.
+
+data:
+  root: "data/IO-VNBD"
+  # which dataset variant to train on first: the synchronised set has vehicle
+  # (V) + smartphone (S) IMU streams time-aligned, which we need for the
+  # phone-mounted use case described in the PS.
+  variant: "Synchronised V abd S datasets"
+  # V-*.csv files are vehicle CAN-bus data with no 3-axis accel/gyro (only
+  # 2-axis "indicated" accel + yaw rate) — not usable here. S-*.csv are the
+  # real smartphone recordings (3-axis accel+gyro+GPS), which is what this
+  # PS is actually about. Confirmed against real headers, 2026-09-03.
+  file_prefix: "S-"
+  sample_rate_hz: 10          # PS explicitly specifies 10Hz phone update rate
+  window_size: 50             # 5s windows @ 10Hz
+  window_stride: 10           # 1s stride between training windows
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  # filled in by inspect_dataset.py — do not hand-edit until confirmed
+  column_map:
+    time: null
+    accel_x: null
+    accel_y: null
+    accel_z: null
+    gyro_x: null
+    gyro_y: null
+    gyro_z: null
+    speed_gt: null      # wheel-speed or GPS-derived speed, ground truth
+    lat: null
+    lon: null
+    heading_gt: null
+
+model:
+  # physics-informed learned bias-correction network:
+  #   v_physics = integrate(calibrated forward accel)      <- drifts
+  #   v_corrected = v_physics + NN(imu_window)              <- learned residual
+  # loss combines per-step speed error + end-to-end drift over the window.
+  input_channels: 6           # ax, ay, az, gx, gy, gz (calibrated/leveled)
+  cnn_channels: [32, 64, 64]
+  cnn_kernel_size: 5
+  gru_hidden: 128
+  gru_layers: 2
+  dropout: 0.2
+  output_dim: 2               # [delta_v (speed residual), delta_theta (heading-rate residual)]
+
+train:
+  batch_size: 64
+  epochs: 60
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  loss_weights:
+    speed: 1.0
+    heading: 0.5
+    drift: 2.0               # end-to-end position-drift term — this is what the SIH benchmark actually grades
+  early_stop_patience: 8
+  device: "auto"              # auto -> mps (Apple Silicon) > cuda > cpu
+
+eval:
+  # SIH26168 benchmark targets (from PS, doc §2):
+  drift_target_pct: 10.0      # < 10% of distance travelled during blackout
+  example_checks:
+    - {distance_m: 50,  max_drift_m: 5,  max_time_s: 60}
+    - {distance_m: 1000, max_drift_m: 100, speed_kmph: 60}
+
+export:
+  onnx_path: "checkpoints/dead_reckoning_model.onnx"
+  opset: 17

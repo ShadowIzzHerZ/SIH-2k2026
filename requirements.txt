@@ -1,0 +1,17 @@
+# Core
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+
+# ML
+torch>=2.2
+onnx>=1.15
+onnxruntime>=1.17
+
+# Classical filtering baseline / comparison
+filterpy>=1.4.5
+
+# Utils
+pyyaml>=6.0
+matplotlib>=3.7
+tqdm>=4.66
