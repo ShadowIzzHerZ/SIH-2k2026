@@ -1,6 +1,0 @@
-device: mps
-train: 100 files -> 135344 windows
-val: 21 files -> 14049 windows
-test: 23 files -> 35969 windows
-epoch 000 | train drift 134734.99% | val drift 43.66% | 70.4s
-epoch 001 | train drift 54.72% | val drift 43.66% | 71.0s

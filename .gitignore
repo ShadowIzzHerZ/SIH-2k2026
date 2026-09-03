@@ -7,12 +7,18 @@ __pycache__/
 # Dataset (huge, pulled via git-lfs from the IO-VNBD repo — don't duplicate in this repo's history)
 data/IO-VNBD/
 
-# Training artifacts
-checkpoints/*.pt
-checkpoints/*.onnx
+# Training logs (real ones, run to run, are large/noisy — keep out of history)
+logs/*.log
+
+# osmnx's local HTTP response cache (raw Overpass API JSON) — a convenience
+# cache, not something to version
+cache/
+
+# Generated plots/large CSVs — but keep checkpoints and small eval-result
+# JSON: they're real deliverables now (a trained model + its actual numbers),
+# small (<1MB each), and worth having in the repo without needing to retrain.
 results/*.png
 results/*.csv
-results/*.json
 !results/.gitkeep
 
 .DS_Store

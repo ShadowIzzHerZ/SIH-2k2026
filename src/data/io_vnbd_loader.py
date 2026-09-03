@@ -167,6 +167,16 @@ def latlon_to_local_xy(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     return np.stack([x, y], axis=1)
 
 
+def compass_deg_to_xy_unit(bearing_deg: np.ndarray) -> np.ndarray:
+    """Convert a compass bearing (0°=North, 90°=East, clockwise — GPS
+    course-over-ground convention) into a unit vector in the [x=east,
+    y=north] frame latlon_to_local_xy uses, so heading_gt is directly
+    comparable to position-derived directions without a separate
+    degrees<->math-angle conversion step at every call site."""
+    rad = np.radians(bearing_deg)
+    return np.stack([np.sin(rad), np.cos(rad)], axis=-1)
+
+
 def derive_speed_from_gps(lat: np.ndarray, lon: np.ndarray, time: np.ndarray) -> np.ndarray:
     """Fallback ground-truth speed from consecutive GPS fixes, if the file
     has no direct wheel-speed / speed column."""

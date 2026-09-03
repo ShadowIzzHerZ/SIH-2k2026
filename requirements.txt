@@ -11,6 +11,11 @@ onnxruntime>=1.17
 # Classical filtering baseline / comparison
 filterpy>=1.4.5
 
+# Map-matching (road-network snapping component)
+osmnx>=2.0
+leuvenmapmatching>=1.3
+rtree>=1.4
+
 # Utils
 pyyaml>=6.0
 matplotlib>=3.7
