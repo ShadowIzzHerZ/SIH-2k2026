@@ -2,6 +2,8 @@
 numpy>=1.24
 scipy>=1.10
 pandas>=2.0
+pyarrow>=14.0          # parquet support (comma2k19 loader)
+huggingface_hub>=0.20  # downloads the comma2k19 demo split
 
 # ML
 torch>=2.2
