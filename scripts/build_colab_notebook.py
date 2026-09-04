@@ -230,7 +230,12 @@ while cycle < MAX_CYCLES:
     resume_args = ["--resume", "checkpoints/best.pt"] if os.path.exists("checkpoints/best.pt") else []
     print(f"\\n{'='*70}\\ncycle {cycle} {'(warm restart)' if resume_args else '(cold start)'}\\n{'='*70}")
 
-    train_ret = subprocess.run([sys.executable, "-m", "src.train", "--config", "configs/default.yaml", *resume_args])
+    # -u: unbuffered stdout. Without it, src.train's stdout is piped (not a
+    # TTY) so Python fully block-buffers it — nothing appears in the Colab
+    # cell until the whole cycle's subprocess exits and flushes everything
+    # at once, which can look like a silent hang for many minutes on a
+    # cold-start cycle. -u makes per-epoch progress genuinely live here too.
+    train_ret = subprocess.run([sys.executable, "-u", "-m", "src.train", "--config", "configs/default.yaml", *resume_args])
     if train_ret.returncode != 0:
         print("training subprocess exited with an error — stopping the loop, see output above")
         break

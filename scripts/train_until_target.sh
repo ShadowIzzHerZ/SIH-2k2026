@@ -35,7 +35,7 @@ while [ "$cycle" -lt "$MAX_CYCLES" ]; do
   echo "cycle $cycle $(date) $label"
   echo "====================================================================="
 
-  "$PY" -m src.train --config configs/default.yaml $resume_arg
+  "$PY" -u -m src.train --config configs/default.yaml $resume_arg
   train_status=$?
   if [ $train_status -ne 0 ]; then
     echo "train exited with status $train_status — stopping loop"
