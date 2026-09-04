@@ -20,16 +20,22 @@ echo "=== train_until_target started $(date) ==="
 cycle=0
 while [ "$cycle" -lt "$MAX_CYCLES" ]; do
   cycle=$((cycle + 1))
-  resume_args=()
+  # A plain string (not a bash array) deliberately — macOS's default
+  # /bin/bash is 3.2, where `"${arr[@]}"` on an empty array errors under
+  # `set -u`. Safe to word-split unquoted here: it's always either empty or
+  # exactly "--resume checkpoints/best.pt", no spaces/globs involved.
+  resume_arg=""
+  label="(cold start)"
   if [ -f checkpoints/best.pt ]; then
-    resume_args=(--resume checkpoints/best.pt)
+    resume_arg="--resume checkpoints/best.pt"
+    label="$resume_arg"
   fi
   echo ""
   echo "====================================================================="
-  echo "cycle $cycle $(date) ${resume_args[*]:-(cold start)}"
+  echo "cycle $cycle $(date) $label"
   echo "====================================================================="
 
-  "$PY" -m src.train --config configs/default.yaml "${resume_args[@]}"
+  "$PY" -m src.train --config configs/default.yaml $resume_arg
   train_status=$?
   if [ $train_status -ne 0 ]; then
     echo "train exited with status $train_status — stopping loop"
