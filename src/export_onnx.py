@@ -41,7 +41,6 @@ def main():
         input_channels=cfg["model"]["input_channels"],
         cnn_channels=cfg["model"]["cnn_channels"],
         cnn_kernel_size=cfg["model"]["cnn_kernel_size"],
-        cnn_dilations=cfg["model"].get("cnn_dilations"),
         gru_hidden=cfg["model"]["gru_hidden"],
         gru_layers=cfg["model"]["gru_layers"],
         dropout=cfg["model"]["dropout"],
