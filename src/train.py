@@ -128,8 +128,20 @@ def main():
     epoch_offset = 0
     if args.resume:
         print(f"resuming from {args.resume}")
-        model.load_state_dict(torch.load(args.resume, map_location=device))
+        try:
+            model.load_state_dict(torch.load(args.resume, map_location=device))
+        except (RuntimeError, OSError) as e:
+            # RuntimeError: most likely the checkpoint was trained with a
+            # different model.input_channels (an architecture/feature
+            # change) and its layer shapes no longer match. OSError: path
+            # doesn't exist / unreadable. Either way, an unattended loop
+            # (train_until_target.sh, the Colab loop cell) shouldn't crash
+            # over it — fall back to a cold start instead.
+            print(f"could not load {args.resume} ({e}); "
+                  f"starting from random init instead (likely an input_channels/architecture change or missing checkpoint).")
+            args.resume = None  # so the loop below knows this run is effectively a cold start
 
+    if args.resume:
         # Back up whatever the previous run left behind before this run
         # overwrites best.pt / train_history.json — resuming should never
         # silently destroy the checkpoint/history it started from.

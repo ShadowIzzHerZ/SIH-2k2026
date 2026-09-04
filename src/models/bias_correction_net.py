@@ -73,7 +73,10 @@ class BiasCorrectionNet(nn.Module):
         """
         Args:
             x: (batch, T, C) calibrated IMU window — [ax, ay, az, gx, gy, gz]
-               in the leveled vehicle frame (see calibration.py).
+               in the leveled vehicle frame (see calibration.py), plus
+               engineered channels appended after (see windowing.py's
+               engineer_features()) when C > 6. input_channels is a config
+               value, not hardcoded, so this works either way.
 
         Returns:
             corrections: (batch, T, output_dim) per-timestep residuals

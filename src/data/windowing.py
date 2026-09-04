@@ -219,6 +219,51 @@ def build_windows(seq: ImuSequence, window_size: int, stride: int, dt: float,
     return windows
 
 
+def engineer_features(accel: np.ndarray, gyro: np.ndarray, dt: float, smooth_win: int = 5) -> np.ndarray:
+    """Extra per-timestep channels appended after the raw 6 calibrated
+    accel/gyro axes.
+
+    Four training cycles of warm-restarting the same 6-raw-channel model
+    against the same data all plateaued in the exact same ~68-70% val-drift
+    band (see train_history.json), and train drift plateaued right along
+    with it — not a sign of overfitting or a bad LR, but of the network not
+    having enough signal in 6 raw axes to separate real sustained motion
+    from single-sample MEMS noise/vibration. These are cheap, well-known
+    IMU features (magnitude, jerk, local smoothing/roughness) meant to hand
+    that signal to the network more directly instead of making it rediscover
+    it inside a small CNN receptive field.
+
+    Appended *after* the 6 raw channels (never inserted before) so
+    `train.py`'s `imu[..., 0]` (forward accel) and `imu[..., 5]` (yaw rate)
+    indexing into the physics baseline stays correct.
+    """
+    ax, ay, az = accel[:, 0], accel[:, 1], accel[:, 2]
+    gx, gy, gz = gyro[:, 0], gyro[:, 1], gyro[:, 2]
+
+    accel_mag = np.sqrt(ax**2 + ay**2 + az**2)
+    accel_horiz_mag = np.sqrt(ax**2 + ay**2)
+    gyro_mag = np.sqrt(gx**2 + gy**2 + gz**2)
+
+    # Sharp brake/throttle transitions look different from steady
+    # acceleration only in their rate of change — a single raw sample can't
+    # tell them apart.
+    jerk_x = np.gradient(ax, dt)
+
+    # Local smoothing/roughness of the two channels the physics baseline
+    # actually integrates: a short moving average (separates sustained
+    # motion from a single noisy sample) and local std (vibration
+    # intensity/roughness) over a ~0.5s window.
+    kernel = np.ones(smooth_win) / smooth_win
+    ax_smooth = np.convolve(ax, kernel, mode="same")
+    ax_local_std = np.sqrt(np.clip(np.convolve(ax**2, kernel, mode="same") - ax_smooth**2, 0, None))
+    gz_smooth = np.convolve(gz, kernel, mode="same")
+    gz_local_std = np.sqrt(np.clip(np.convolve(gz**2, kernel, mode="same") - gz_smooth**2, 0, None))
+
+    return np.stack(
+        [accel_mag, accel_horiz_mag, gyro_mag, jerk_x, ax_local_std, gz_local_std], axis=1
+    ).astype(np.float32)
+
+
 class IOVNBDWindowDataset(Dataset):
     def __init__(self, windows: list[Window]):
         self.windows = windows
@@ -228,7 +273,8 @@ class IOVNBDWindowDataset(Dataset):
 
     def __getitem__(self, idx):
         w = self.windows[idx]
-        imu = np.concatenate([w.accel, w.gyro], axis=1).astype(np.float32)  # (T, 6)
+        extra = engineer_features(w.accel, w.gyro, w.dt)
+        imu = np.concatenate([w.accel, w.gyro, extra], axis=1).astype(np.float32)  # (T, 12)
         return {
             "imu": torch.from_numpy(imu),
             "speed_gt": torch.from_numpy(w.speed_gt.astype(np.float32)),
