@@ -39,7 +39,11 @@ model:
   #   v_physics = integrate(calibrated forward accel)      <- drifts
   #   v_corrected = v_physics + NN(imu_window)              <- learned residual
   # loss combines per-step speed error + end-to-end drift over the window.
-  input_channels: 6           # ax, ay, az, gx, gy, gz (calibrated/leveled)
+  # 6 raw calibrated/leveled channels (ax,ay,az,gx,gy,gz) + 6 engineered
+  # (accel_mag, accel_horiz_mag, gyro_mag, jerk_x, ax_local_std, gz_local_std)
+  # — see windowing.py's engineer_features(). Raw channels come first so
+  # train.py's imu[...,0]/imu[...,5] physics-baseline indexing stays valid.
+  input_channels: 12
   cnn_channels: [32, 64, 64]
   cnn_kernel_size: 5
   gru_hidden: 128
