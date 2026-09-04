@@ -36,6 +36,14 @@ import osmnx as ox
 from leuvenmapmatching.map.inmem import InMemMap
 from leuvenmapmatching.matcher.distance import DistanceMatcher
 
+# osmnx has no timeout by default beyond whatever its own internal default
+# is — an evaluate_with_mapmatching.py run once hung with the process alive
+# but CPU time frozen (a network read with nothing bounding how long it
+# waits), rather than raising an exception our retry/backoff could catch.
+# An explicit, moderate timeout turns "hangs forever" into "raises after
+# 45s", which is what the caller's retry logic actually expects.
+ox.settings.timeout = 45
+
 
 def download_road_graph(lat: float, lon: float, dist_m: float = 2000,
                          network_type: str = "drive") -> nx.MultiDiGraph:

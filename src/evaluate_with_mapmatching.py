@@ -52,8 +52,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--checkpoint", default="checkpoints/best.pt")
-    parser.add_argument("--n_windows", type=int, default=40)
+    parser.add_argument("--n_windows", type=int, default=20)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--min_request_gap", type=float, default=5.0,
+                         help="Minimum seconds between successful Overpass downloads, not just "
+                              "retry backoff — the free API rate-limited/refused connections after "
+                              "a handful of requests in quick succession on a prior run even when "
+                              "each individual request succeeded, so pacing every request (not just "
+                              "retries after a failure) matters.")
     args = parser.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
@@ -84,6 +90,7 @@ def main():
     print(f"evaluating {len(idxs)} sampled test windows")
 
     graph_cache: dict[tuple[int, int], "InMemMap"] = {}
+    last_request_t = [0.0]  # mutable cell, closed over by get_map
 
     def get_map(lat0: float, lon0: float):
         # ~11km grid — coarser than a first pass (~1km) to raise the cache-hit
@@ -94,15 +101,27 @@ def main():
         # than precision in which nearby windows share a graph.
         key = (round(lat0, 1), round(lon0, 1))
         if key not in graph_cache:
+            # Proactive pacing, not just retry-after-failure backoff — the
+            # free API rate-limited even between individually-successful
+            # requests on a prior run, so every distinct download (not only
+            # ones that just failed) waits out the minimum gap first.
+            gap = time.time() - last_request_t[0]
+            if gap < args.min_request_gap:
+                time.sleep(args.min_request_gap - gap)
+
             last_err = None
             for attempt in range(3):
                 try:
+                    print(f"  downloading OSM graph for {key} (attempt {attempt + 1})...", flush=True)
                     G = download_road_graph(lat0, lon0, dist_m=1500)
                     graph_cache[key] = osmnx_graph_to_inmem_map(G, name=f"{key}")
+                    last_request_t[0] = time.time()
                     break
                 except Exception as e:
                     last_err = e
-                    time.sleep(3 * (attempt + 1))  # backoff — be gentle with the free API
+                    print(f"  download failed ({e}); backing off...", flush=True)
+                    time.sleep(5 * (attempt + 1))  # backoff — be gentle with the free API
+                    last_request_t[0] = time.time()
             else:
                 raise last_err
         return graph_cache[key]
@@ -110,7 +129,8 @@ def main():
     before_drifts, after_drifts, match_rates = [], [], []
 
     with torch.no_grad():
-        for idx in idxs:
+        for n, idx in enumerate(idxs):
+            print(f"[{n + 1}/{len(idxs)}] window {idx}...", flush=True)
             item = test_ds[idx]
             batch = {k: (v.unsqueeze(0) if torch.is_tensor(v) else [v]) for k, v in item.items()}
             speed_pred, pos_pred, speed_gt, pos_gt = forward_pass(model, batch, dt, device)
@@ -120,28 +140,32 @@ def main():
             pos_gt_np = pos_gt[0].cpu().numpy()
             lat0, lon0 = item["lat0"], item["lon0"]
             if not np.isfinite(lat0) or not np.isfinite(lon0):
+                print(f"  [skip] non-finite lat0/lon0")
                 continue
 
+            # Isolate each window's own failures (a download timeout/retry
+            # exhaustion, or anything unexpected from the matcher itself) so
+            # one bad window can't take down an otherwise-long unattended run.
             try:
                 map_con = get_map(lat0, lon0)
+
+                latlon_pred = xy_to_latlon(pos_pred_np, lat0, lon0)
+                # subsample to ~1/sec for the matcher (matching every 10Hz sample is
+                # unnecessary and slow; the matcher fills in the path between them).
+                # drift_metric scores ONLY the trajectory's final point — a plain
+                # range(0, T, step) doesn't land on T-1 for T=50, step=10, so the
+                # one point that actually matters for the metric would never get
+                # corrected (confirmed: that exact bug made before==after look
+                # identical to 2 decimal places on the first run). np.linspace
+                # guarantees both endpoints are included.
+                n_sel = max(2, len(latlon_pred) // max(1, int(round(1.0 / dt))))
+                sel = sorted(set(np.linspace(0, len(latlon_pred) - 1, n_sel, dtype=int).tolist()))
+                path = [tuple(latlon_pred[i]) for i in sel]
+
+                result = match_trajectory(map_con, path, obs_noise=30.0, max_dist=100.0)
             except Exception as e:
-                print(f"[skip window {idx}] OSM download failed: {e}")
+                print(f"  [skip] map-matching failed: {e}")
                 continue
-
-            latlon_pred = xy_to_latlon(pos_pred_np, lat0, lon0)
-            # subsample to ~1/sec for the matcher (matching every 10Hz sample is
-            # unnecessary and slow; the matcher fills in the path between them).
-            # drift_metric scores ONLY the trajectory's final point — a plain
-            # range(0, T, step) doesn't land on T-1 for T=50, step=10, so the
-            # one point that actually matters for the metric would never get
-            # corrected (confirmed: that exact bug made before==after look
-            # identical to 2 decimal places on the first run). np.linspace
-            # guarantees both endpoints are included.
-            n_sel = max(2, len(latlon_pred) // max(1, int(round(1.0 / dt))))
-            sel = sorted(set(np.linspace(0, len(latlon_pred) - 1, n_sel, dtype=int).tolist()))
-            path = [tuple(latlon_pred[i]) for i in sel]
-
-            result = match_trajectory(map_con, path, obs_noise=30.0, max_dist=100.0)
             match_rates.append(result.match_rate)
 
             snapped_xy = pos_pred_np.copy()  # fall back to unmatched prediction where snapping failed
@@ -159,6 +183,7 @@ def main():
                 torch.from_numpy(snapped_xy).unsqueeze(0).float(),
                 torch.from_numpy(pos_gt_np).unsqueeze(0).float(),
             ).item()
+            print(f"  before {before:.1f}% -> after {after:.1f}% (match_rate {result.match_rate:.2f})", flush=True)
 
             before_drifts.append(before)
             after_drifts.append(after)
