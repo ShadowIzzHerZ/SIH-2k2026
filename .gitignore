@@ -21,4 +21,10 @@ results/*.png
 results/*.csv
 !results/.gitkeep
 
+# Local safety backups made by `src.train --resume` before it overwrites
+# best.pt / train_history.json — convenience for the person running it, not
+# a deliverable worth versioning.
+checkpoints/best_prev.pt
+results/train_history_prev.json
+
 .DS_Store
