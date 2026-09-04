@@ -91,8 +91,15 @@ individual CSVs, just re-bundled, and would roughly double the download.)
 # 1. confirm dataset columns (one-time)
 python src/data/inspect_dataset.py
 
-# 2. train
+# 2. train (cold start)
 python -m src.train --config configs/default.yaml
+
+# 2b. or resume/warm-restart from the current best checkpoint instead of
+# random init — measures the loaded weights' real val drift first so
+# checkpoints/best.pt only gets overwritten if this run actually beats it.
+# Backs up the previous checkpoints/best.pt -> best_prev.pt and
+# results/train_history.json -> train_history_prev.json before it starts.
+python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
 
 # 3. evaluate against the PS's <10% drift benchmark
 python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
@@ -109,3 +116,20 @@ python -m tests.test_map_matching
 # measure map-matching's real improvement on the trained model's predictions
 python -m src.evaluate_with_mapmatching --config configs/default.yaml --checkpoint checkpoints/best.pt
 ```
+
+### Training on Colab
+
+[notebooks/colab_train.ipynb](notebooks/colab_train.ipynb) is generated from
+the real `src/` files by [scripts/build_colab_notebook.py](scripts/build_colab_notebook.py)
+(re-run that script and re-upload any time `src/*.py` or the config change,
+so the notebook never drifts from what's actually in the repo). Upload it to
+[colab.research.google.com](https://colab.research.google.com), set
+Runtime → GPU, and run the cells top to bottom.
+
+It resumes rather than cold-starts: it fetches `checkpoints/best.pt` from
+Google Drive (a previous Colab run) or, failing that, from this GitHub repo,
+then loops `src.train --resume ...` (a cosine-annealed warm restart each
+cycle) + `src.evaluate`, checkpointing to Drive after every cycle so nothing
+is lost on disconnect. It keeps going until the PS's <10% drift target is
+hit or the Colab runtime itself ends — there's a very high cycle cap as a
+pure safety backstop, not a real limit.
