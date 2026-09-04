@@ -223,19 +223,29 @@ def engineer_features(accel: np.ndarray, gyro: np.ndarray, dt: float, smooth_win
     """Extra per-timestep channels appended after the raw 6 calibrated
     accel/gyro axes.
 
-    Four training cycles of warm-restarting the same 6-raw-channel model
-    against the same data all plateaued in the exact same ~68-70% val-drift
-    band (see train_history.json), and train drift plateaued right along
-    with it — not a sign of overfitting or a bad LR, but of the network not
-    having enough signal in 6 raw axes to separate real sustained motion
-    from single-sample MEMS noise/vibration. These are cheap, well-known
-    IMU features (magnitude, jerk, local smoothing/roughness) meant to hand
-    that signal to the network more directly instead of making it rediscover
-    it inside a small CNN receptive field.
+    NOT currently wired into IOVNBDWindowDataset.__getitem__ — kept here,
+    defined but unused, rather than deleted. Tried once (model.input_channels
+    12 in config, a matching checkpoints/best_12ch* set): the first
+    cold-start cycle reached 71.73% val drift at epoch 2 then early-stopped
+    at epoch 10, noisier and no better than the 6-channel baseline at a
+    comparable point — but on only 10 epochs (patience=8) vs. the 57 the
+    6-channel run took to reach its eventual best, so this wasn't a fair
+    trial, not a disproof. Revisit with a higher patience for the first
+    cycle, and/or per-channel normalization (these features are on very
+    different scales — magnitudes vs. jerk vs. local std — unlike train.py's
+    reasonably-scaled raw 6 that trained fine into BatchNorm1d as-is)
+    before concluding either way. Reverted to the working 6-channel baseline
+    (checkpoints/best.pt) in the meantime given the SIH deadline.
+
+    Four training cycles of warm-restarting the 6-raw-channel model against
+    the same data all plateaued in the exact same ~68-70% val-drift band
+    (see results/train_history_6ch_baseline.json), and train drift
+    plateaued right along with it — evidence of underfitting from limited
+    input signal (motivating this), not of overfitting or a bad LR.
 
     Appended *after* the 6 raw channels (never inserted before) so
     `train.py`'s `imu[..., 0]` (forward accel) and `imu[..., 5]` (yaw rate)
-    indexing into the physics baseline stays correct.
+    indexing into the physics baseline stays correct, if re-enabled.
     """
     ax, ay, az = accel[:, 0], accel[:, 1], accel[:, 2]
     gx, gy, gz = gyro[:, 0], gyro[:, 1], gyro[:, 2]
@@ -273,8 +283,7 @@ class IOVNBDWindowDataset(Dataset):
 
     def __getitem__(self, idx):
         w = self.windows[idx]
-        extra = engineer_features(w.accel, w.gyro, w.dt)
-        imu = np.concatenate([w.accel, w.gyro, extra], axis=1).astype(np.float32)  # (T, 12)
+        imu = np.concatenate([w.accel, w.gyro], axis=1).astype(np.float32)  # (T, 6)
         return {
             "imu": torch.from_numpy(imu),
             "speed_gt": torch.from_numpy(w.speed_gt.astype(np.float32)),
