@@ -7,6 +7,10 @@ __pycache__/
 # Dataset (huge, pulled via git-lfs from the IO-VNBD repo — don't duplicate in this repo's history)
 data/IO-VNBD/
 
+# comma2k19 demo split (~227MB, pulled via huggingface_hub — see
+# src/data/comma2k19_loader.py's module docstring)
+data/comma2k19_demo/
+
 # Training logs (real ones, run to run, are large/noisy — keep out of history)
 logs/*.log
 

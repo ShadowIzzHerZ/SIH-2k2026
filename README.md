@@ -47,8 +47,11 @@ distance travelled — not a proxy.
 | [src/export_onnx.py](src/export_onnx.py) | Exports the network to ONNX for the mobile app / edge engine |
 | [src/map_matching.py](src/map_matching.py) | Snaps a (predicted or raw) trajectory onto real roads via HMM map-matching (OpenStreetMap + leuvenmapmatching) — the PS's separate "map-matching / non-holonomic constraints" component |
 | [src/evaluate_with_mapmatching.py](src/evaluate_with_mapmatching.py) | Measures the real improvement map-matching gives on top of the trained model's own predictions on held-out test windows |
+| [src/data/comma2k19_loader.py](src/data/comma2k19_loader.py) | Loads the [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) demo split — a second, independent real dataset for a generalization check |
+| [src/evaluate_comma2k19.py](src/evaluate_comma2k19.py) | Runs the IO-VNBD-trained model on comma2k19 with zero retraining |
 | [tests/test_pipeline_smoke.py](tests/test_pipeline_smoke.py) | Synthetic-data sanity check for the integrator/model/train loop |
 | [tests/test_map_matching.py](tests/test_map_matching.py) | Validates the map-matcher against a real road segment with a known-answer synthetic-drift-recovery check (needs network access) |
+| [tests/test_comma2k19_loader.py](tests/test_comma2k19_loader.py) | Sanity-checks the comma2k19 loader against the real demo split (needs it downloaded first) |
 
 ## Setup
 
@@ -68,6 +71,17 @@ cd data/IO-VNBD && git lfs pull --include="*.csv" --exclude="*.zip"
 (The `.zip` archives are excluded — they're the same data as the
 individual CSVs, just re-bundled, and would roughly double the download.)
 
+comma2k19 (Hugging Face, ~227MB, no login needed — see
+[src/data/comma2k19_loader.py](src/data/comma2k19_loader.py) for details):
+```bash
+python -c "
+from huggingface_hub import hf_hub_download
+for i in range(3):
+    hf_hub_download('commaai/comma2k19', f'data/demo-0000{i}-of-00003.parquet',
+                     repo_type='dataset', local_dir='data/comma2k19_demo')
+"
+```
+
 ## Status
 
 - [x] Project scaffolded, dataset pulled
@@ -85,6 +99,7 @@ individual CSVs, just re-bundled, and would roughly double the download.)
   - This isn't a contradiction of the synthetic-drift test above (which showed a real 62% improvement) — it's a scale mismatch. Map-matching corrects meter-to-tens-of-metres noise/offset around a *basically-correct* route (exactly what the synthetic test injected: 40m of drift on top of an otherwise-accurate path). The trained model's raw predictions are 50-80% drift — the predicted trajectory has usually left the true road corridor entirely, so the matcher (which has no ground truth to check against) confidently snaps onto *some* plausible nearby road, not necessarily the right one.
   - Practical implication: map-matching is real, working infrastructure (see the synthetic test) but isn't a rescue for a bad underlying trajectory — it's only worth applying once the dead-reckoning model's own drift is low enough that the true route is still recoverable from the prediction (rough guess: sub-~20% based on the one window here that stayed roughly flat at that level). Getting the network's own drift down remains the binding constraint, not map-matching.
 - [ ] **Tried a bigger "v2" architecture** (dilated residual CNN, 64/128/256 channels + deeper unidirectional GRU, 256-hidden 3-layer, ~1.9M params) after v1 plateaued on *train* drift too (not just val, across 6 warm-restart cycles) — evidence of underfitting, not overfitting. Result on a real Colab run: **71.35% test drift, worse than v1's 62.76%**. **Reverted to v1** — `checkpoints/best.pt` is the 62.76%-drift model again. Full rationale + result: [src/models/bias_correction_net.py](src/models/bias_correction_net.py)'s module docstring. A next attempt should isolate *why* v2 underperformed (residual/dilation structure vs. raw parameter count) instead of changing several things at once.
+- [x] **Cross-dataset generalization check**: ran the IO-VNBD-trained model (zero retraining) on [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) — a second, independently-collected real dataset (different device, different country, highway driving). Result: **29.27% mean drift, 15.64% median** — notably *better* than IO-VNBD's own 62.76% test number, and 10% of windows already clear the PS's <10% target outright. This is a genuinely good sign: the model isn't just memorizing IO-VNBD's specific quirks, and its accuracy tracks scenario difficulty sensibly (steady highway cruise is a much easier dead-reckoning case than IO-VNBD's turning/stop-and-go urban driving — see [src/data/comma2k19_loader.py](src/data/comma2k19_loader.py) for the dataset's own caveats: demo split only, highway-only, EON dashcam device not literally a phone). Full numbers: [results/comma2k19_eval.json](results/comma2k19_eval.json). Not yet used as *training* data — this was a generalization check, not a retrain.
 - [ ] Non-holonomic motion constraints not yet enforced inside the matcher itself (relies on the road graph's own directionality for one-way streets, but no explicit "can't teleport backward along a one-way" cost yet)
 - [ ] GNSS+INS fusion mode-switching (seamless handoff between GPS-available and blackout) — not started, sits above both the network and the matcher
 - [ ] Own campus recordings (see `data/own_recordings/`) — not yet collected; could help close the gap given IO-VNBD's mounting/session variety is a real source of error
