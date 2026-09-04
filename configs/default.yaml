@@ -41,23 +41,15 @@ model:
   # loss combines per-step speed error + end-to-end drift over the window.
   input_channels: 6           # ax, ay, az, gx, gy, gz (calibrated/leveled)
   # A 6-added-engineered-channel variant (magnitude/jerk/local-std — see
-  # windowing.py's engineer_features()) was tried and reverted here for now;
-  # see that function's docstring for the inconclusive result and why.
-  #
-  # v2 architecture (bigger, on purpose): dilated residual CNN (TCN-style)
-  # + deeper/wider unidirectional GRU. v1 (32/64/64 CNN, 128-hidden 2-layer
-  # GRU, 214K params) plateaued on *train* drift across 6 warm-restart
-  # cycles, not just val — evidence of underfitting (capacity/receptive
-  # field), not overfitting, so capacity went up instead of adding
-  # regularization or more data. Full rationale in
-  # src/models/bias_correction_net.py's module docstring — including why
-  # the GRU stays unidirectional despite training on whole windows (must
-  # run causally on-device as samples stream in).
-  cnn_channels: [64, 128, 256]
+  # windowing.py's engineer_features()) was tried and reverted here; see
+  # that function's docstring for the inconclusive result and why.
+  # A bigger "v2" architecture (dilated residual CNN + deeper GRU) was also
+  # tried and reverted — see bias_correction_net.py's module docstring
+  # (71.35% test drift, worse than this one's 62.76%).
+  cnn_channels: [32, 64, 64]
   cnn_kernel_size: 5
-  cnn_dilations: [1, 2, 4]     # widens receptive field well beyond kernel_size*n_layers
-  gru_hidden: 256
-  gru_layers: 3
+  gru_hidden: 128
+  gru_layers: 2
   dropout: 0.2
   output_dim: 2               # [delta_v (speed residual), delta_theta (heading-rate residual)]
 
