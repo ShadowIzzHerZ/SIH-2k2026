@@ -65,6 +65,16 @@ def main():
         help="Must match whatever the checkpoint was trained with — see src.train's "
              "--extra_features. Rebuilds the same 12-channel normalized input.",
     )
+    parser.add_argument(
+        "--run_name", default=None,
+        help="Save reports as results/eval_report_<run_name>.json / "
+             "eval_report_breakdown_<run_name>.json instead of the plain names. Evaluating "
+             "any checkpoint other than checkpoints/best.pt without this silently "
+             "overwrites the production checkpoint's own saved report with whatever "
+             "checkpoint you just happened to pass — found this happen for real "
+             "(eval_report.json briefly held the engineered-features run's numbers "
+             "instead of best.pt's). Omitted (the default) behaves exactly as before.",
+    )
     args = parser.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
@@ -100,11 +110,12 @@ def main():
     dt = 1.0 / cfg["data"]["sample_rate_hz"]
     target = cfg["eval"]["drift_target_pct"]
     batch_size = cfg["train"]["batch_size"]
+    suffix = f"_{args.run_name}" if args.run_name else ""
 
     report = eval_drift(model, splits["test"], dt, device, batch_size, target_pct=target)
 
     print(json.dumps(report, indent=2))
-    json.dump(report, open("results/eval_report.json", "w"), indent=2)
+    json.dump(report, open(f"results/eval_report{suffix}.json", "w"), indent=2)
 
     if report["mean_drift_pct"] < target:
         print(f"\n✅ mean drift {report['mean_drift_pct']:.2f}% is under the {target}% PS target.")
@@ -118,7 +129,7 @@ def main():
         breakdown = {"iovnbd_test_only": iov, "comma2k19_test_only": comma}
         print("\n--- breakdown by dataset (same checkpoint) ---")
         print(json.dumps(breakdown, indent=2))
-        json.dump(breakdown, open("results/eval_report_breakdown.json", "w"), indent=2)
+        json.dump(breakdown, open(f"results/eval_report_breakdown{suffix}.json", "w"), indent=2)
 
 
 if __name__ == "__main__":
