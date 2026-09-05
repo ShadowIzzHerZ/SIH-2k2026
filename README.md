@@ -8,6 +8,34 @@ bias-correction network, trained on [IO-VNBD](https://github.com/onyekpeu/IO-VNB
 See `sih.md` (on the Desktop, one level up) for the full hackathon strategy
 doc this project implements the ML component of.
 
+## Results
+
+The model, dead-reckoning drift-%, evaluated on two independent real datasets
+it was trained on (checkpoint: `checkpoints/best.pt`, see [Status](#status)
+for the full evidence trail behind these numbers):
+
+| Dataset | Scenario | Mean drift | Median drift | Pass rate (<10%) |
+|---|---|---|---|---|
+| [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) | Highway cruise (steady speed, few turns) | **16.49%** | **8.94%** | 54.53% |
+| [IO-VNBD](https://github.com/onyekpeu/IO-VNBD) | Urban stop-and-go (low speed, frequent turns) | 62.33% | 67.56% | 3.71% |
+
+**The honest read**: this is a real, working physics+learned-residual dead-
+reckoning system that meets or nearly meets the PS's own <10%-drift target
+on the scenario it's actually good at — steady, higher-speed driving, where
+a phone's IMU has the least ambiguous signal to work with — and is
+transparently weaker on the harder case: low-speed, frequent-turn urban
+driving, where per-window drift diagnostics ([src/diagnose_drift.py](src/diagnose_drift.py),
+[results/drift_diagnostics.csv](results/drift_diagnostics.csv)) show broad,
+spread-out underfitting rather than one fixable bug. Four different fixes
+were tried against the IO-VNBD number specifically (a bigger architecture,
+mixing in comma2k19 as training data, a real LR-scheduler bug fix, and
+properly-normalized engineered features) — all landed in the same 60-65%
+band or worse. Rather than paper over that with a cherry-picked number, the
+plan going in to the demo is to lead with what's genuinely earned (the
+comma2k19 result) and be upfront that urban low-speed driving is the known
+hard case — see the Status section below for the full, unfiltered trail of
+what was tried and what actually happened.
+
 ## Approach
 
 Raw IMU integration ("dead reckoning") drifts within seconds because MEMS
@@ -49,6 +77,7 @@ distance travelled — not a proxy.
 | [src/evaluate_with_mapmatching.py](src/evaluate_with_mapmatching.py) | Measures the real improvement map-matching gives on top of the trained model's own predictions on held-out test windows |
 | [src/data/comma2k19_loader.py](src/data/comma2k19_loader.py) | Loads the [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) demo split — a second, independent real dataset for a generalization check |
 | [src/evaluate_comma2k19.py](src/evaluate_comma2k19.py) | Runs the IO-VNBD-trained model on comma2k19 with zero retraining |
+| [src/diagnose_drift.py](src/diagnose_drift.py) | Per-window drift diagnostics — correlates predicted drift-% against distance travelled, yaw rate, speed to find what's actually driving high-drift windows |
 | [tests/test_pipeline_smoke.py](tests/test_pipeline_smoke.py) | Synthetic-data sanity check for the integrator/model/train loop |
 | [tests/test_map_matching.py](tests/test_map_matching.py) | Validates the map-matcher against a real road segment with a known-answer synthetic-drift-recovery check (needs network access) |
 | [tests/test_comma2k19_loader.py](tests/test_comma2k19_loader.py) | Sanity-checks the comma2k19 loader against the real demo split (needs it downloaded first) |
@@ -92,7 +121,7 @@ for i in range(3):
   - **Test set: 62.76% mean drift** (down from an untrained ~80-90% baseline)
   - Re-confirmed via 4 warm-restart cycles (`train.py --resume`, ~90 more epochs total): val drift never left a tight 68-70% band, and **train drift plateaued too** (~58-61%) — not overfitting or an LR problem, the 6-raw-channel network was genuinely underfitting the task. Preserved as-is: [checkpoints/best_6ch_baseline.pt](checkpoints/best_6ch_baseline.pt), [results/eval_report_6ch_baseline.json](results/eval_report_6ch_baseline.json), [results/train_history_6ch_baseline.json](results/train_history_6ch_baseline.json).
   - **Honestly, 62.76% is well above the PS's <10% target**, and this alone won't get there — needs the other PS-listed components (map-matching, GNSS/INS fusion mode-switching) doing real work too, not just polish.
-- [ ] **Tried 6 added engineered input channels** (accel/gyro magnitude, jerk, local smoothing+roughness — see `windowing.py`'s `engineer_features()`, currently defined but not wired in) instead of just 6 raw axes. First cold-start cycle reached 71.73% val drift at epoch 2 then early-stopped at epoch 10 — noisier and no better than the 6-channel baseline at a comparable point, but on only 10 epochs vs. the 57 the baseline took to reach its best, so inconclusive rather than a disproof. **Reverted to the 6-channel baseline for now** given the deadline — `checkpoints/best.pt` is back to the 62.76%-drift model. See `engineer_features()`'s docstring for what a real retry would need (higher first-cycle patience, per-channel normalization).
+- [x] **Retried 6 added engineered input channels properly** (accel/gyro magnitude, jerk, local smoothing+roughness — `windowing.py`'s `engineer_features()`, now wired in via `--extra_features`), fixing both gaps that made the first attempt inconclusive: real per-channel z-score normalization from train-split stats, and a fair `early_stop_patience=15` (`configs/engineered_features.yaml`) instead of the original run's 8. Combined with comma2k19 mixed into training, conclusive result this time — **worse than the 6-channel baseline on the metric that matters most**: 62.75% combined / 64.28% IO-VNBD-only test drift vs. 60.92%/62.33% without the extra channels. The extra channels do help the already-easy comma2k19 case further (14.48% mean / **5.42% median**, 71.45% pass rate — better than the 16.49%/8.94%/54.5% below), just not the harder IO-VNBD one. **Reverted to the 6-channel baseline as the production checkpoint** — `checkpoints/best.pt` unchanged; `checkpoints/best_engineered.pt` + its eval reports kept as reference. Full rationale: `engineer_features()`'s docstring.
 - [x] ONNX export re-verified against the reverted checkpoint — matches PyTorch to 4.05e-6, see [checkpoints/dead_reckoning_model.onnx](checkpoints/dead_reckoning_model.onnx)
 - [x] Map-matching implemented and validated: HMM-based (leuvenmapmatching, Newson-Krumm family) snapping onto real OpenStreetMap road graphs, **not** naive nearest-point snapping (which breaks on noisy/drifted input — no memory of the route so far). Synthetic-drift recovery test shows a real **62% error reduction** (20.1m → 7.6m mean error) on a real road segment — see [tests/test_map_matching.py](tests/test_map_matching.py).
 - [x] Map-matching's improvement on the *trained model's own* predictions (not synthetic drift) — measured, and **honestly, it doesn't help here**: 20 real test windows, mean drift 58.54% → 60.56% (**-3.5%**, i.e. slightly worse), avg match rate 0.65. One window regressed badly (19.6% → 53.9%) when the matcher snapped a decent prediction onto the *wrong* nearby road. Full log: [results/mapmatching_on_real_predictions.log](results/mapmatching_on_real_predictions.log).
@@ -100,6 +129,16 @@ for i in range(3):
   - Practical implication: map-matching is real, working infrastructure (see the synthetic test) but isn't a rescue for a bad underlying trajectory — it's only worth applying once the dead-reckoning model's own drift is low enough that the true route is still recoverable from the prediction (rough guess: sub-~20% based on the one window here that stayed roughly flat at that level). Getting the network's own drift down remains the binding constraint, not map-matching.
 - [ ] **Tried a bigger "v2" architecture** (dilated residual CNN, 64/128/256 channels + deeper unidirectional GRU, 256-hidden 3-layer, ~1.9M params) after v1 plateaued on *train* drift too (not just val, across 6 warm-restart cycles) — evidence of underfitting, not overfitting. Result on a real Colab run: **71.35% test drift, worse than v1's 62.76%**. **Reverted to v1** — `checkpoints/best.pt` is the 62.76%-drift model again. Full rationale + result: [src/models/bias_correction_net.py](src/models/bias_correction_net.py)'s module docstring. A next attempt should isolate *why* v2 underperformed (residual/dilation structure vs. raw parameter count) instead of changing several things at once.
 - [x] **Cross-dataset generalization check**: ran the IO-VNBD-trained model (zero retraining) on [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) — a second, independently-collected real dataset (different device, different country, highway driving). Result: **29.27% mean drift, 15.64% median** — notably *better* than IO-VNBD's own 62.76% test number, and 10% of windows already clear the PS's <10% target outright. This is a genuinely good sign: the model isn't just memorizing IO-VNBD's specific quirks, and its accuracy tracks scenario difficulty sensibly (steady highway cruise is a much easier dead-reckoning case than IO-VNBD's turning/stop-and-go urban driving — see [src/data/comma2k19_loader.py](src/data/comma2k19_loader.py) for the dataset's own caveats: demo split only, highway-only, EON dashcam device not literally a phone). Full numbers: [results/comma2k19_eval.json](results/comma2k19_eval.json). Not yet used as *training* data — this was a generalization check, not a retrain.
+- [x] **Mixed comma2k19 into training** (not just the zero-shot check above) — combined IO-VNBD+comma2k19 dataset, trained from cold start then warm-restarted overnight (9+ cycles, `scripts/train_until_target_comma.sh`). Result, broken down by dataset on the same checkpoint ([results/eval_report_combined_run1.json](results/eval_report_combined_run1.json) / [results/eval_report_breakdown_run1.json](results/eval_report_breakdown_run1.json)):
+  - **IO-VNBD-only test drift: 62.33%** — flat vs. the 62.76% IO-VNBD-only baseline, i.e. mixing in comma2k19 did **not** measurably help IO-VNBD itself.
+  - **comma2k19-only test drift: 16.49% mean / 8.94% median** — meaningfully better than the zero-shot 29.27%/15.64% above, and the median now clears the PS's <10% target. Training on comma2k19 (not just evaluating on it) genuinely helps comma2k19 performance; it just doesn't transfer back to IO-VNBD's harder scenario.
+  - Along the way, found and fixed a real bug in the warm-restart LR schedule (`src/train.py`): `CosineAnnealingLR`'s `T_max` was always the full config epoch budget (60), but `early_stop_patience=8` was cutting every resumed cycle off after only 8-16 real epochs — so LR barely moved off its peak before each cycle ended, and every restart was retracing almost the same high-LR trajectory. Fixed by sizing `T_max` to the guaranteed cycle length on resume (`early_stop_patience + 2`) so LR actually reaches a fine-tuning-scale value even in the worst case. Confirmed via the checkpoint's own history that this was a real inefficiency, not the reason for the plateau: even after the fix, **9 more warm-restart cycles all still failed to beat the pre-fix 63.26% best val drift** — this is a genuine ceiling for this architecture + data combination, not an LR artifact.
+- [x] **Per-window drift diagnostics** ([src/diagnose_drift.py](src/diagnose_drift.py), [results/drift_diagnostics.csv](results/drift_diagnostics.csv)) — checked whether the 60%+ mean / 809% worst-case test drift is driven by a small number of outlier windows or one identifiable failure mode (e.g. tight turns, as earlier bullets assumed), before trying another blind architecture/data change. It's neither:
+  - Removing the worst 1% of windows only drops mean drift 60.92% → 59.25%; removing the worst 5% only gets to 57.83% — the tail isn't dominating the average.
+  - Correlation of drift-% with distance travelled (r=0.34), max yaw rate (r=0.22), mean yaw rate (r=0.26), and starting speed (r≈-0.04) are all weak — no single factor explains per-window error.
+  - The actual pattern: median drift (66.96%) sits *above* the mean, i.e. bimodal — a cluster of easy, long, high-speed highway-like windows near 0% drift (matching comma2k19's strength) pulling the mean down, against a majority of short, low-speed, urban stop-and-go windows sitting around 60-90%.
+  - **Conclusion: broad, spread-out underfitting on low-speed/urban driving specifically, not a fixable outlier bug or a single targeted failure mode.** Consistent with every other lever tried failing to move the number (warm restarts, the LR fix above, the v2 architecture, comma2k19 mixing).
+- **Given the above and the Sept 10 shortlist deadline, decided to stop chasing the combined/IO-VNBD drift number further and reframe the pitch honestly around what the evidence actually supports**: the model is genuinely strong on highway-style driving (comma2k19: 16.49% mean / 8.94% median, at/near the <10% target) and openly weaker on low-speed urban stop-and-go (IO-VNBD's harder case) — a real, defensible, and honestly-earned result, rather than an unqualified claim against the PS's flat 62.76%/60.92% headline numbers.
 - [ ] Non-holonomic motion constraints not yet enforced inside the matcher itself (relies on the road graph's own directionality for one-way streets, but no explicit "can't teleport backward along a one-way" cost yet)
 - [ ] GNSS+INS fusion mode-switching (seamless handoff between GPS-available and blackout) — not started, sits above both the network and the matcher
 - [ ] Own campus recordings (see `data/own_recordings/`) — not yet collected; could help close the gap given IO-VNBD's mounting/session variety is a real source of error
