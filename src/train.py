@@ -25,7 +25,7 @@ import torch.nn as nn
 import yaml
 from torch.utils.data import DataLoader
 
-from src.data.windowing import load_dataset_splits
+from src.data.windowing import load_combined_dataset_splits
 from src.models.bias_correction_net import BiasCorrectionNet
 from src.models.strapdown_ins import dead_reckon_position, drift_metric, integrate_heading, integrate_speed
 
@@ -41,7 +41,10 @@ def pick_device(requested: str) -> torch.device:
 
 
 def forward_pass(model, batch, dt: float, device):
-    imu = batch["imu"].to(device)              # (B, T, 6)
+    imu = batch["imu"].to(device)               # (B, T, 6 or 12) — network input, possibly
+                                                 # extended/normalized (see IOVNBDWindowDataset)
+    imu_raw = batch["imu_raw"].to(device)        # (B, T, 6) — always real accel/gyro units,
+                                                 # used for the physics integration below
     speed_gt = batch["speed_gt"].to(device)     # (B, T)
     pos_gt = batch["pos_gt"].to(device)         # (B, T, 2)
     v0 = batch["v0"].to(device)                 # (B,) true starting speed
@@ -50,8 +53,8 @@ def forward_pass(model, batch, dt: float, device):
     corrections = model(imu)                    # (B, T, 2) -> [delta_v, delta_theta]
     delta_v, delta_theta = corrections[..., 0], corrections[..., 1]
 
-    forward_accel = imu[..., 0] + delta_v        # residual added to raw forward accel
-    yaw_rate = imu[..., 5] + delta_theta          # residual added to raw yaw rate (gz)
+    forward_accel = imu_raw[..., 0] + delta_v    # residual added to raw forward accel
+    yaw_rate = imu_raw[..., 5] + delta_theta      # residual added to raw yaw rate (gz)
 
     # Start from the window's real initial state, not zero — a window is a
     # random slice mid-drive, so the vehicle is essentially never stopped
@@ -87,13 +90,41 @@ def main():
              "actually beats what it started from. The previous best.pt and train_history.json "
              "are backed up (*_prev) before anything gets overwritten.",
     )
+    parser.add_argument(
+        "--comma2k19_dir", default=None,
+        help="Mix comma2k19 windows (see src/data/comma2k19_loader.py) into train/val/test "
+             "alongside IO-VNBD, e.g. --comma2k19_dir data/comma2k19_demo/data. Opt-in — "
+             "omitted (the default) trains on IO-VNBD only, unchanged from before.",
+    )
+    parser.add_argument(
+        "--extra_features", action="store_true",
+        help="Append windowing.py's engineer_features() 6 extra channels (accel/gyro "
+             "magnitude, jerk, local smoothing+roughness) to the raw 6, z-score-normalized "
+             "per-channel using train-split statistics (see IOVNBDWindowDataset). First "
+             "attempt at this (no normalization, low first-cycle patience) was inconclusive "
+             "— see engineer_features()'s docstring. Automatically bumps "
+             "model.input_channels to 12 regardless of the config value.",
+    )
+    parser.add_argument(
+        "--run_name", default=None,
+        help="Save/load under checkpoints/best_<run_name>.pt and "
+             "results/train_history_<run_name>.json instead of the plain best.pt / "
+             "train_history.json — use for any experimental run (different "
+             "input_channels, architecture, etc.) so it can't silently overwrite the "
+             "real best.pt with a checkpoint of an incompatible shape. Omitted (the "
+             "default) behaves exactly as before.",
+    )
     args = parser.parse_args()
+    if args.extra_features:
+        print("--extra_features: using 12-channel input (6 raw + 6 engineered), "
+              "z-score normalized from train-split stats")
 
     cfg = yaml.safe_load(open(args.config))
     device = pick_device(cfg["train"]["device"])
     print(f"device: {device}")
 
-    splits = load_dataset_splits(
+    splits = load_combined_dataset_splits(
+        comma2k19_dir=args.comma2k19_dir,
         data_root=cfg["data"]["root"],
         variant=cfg["data"]["variant"],
         column_map=cfg["data"]["column_map"],
@@ -103,13 +134,15 @@ def main():
         train_split=cfg["data"]["train_split"],
         val_split=cfg["data"]["val_split"],
         file_prefix=cfg["data"].get("file_prefix", ""),
+        extra_features=args.extra_features,
     )
 
     train_loader = DataLoader(splits["train"], batch_size=cfg["train"]["batch_size"], shuffle=True)
     val_loader = DataLoader(splits["val"], batch_size=cfg["train"]["batch_size"], shuffle=False)
 
+    input_channels = 12 if args.extra_features else cfg["model"]["input_channels"]
     model = BiasCorrectionNet(
-        input_channels=cfg["model"]["input_channels"],
+        input_channels=input_channels,
         cnn_channels=cfg["model"]["cnn_channels"],
         cnn_kernel_size=cfg["model"]["cnn_kernel_size"],
         gru_hidden=cfg["model"]["gru_hidden"],
@@ -122,7 +155,9 @@ def main():
     ckpt_dir.mkdir(exist_ok=True)
     results_dir = Path("results")
     results_dir.mkdir(exist_ok=True)
-    history_path = results_dir / "train_history.json"
+    suffix = f"_{args.run_name}" if args.run_name else ""
+    best_name = f"best{suffix}.pt"
+    history_path = results_dir / f"train_history{suffix}.json"
     dt = 1.0 / cfg["data"]["sample_rate_hz"]
 
     epoch_offset = 0
@@ -145,13 +180,13 @@ def main():
         # Back up whatever the previous run left behind before this run
         # overwrites best.pt / train_history.json — resuming should never
         # silently destroy the checkpoint/history it started from.
-        best_path = ckpt_dir / "best.pt"
+        best_path = ckpt_dir / best_name
         if best_path.exists():
-            shutil.copyfile(best_path, ckpt_dir / "best_prev.pt")
+            shutil.copyfile(best_path, ckpt_dir / f"best{suffix}_prev.pt")
         prev_history = []
         if history_path.exists():
             prev_history = json.load(open(history_path))
-            shutil.copyfile(history_path, results_dir / "train_history_prev.json")
+            shutil.copyfile(history_path, results_dir / f"train_history{suffix}_prev.json")
             epoch_offset = (prev_history[-1]["epoch"] + 1) if prev_history else 0
 
         # Measure the loaded weights' actual val drift before training so
@@ -183,7 +218,30 @@ def main():
     # this restarts the cosine cycle from the configured peak LR (a "warm
     # restart") rather than continuing the decayed tail of the previous run
     # — deliberately, since a fully-decayed LR has nowhere left to explore.
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg["train"]["epochs"])
+    #
+    # Bug found after 7 identical-result warm-restart cycles in a row
+    # (train_until_target_comma.sh, 2026-09-05): T_max was always
+    # cfg["train"]["epochs"] (60), but early_stop_patience=8 was cutting
+    # every *resumed* cycle off after only 8-16 real epochs — nowhere near
+    # 60 — so LR barely moved off its 1.0e-3 peak (e.g. 1.00e-03 -> 9.67e-04
+    # over 8 epochs) before the cycle ended. Every restart was therefore
+    # retracing almost the same high-LR trajectory for a similar short
+    # duration and landing in the same place — that's *why* the cycles kept
+    # matching, not evidence the model was maxed out.
+    #
+    # First attempt used T_max = patience*3 (24), reasoning it'd decay
+    # nicely *if* a cycle ran long. It didn't help: a resumed cycle that
+    # never finds a new best always stops at exactly `patience` epochs
+    # (no improvement to reset the counter), so the guaranteed worst-case
+    # window is `early_stop_patience` epochs, not something a longer T_max
+    # can lean on. Sized to the guaranteed window instead, so LR reaches a
+    # genuinely low, fine-tuning-scale value even in that worst case
+    # (T_max=10, patience=8 -> LR ~2e-4 by the 8th epoch instead of ~9.7e-4).
+    # Cold start keeps the full-length cycle (unchanged; that run already
+    # reached the 63.26% best cleanly over 57 real epochs, finding enough
+    # new bests along the way to actually use a long cycle).
+    cycle_len = cfg["train"]["epochs"] if not args.resume else max(cfg["train"]["early_stop_patience"] + 2, 10)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cycle_len)
 
     # Seed "best" from the loaded checkpoint's real val drift (not inf) so
     # this run only overwrites best.pt when it actually beats what it
@@ -231,17 +289,17 @@ def main():
         if val_metrics["drift_pct"] < best_val_drift:
             best_val_drift = val_metrics["drift_pct"]
             bad_epochs = 0
-            torch.save(model.state_dict(), ckpt_dir / "best.pt")
-            print(f"  -> new best val drift {best_val_drift:.2f}%, saved checkpoints/best.pt")
+            torch.save(model.state_dict(), ckpt_dir / best_name)
+            print(f"  -> new best val drift {best_val_drift:.2f}%, saved checkpoints/{best_name}")
         else:
             bad_epochs += 1
             if bad_epochs >= patience:
                 print(f"early stopping at epoch {epoch} (no val improvement for {patience} epochs)")
                 break
 
-    print(f"best val drift this run: {best_val_drift:.2f}% -> checkpoints/best.pt "
-          f"(previous best backed up at checkpoints/best_prev.pt)" if args.resume else
-          f"best val drift: {best_val_drift:.2f}% -> checkpoints/best.pt")
+    print(f"best val drift this run: {best_val_drift:.2f}% -> checkpoints/{best_name} "
+          f"(previous best backed up at checkpoints/best{suffix}_prev.pt)" if args.resume else
+          f"best val drift: {best_val_drift:.2f}% -> checkpoints/{best_name}")
 
 
 if __name__ == "__main__":

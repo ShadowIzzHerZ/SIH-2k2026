@@ -1,0 +1,69 @@
+# Config for the properly-redone 12-channel engineered-features experiment
+# (--extra_features flag on src.train / src.evaluate). Identical to
+# default.yaml except:
+#   - model.input_channels: 12 (informational only — --extra_features
+#     overrides this in code regardless, kept in sync here to avoid confusion
+#     if this file is ever used without the flag)
+#   - train.early_stop_patience: 15 (up from 8) — the first attempt at
+#     engineered features used the default patience and only got 10 epochs
+#     before stopping (vs. the 57 the 6-channel baseline took to reach its
+#     best), which the module docstring flagged as an unfair trial, not a
+#     real disproof. A higher patience gives the new, differently-scaled
+#     input a fairer chance to actually converge before judging it.
+#
+# Run:
+#   python -m src.train --config configs/engineered_features.yaml --extra_features
+
+data:
+  root: "data/IO-VNBD"
+  variant: "Synchronised V abd S datasets"
+  file_prefix: "S-"
+  sample_rate_hz: 10
+  window_size: 50
+  window_stride: 10
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  column_map:
+    time: null
+    accel_x: null
+    accel_y: null
+    accel_z: null
+    gyro_x: null
+    gyro_y: null
+    gyro_z: null
+    speed_gt: null
+    lat: null
+    lon: null
+    heading_gt: null
+
+model:
+  input_channels: 12          # 6 raw + 6 engineered (see engineer_features()) — --extra_features sets this in code too
+  cnn_channels: [32, 64, 64]
+  cnn_kernel_size: 5
+  gru_hidden: 128
+  gru_layers: 2
+  dropout: 0.2
+  output_dim: 2
+
+train:
+  batch_size: 64
+  epochs: 60
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  loss_weights:
+    speed: 1.0
+    heading: 0.5
+    drift: 2.0
+  early_stop_patience: 15      # up from 8 — see module comment above
+  device: "auto"
+
+eval:
+  drift_target_pct: 10.0
+  example_checks:
+    - {distance_m: 50,  max_drift_m: 5,  max_time_s: 60}
+    - {distance_m: 1000, max_drift_m: 100, speed_kmph: 60}
+
+export:
+  onnx_path: "checkpoints/dead_reckoning_model_engineered.onnx"
+  opset: 17

@@ -223,19 +223,31 @@ def engineer_features(accel: np.ndarray, gyro: np.ndarray, dt: float, smooth_win
     """Extra per-timestep channels appended after the raw 6 calibrated
     accel/gyro axes.
 
-    NOT currently wired into IOVNBDWindowDataset.__getitem__ — kept here,
-    defined but unused, rather than deleted. Tried once (model.input_channels
-    12 in config, a matching checkpoints/best_12ch* set): the first
-    cold-start cycle reached 71.73% val drift at epoch 2 then early-stopped
-    at epoch 10, noisier and no better than the 6-channel baseline at a
-    comparable point — but on only 10 epochs (patience=8) vs. the 57 the
-    6-channel run took to reach its eventual best, so this wasn't a fair
-    trial, not a disproof. Revisit with a higher patience for the first
-    cycle, and/or per-channel normalization (these features are on very
-    different scales — magnitudes vs. jerk vs. local std — unlike train.py's
-    reasonably-scaled raw 6 that trained fine into BatchNorm1d as-is)
-    before concluding either way. Reverted to the working 6-channel baseline
-    (checkpoints/best.pt) in the meantime given the SIH deadline.
+    IS now wired in — via IOVNBDWindowDataset's extra_features=True /
+    src.train's --extra_features flag — after a proper, conclusive retry
+    (2026-09-05) fixed both gaps the first inconclusive attempt had: it now
+    gets real per-channel z-score normalization (computed from train-split
+    stats only, see compute_channel_norm_stats — these 6 extra channels are
+    on very different scales from each other and from the raw 6, unlike
+    train.py's reasonably-scaled raw accel/gyro that trained fine into
+    BatchNorm1d unnormalized) and a fair, generous early_stop_patience=15
+    for the first cycle (configs/engineered_features.yaml) instead of the
+    original attempt's default 8, which had cut it off at epoch 10 — nowhere
+    near the 57 epochs the 6-channel baseline took to reach its own best.
+
+    Conclusive result this time, combined with comma2k19 mixed into
+    training (checkpoints/best_engineered.pt, results/eval_report saved
+    under that run): **worse than the 6-channel baseline on the metric that
+    matters most** — 62.75% combined / 64.28% IO-VNBD-only test drift, vs.
+    60.92%/62.33% without the extra channels. The one genuine win: comma2k19
+    -only test drift improved further to 14.48% mean / **5.42% median**,
+    71.45% pass rate (vs. 16.49%/8.94%/54.5% with just the raw 6 channels)
+    — the extra engineered channels (magnitude, jerk, local roughness) do
+    help the model on already-easy, clean highway driving, but make the
+    harder IO-VNBD urban/stop-and-go case worse, not better. **Reverted to
+    the 6-channel baseline as the production checkpoint** (`checkpoints/
+    best.pt`) given this; `checkpoints/best_engineered.pt` and its eval
+    reports are kept as a reference, same treatment as best_6ch_baseline.pt.
 
     Four training cycles of warm-restarting the 6-raw-channel model against
     the same data all plateaued in the exact same ~68-70% val-drift band
@@ -275,17 +287,44 @@ def engineer_features(accel: np.ndarray, gyro: np.ndarray, dt: float, smooth_win
 
 
 class IOVNBDWindowDataset(Dataset):
-    def __init__(self, windows: list[Window]):
+    def __init__(self, windows: list[Window], extra_features: bool = False,
+                 norm_mean: np.ndarray | None = None, norm_std: np.ndarray | None = None):
+        """extra_features=True appends engineer_features()'s 6 extra channels
+        (12 total). norm_mean/norm_std (per-channel, computed once from the
+        *train* split only — see compute_channel_norm_stats — and reused
+        across val/test/comma2k19_test_only) z-score the raw+engineered
+        channels before they hit the network. Both were flagged as missing
+        in the first, inconclusive attempt at this (see engineer_features()'s
+        docstring) — the 6 raw channels are all similar-scale accel/gyro
+        already, so they trained fine unnormalized, but jerk/local-std/
+        magnitude channels are on very different scales and need it."""
         self.windows = windows
+        self.extra_features = extra_features
+        self.norm_mean = norm_mean
+        self.norm_std = norm_std
 
     def __len__(self):
         return len(self.windows)
 
     def __getitem__(self, idx):
         w = self.windows[idx]
-        imu = np.concatenate([w.accel, w.gyro], axis=1).astype(np.float32)  # (T, 6)
+        raw_imu = np.concatenate([w.accel, w.gyro], axis=1).astype(np.float32)  # (T, 6), real physical units
+        imu = raw_imu
+        if self.extra_features:
+            extra = engineer_features(w.accel, w.gyro, w.dt)  # (T, 6)
+            imu = np.concatenate([imu, extra], axis=1)  # (T, 12)
+        if self.norm_mean is not None:
+            imu = (imu - self.norm_mean) / self.norm_std
+        # "imu" (possibly extended + z-score normalized) feeds the network;
+        # "imu_raw" (always real accel m/s^2 / gyro rad/s) is what
+        # train.py's forward_pass integrates through the physics baseline —
+        # normalizing that too would integrate z-scored numbers instead of
+        # real acceleration, breaking dead-reckoning entirely, not just
+        # feature scale. When extra_features/norm are both off, imu_raw and
+        # imu are identical (same values as before this was added).
         return {
             "imu": torch.from_numpy(imu),
+            "imu_raw": torch.from_numpy(raw_imu),
             "speed_gt": torch.from_numpy(w.speed_gt.astype(np.float32)),
             "pos_gt": torch.from_numpy(w.pos_gt.astype(np.float32)),
             "v0": torch.tensor(w.v0, dtype=torch.float32),
@@ -296,10 +335,30 @@ class IOVNBDWindowDataset(Dataset):
         }
 
 
+def compute_channel_norm_stats(windows: list[Window], extra_features: bool) -> tuple[np.ndarray, np.ndarray]:
+    """Per-channel mean/std over every timestep of every window, meant to be
+    called on the *train* split only and reused (not recomputed) for
+    val/test/etc — computing it per-split would leak each split's own
+    distribution into its own normalization and isn't how the network would
+    see data at real inference time anyway (no access to future/other
+    windows' statistics)."""
+    all_imu = []
+    for w in windows:
+        imu = np.concatenate([w.accel, w.gyro], axis=1).astype(np.float32)
+        if extra_features:
+            imu = np.concatenate([imu, engineer_features(w.accel, w.gyro, w.dt)], axis=1)
+        all_imu.append(imu)
+    stacked = np.concatenate(all_imu, axis=0)  # (n_windows * T, C)
+    mean = stacked.mean(axis=0)
+    std = stacked.std(axis=0)
+    std[std < 1e-6] = 1.0  # avoid divide-by-zero on a degenerate channel
+    return mean.astype(np.float32), std.astype(np.float32)
+
+
 def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_rate_hz: float,
                          window_size: int, window_stride: int,
                          train_split: float, val_split: float, seed: int = 0,
-                         file_prefix: str = ""):
+                         file_prefix: str = "", extra_features: bool = False):
     """Discover CSV files, load+calibrate+resample each sequence, window
     them, then split at the *file* level into train/val/test.
 
@@ -328,7 +387,7 @@ def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_r
     }
 
     dt = 1.0 / sample_rate_hz
-    out = {}
+    split_windows: dict[str, list[Window]] = {}
     for split, files in split_paths.items():
         windows: list[Window] = []
         for p in files:
@@ -339,6 +398,94 @@ def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_r
                 windows.extend(build_windows(seq, window_size, window_stride, dt))
             except Exception as e:
                 print(f"[skip] {p}: {e}")
-        out[split] = IOVNBDWindowDataset(windows)
+        split_windows[split] = windows
         print(f"{split}: {len(files)} files -> {len(windows)} windows")
+
+    # Normalization stats computed from train only (see
+    # compute_channel_norm_stats's docstring) — only when extra_features is
+    # on, so the existing plain-6-channel path's numbers stay bit-for-bit
+    # unchanged from before this was added.
+    norm_mean, norm_std = (None, None)
+    if extra_features:
+        norm_mean, norm_std = compute_channel_norm_stats(split_windows["train"], extra_features=True)
+
+    out = {}
+    for split, windows in split_windows.items():
+        out[split] = IOVNBDWindowDataset(windows, extra_features=extra_features,
+                                          norm_mean=norm_mean, norm_std=norm_std)
+    return out
+
+
+def load_combined_dataset_splits(comma2k19_dir: str | None = None, seed: int = 0, **iovnbd_kwargs):
+    """load_dataset_splits(**iovnbd_kwargs), optionally with comma2k19
+    windows mixed into the same train/val/test splits — split at the
+    *segment* level (same leakage-avoidance reasoning as IO-VNBD's
+    file-level split above), so no comma2k19 segment's windows cross a
+    split boundary either.
+
+    comma2k19_dir=None (or no parquet files found there) behaves exactly
+    like load_dataset_splits — this is an additive, opt-in extension, not
+    a replacement.
+
+    Returns the combined splits dict, plus "iovnbd_test_only" and
+    "comma2k19_test_only" — the same two test sets kept separate — so a
+    caller can check whether mixing comma2k19 into training measurably
+    helped/hurt *IO-VNBD* test drift specifically, not just report a
+    combined number that could hide either direction.
+    """
+    combined = load_dataset_splits(seed=seed, **iovnbd_kwargs)
+    if not comma2k19_dir:
+        return combined
+
+    comma_paths = sorted(glob.glob(f"{comma2k19_dir}/*.parquet"))
+    if not comma_paths:
+        print(f"[combined dataset] no comma2k19 parquet files under {comma2k19_dir} — skipping, IO-VNBD only")
+        return combined
+
+    from .comma2k19_loader import load_all_segments  # local import: extra deps (pyarrow, huggingface_hub)
+
+    sample_rate_hz = iovnbd_kwargs["sample_rate_hz"]
+    window_size = iovnbd_kwargs["window_size"]
+    window_stride = iovnbd_kwargs["window_stride"]
+    train_split = iovnbd_kwargs["train_split"]
+    val_split = iovnbd_kwargs["val_split"]
+
+    seqs = load_all_segments(comma_paths, target_hz=sample_rate_hz)
+    rng = np.random.default_rng(seed)
+    idxs = np.arange(len(seqs))
+    rng.shuffle(idxs)
+    n = len(idxs)
+    n_train = int(n * train_split)
+    n_val = int(n * val_split)
+    split_idxs = {"train": idxs[:n_train], "val": idxs[n_train:n_train + n_val], "test": idxs[n_train + n_val:]}
+
+    dt = 1.0 / sample_rate_hz
+    comma_windows_by_split: dict[str, list[Window]] = {}
+    for split, ii in split_idxs.items():
+        windows: list[Window] = []
+        for i in ii:
+            seq = seqs[i]
+            try:
+                calibrate_sequence(seq)
+                windows.extend(build_windows(seq, window_size, window_stride, dt))
+            except Exception as e:
+                print(f"[skip] comma2k19 segment {seq.path}: {e}")
+        comma_windows_by_split[split] = windows
+        print(f"comma2k19 {split}: {len(ii)} segments -> {len(windows)} windows")
+
+    # Reuse whatever extra_features/norm stats load_dataset_splits already
+    # set up on the IO-VNBD side (computed from IO-VNBD *train* windows only)
+    # so comma2k19 windows get the identical treatment — a second,
+    # independently-fit normalization would make the two datasets' channels
+    # not directly comparable to the network.
+    extra_features = combined["train"].extra_features
+    norm_mean, norm_std = combined["train"].norm_mean, combined["train"].norm_std
+
+    out = {}
+    for split in ("train", "val", "test"):
+        out[split] = IOVNBDWindowDataset(list(combined[split].windows) + comma_windows_by_split[split],
+                                          extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+    out["iovnbd_test_only"] = combined["test"]
+    out["comma2k19_test_only"] = IOVNBDWindowDataset(comma_windows_by_split["test"],
+                                                      extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
     return out

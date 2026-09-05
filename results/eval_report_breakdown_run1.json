@@ -1,0 +1,20 @@
+{
+  "iovnbd_test_only": {
+    "n_windows": 18460,
+    "mean_drift_pct": 62.332683252451794,
+    "median_drift_pct": 67.5557632446289,
+    "p90_drift_pct": 79.46280364990234,
+    "worst_drift_pct": 809.5068359375,
+    "target_pct": 10.0,
+    "pass_rate_pct": 3.7107258938244856
+  },
+  "comma2k19_test_only": {
+    "n_windows": 585,
+    "mean_drift_pct": 16.485866372223594,
+    "median_drift_pct": 8.94443416595459,
+    "p90_drift_pct": 34.018757629394536,
+    "worst_drift_pct": 716.0368041992188,
+    "target_pct": 10.0,
+    "pass_rate_pct": 54.52991452991453
+  }
+}
