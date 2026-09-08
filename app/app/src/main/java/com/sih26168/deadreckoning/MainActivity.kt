@@ -2,9 +2,12 @@ package com.sih26168.deadreckoning
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -45,11 +48,16 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var modeText: TextView
     private lateinit var detailText: TextView
+    private lateinit var statusDot: View
+    private lateinit var calibrationProgress: ProgressBar
+    private lateinit var legendRow: View
     private lateinit var roadMapView: RoadMapView
     private lateinit var blackoutToggle: SwitchMaterial
     private lateinit var replayToggle: SwitchMaterial
     private lateinit var recenterButton: FloatingActionButton
     private var wasReplaying = false
+
+    private val calibratingColor = android.graphics.Color.parseColor("#94a3b8")  // neutral gray
 
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickIntervalMs = 100L  // 10Hz — matches configs/default.yaml's sample_rate_hz
@@ -68,6 +76,9 @@ class MainActivity : AppCompatActivity() {
 
         modeText = findViewById(R.id.modeText)
         detailText = findViewById(R.id.detailText)
+        statusDot = findViewById(R.id.statusDot)
+        calibrationProgress = findViewById(R.id.calibrationProgress)
+        legendRow = findViewById(R.id.legendRow)
         roadMapView = findViewById(R.id.roadMapView)
         blackoutToggle = findViewById(R.id.blackoutToggle)
         replayToggle = findViewById(R.id.replayToggle)
@@ -138,14 +149,16 @@ class MainActivity : AppCompatActivity() {
             roadMapView.clear()
             replayIndex = 0
             wasReplaying = usingReplay
+            calibrationProgress.visibility = View.VISIBLE
+            calibrationProgress.progress = 0
+            legendRow.visibility = View.GONE
         }
 
         val sample = readSample(usingReplay)
 
         if (!calibration.isLeveled) {
             calibration.addLevelSample(sample.rawAccel)
-            modeText.text = getString(R.string.status_calibrating)
-            detailText.text = "leveling…"
+            showCalibrating("leveling…")
             tickHandler.postDelayed(::tick, tickIntervalMs)
             return
         }
@@ -157,11 +170,19 @@ class MainActivity : AppCompatActivity() {
             if (sample.hasFix) {
                 calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
             }
-            modeText.text = getString(R.string.status_calibrating)
-            detailText.text = if (usingReplay) "yaw alignment: collecting confident samples from the replay…"
+            showCalibrating(
+                if (usingReplay) "yaw alignment: collecting confident samples from the replay…"
                 else "yaw alignment: collecting confident samples — drive in a straight line with GPS"
+            )
             tickHandler.postDelayed(::tick, tickIntervalMs)
             return
+        }
+
+        if (legendRow.visibility != View.VISIBLE) {
+            // First tick past calibration — reveal the legend, hide the
+            // progress bar, once, rather than every tick.
+            calibrationProgress.visibility = View.GONE
+            legendRow.visibility = View.VISIBLE
         }
 
         val calAccel = calibration.calibrate(sample.rawAccel)
@@ -191,16 +212,29 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        modeText.text = when (s.mode) {
-            FusionMode.GNSS_TRACKING -> getString(R.string.status_gnss)
-            FusionMode.BLACKOUT -> getString(R.string.status_blackout)
-            FusionMode.BLEND -> getString(R.string.status_blend)
+        val (statusText, dotColor) = when (s.mode) {
+            FusionMode.GNSS_TRACKING -> getString(R.string.status_gnss) to 0xFF2563EB.toInt()
+            FusionMode.BLACKOUT -> getString(R.string.status_blackout) to 0xFFDC2626.toInt()
+            FusionMode.BLEND -> getString(R.string.status_blend) to 0xFFF59E0B.toInt()
         }
+        modeText.text = statusText
+        setStatusDotColor(dotColor)
         detailText.text = "speed: ${"%.1f".format(s.speed)} m/s  |  heading: ${Math.toDegrees(s.heading.toDouble()).roundToInt()}°" +
             (if (usingReplay) "  |  [REPLAY]" else "") +
             (if (demoBlackout) "  |  [SIMULATED BLACKOUT]" else "")
 
         tickHandler.postDelayed(::tick, tickIntervalMs)
+    }
+
+    private fun showCalibrating(detail: String) {
+        modeText.text = getString(R.string.status_calibrating)
+        detailText.text = detail
+        setStatusDotColor(calibratingColor)
+        calibrationProgress.progress = calibration.progressPercent
+    }
+
+    private fun setStatusDotColor(color: Int) {
+        (statusDot.background as? GradientDrawable)?.setColor(color)
     }
 
     override fun onResume() {

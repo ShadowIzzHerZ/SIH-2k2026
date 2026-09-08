@@ -33,6 +33,15 @@ class CalibrationManager(
 
     val isLeveled: Boolean get() = rLevel != null
 
+    /** 0-100, for a progress bar — leveling's first half, yaw alignment's
+     * second half. Purely a UI convenience, not used by calibration logic
+     * itself. */
+    val progressPercent: Int get() = when {
+        isReady -> 100
+        isLeveled -> 50 + (50 * yawAccelBuf.size / minConfidentSamples).coerceIn(0, 50)
+        else -> (50 * levelBuf.size / levelSamples).coerceIn(0, 50)
+    }
+
     /** Feed one raw accel sample while leveling hasn't completed yet. */
     fun addLevelSample(rawAccel: FloatArray) {
         if (isLeveled) return

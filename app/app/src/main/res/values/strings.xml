@@ -8,4 +8,8 @@
     <string name="status_blackout">GNSS blackout — INS only</string>
     <string name="status_blend">Reconnecting…</string>
     <string name="recenter">Recenter map</string>
+    <string name="legend_gnss">GPS</string>
+    <string name="legend_blackout">Blackout</string>
+    <string name="legend_blend">Reconnect</string>
+    <string name="legend_matched">Map-matched</string>
 </resources>
