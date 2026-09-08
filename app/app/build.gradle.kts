@@ -63,6 +63,11 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Real OpenStreetMap-tile map view — no API key, no Google Play
+    // Services, same free-OSM-tiles philosophy as LocationReader.kt's
+    // choice of plain LocationManager over FusedLocationProviderClient.
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
 }
 
 // Keeps the app's bundled model in sync with the real training artifact

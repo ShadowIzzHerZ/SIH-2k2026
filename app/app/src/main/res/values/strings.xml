@@ -7,4 +7,5 @@
     <string name="status_gnss">GNSS tracking</string>
     <string name="status_blackout">GNSS blackout — INS only</string>
     <string name="status_blend">Reconnecting…</string>
+    <string name="recenter">Recenter map</string>
 </resources>

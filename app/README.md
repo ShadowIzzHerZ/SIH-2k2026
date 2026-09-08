@@ -31,6 +31,16 @@ map-matched trail (green) stays snapped to it — the same before/after
 improvement `src/evaluate_with_mapmatching.py` reports offline, live here
 instead.
 
+The UI shows a **real OpenStreetMap-tile map** (`RoadMapView.kt`, via
+osmdroid — no API key, no Google Play Services) instead of an abstract
+scatter plot: a colored "you are here" marker, mode-colored trail
+polylines, the green map-matched overlay, a live-follow camera that pauses
+the instant you pan (recenter FAB brings it back), all in floating cards
+over the map — the same free-OSM-tiles UX approach as the Zen/DevStorm-2026
+project's Leaflet map, ported to native Android. Verified live with both
+the replay data and **real live GPS** (walking indoors/outdoors — real
+street names rendered correctly, e.g. "Law Gate Rd", "NH44").
+
 ## Architecture
 
 | File | Role |
@@ -41,7 +51,7 @@ instead.
 | [app/src/main/java/.../LocationReader.kt](app/src/main/java/com/sih26168/deadreckoning/LocationReader.kt) | Wraps LocationManager — no Play Services/API key needed. Uses `Location.getSpeed()`/`getBearing()` (the platform's own Doppler-derived values), not position-differencing — see `fusion.py`'s docstring for why that distinction mattered a lot in testing |
 | [app/src/main/java/.../BiasCorrectionModel.kt](app/src/main/java/com/sih26168/deadreckoning/BiasCorrectionModel.kt) | ONNX Runtime wrapper for the exported network |
 | [app/src/main/java/.../FusionEngine.kt](app/src/main/java/com/sih26168/deadreckoning/FusionEngine.kt) | The live GNSS↔INS state machine — same design as the fixed `src/fusion.py` |
-| [app/src/main/java/.../TrajectoryView.kt](app/src/main/java/com/sih26168/deadreckoning/TrajectoryView.kt) | Live trajectory trail, colored by mode — same visual language as `results/blackout_demo_*.png` — plus a green map-matched overlay |
+| [app/src/main/java/.../RoadMapView.kt](app/src/main/java/com/sih26168/deadreckoning/RoadMapView.kt) | Real OSM-tile map (osmdroid) — "you are here" marker, mode-colored trail polylines, green map-matched overlay, follow/recenter camera |
 | [app/src/main/java/.../ReplayDataSource.kt](app/src/main/java/com/sih26168/deadreckoning/ReplayDataSource.kt) | Reads the bundled real-drive replay asset (`assets/replay_drive.json`) |
 | [app/src/main/java/.../RoadGraph.kt](app/src/main/java/com/sih26168/deadreckoning/RoadGraph.kt) | Loads the bundled pre-fetched OSM road extract (`assets/road_graph.json`) |
 | [app/src/main/java/.../MapMatcher.kt](app/src/main/java/com/sih26168/deadreckoning/MapMatcher.kt) | Live sequential map-matcher — snaps the fused position onto RoadGraph with the same non-holonomic/continuity reasoning as `src/map_matching.py`, simplified for online (not whole-path) matching |
@@ -81,11 +91,13 @@ On first launch:
 2. Hold the phone still for ~2s — leveling (roll/pitch from gravity).
 3. Drive/walk in a roughly straight line with GPS available for a few
    seconds — yaw alignment (matches the phone's heading to the vehicle's).
-4. Once both complete, the trajectory view starts drawing: blue while
+4. Once both complete, the map starts drawing: a blue marker/trail while
    GNSS-tracked, red during a blackout (real or the simulate toggle),
-   orange during the reconnect blend.
+   orange during the reconnect blend, green for the map-matched overlay.
+   The camera follows automatically; pan away to look around and tap the
+   bottom-right button to snap back.
 
-## Known limitations / not yet in the app
+## Known limitations
 
 - **The bundled road graph only covers the replay route's area** (a ~1.8km
   radius around it, fetched offline via `src/map_matching.py`'s own
@@ -100,7 +112,24 @@ On first launch:
   future paths the way the offline evaluator can) and what's actually
   implemented (distance + continuity/non-holonomic scoring, one point at a
   time).
+- **The map needs network access** to fetch OSM tiles (dead-reckoning
+  itself stays fully offline — only the visual background needs a
+  connection). A real dev-time gotcha, fixed but worth knowing: stale
+  osmdroid `SharedPreferences` surviving repeated `adb install -r` cycles
+  during development somehow left the online tile downloader out of the
+  provider chain entirely (confirmed via `Configuration.isDebugTileProviders`
+  — only offline/cache providers ever appeared). A clean uninstall +
+  reinstall fixed it outright; a genuine first-time user install never
+  hits this since it never has stale prefs to begin with — but if tiles
+  ever show as a gray checkerboard on a dev device, uninstall and
+  reinstall clean before assuming it's a real bug.
+- **The bundled ONNX Runtime native libraries (`libonnxruntime.so`,
+  `libonnxruntime4j_jni.so`) aren't 16KB-page-size aligned** — surfaced as
+  a system "Android app compatibility" warning dialog on a real device
+  (debug builds only). Doesn't block anything on current devices, but a
+  future 16KB-page-only device could fail to load the native library
+  entirely. Fix is upstream (a newer `onnxruntime-android` release built
+  16KB-aligned) — not something to patch locally.
 - No persistence — closing the app loses the current trajectory.
-- Real (non-replay) live driving hasn't been tested — verified live only
-  via the replay data source so far (real GPS/IMU wiring is the same code
-  path, just unexercised end-to-end outdoors).
+- Verified live with both the replay data source and real live GPS
+  (walking, not driving) — a real driving test hasn't been done yet.
