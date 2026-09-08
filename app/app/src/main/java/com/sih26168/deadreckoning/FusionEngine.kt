@@ -61,10 +61,24 @@ data class FusionState(
  * for a sample says the device is essentially at rest, don't integrate
  * the network's correction for that instant at all — decay speed toward
  * zero and hold heading instead of trusting a correction computed in a
- * regime the network was never trained on. This does NOT change behavior
- * during real motion (driving, or the validated replay segment) — quiet
- * samples essentially never occur there except genuine stops, where
- * exactly this behavior (hold position, don't drift) is correct.
+ * regime the network was never trained on.
+ *
+ * That first version gated purely on accel/gyro magnitude, which is a
+ * real bug of its own: Newton's first law means a vehicle cruising at a
+ * genuinely constant speed also reads near-zero net accel — it's
+ * indistinguishable from "at rest" using accel/gyro alone. Found live via
+ * the replay demo: a real ~110 km/h highway stretch (comma2k19, gently
+ * curving, no real stop) has small enough instantaneous accel/yaw-rate to
+ * pass the accel/gyro-only check, so ZUPT decayed a genuinely-110km/h
+ * speed toward zero — the fused trail visibly reversed course mid-cruise,
+ * confirmed against the raw recorded data (speed held 30-33 m/s and gz
+ * stayed under 0.06 rad/s the entire time — nothing in the real data
+ * justified treating it as a stop). Fixed by also requiring the
+ * currently-tracked speed to already be low (see isQuiet's zuptMaxSpeed
+ * doc) — a cruising vehicle's speed isn't low, so it's exempt regardless
+ * of how quiet the instantaneous reading looks, while a phone actually at
+ * rest (speed already near zero, however it got there) still gets ZUPT
+ * exactly as before.
  */
 class FusionEngine(
     private val model: Predictor,
@@ -75,6 +89,12 @@ class FusionEngine(
     private val vClampMax: Float = 50f,
     private val quietAccelThresh: Float = 0.35f,  // m/s^2, horizontal (ax,ay) magnitude
     private val quietGyroThresh: Float = 0.05f,   // rad/s (~2.9 deg/s), full 3-axis magnitude
+    // Only samples where the currently-tracked speed is already below
+    // this count as ZUPT-eligible, regardless of how quiet accel/gyro
+    // look — see isQuiet's doc. 3 m/s (~11 km/h) sits comfortably above a
+    // brisk walk (the real "holding the phone" scenario this exists for)
+    // and comfortably below any real vehicle cruising speed.
+    private val zuptMaxSpeed: Float = 3.0f,
 ) {
     var state = FusionState()
         private set
@@ -229,7 +249,7 @@ class FusionEngine(
         var x = chunkAnchor.x
         var y = chunkAnchor.y
         for (i in startIdx until window.size) {
-            if (isQuiet(window[i])) {
+            if (isQuiet(window[i], v)) {
                 // ZUPT — raw sensors say the device is at rest right now;
                 // don't trust the network's correction for this instant
                 // (out-of-distribution for anything but real driving), just
@@ -250,10 +270,25 @@ class FusionEngine(
     }
 
     /** True if a raw (pre-correction) calibrated sample [ax,ay,az,gx,gy,gz]
-     * indicates the device is essentially motionless right now — see class
+     * indicates the device is essentially at rest right now — see class
      * doc's ZUPT note for why resolveChunk uses this to distrust the
-     * network's correction instead of applying it. */
-    private fun isQuiet(sample: FloatArray): Boolean {
+     * network's correction instead of applying it.
+     *
+     * currentSpeed is load-bearing, not a tiebreaker: accel/gyro alone
+     * cannot tell "at rest" apart from "moving at a constant velocity" —
+     * Newton's first law says both read as ~zero net force. Found live on
+     * a real device via the replay demo: real ~110 km/h highway cruising
+     * (comma2k19, genuinely constant speed, gently curving) has small
+     * enough horizontal accel and yaw rate that it passed the
+     * accel/gyro-only check, so ZUPT decayed a genuinely-110km/h speed
+     * toward zero and the fused trail visibly reversed course — confirmed
+     * against the raw recorded data (speed held 30-33 m/s, gz stayed under
+     * 0.06 rad/s throughout; there was no real stop or sharp turn there).
+     * Gating on currentSpeed already being low fixes the ambiguity: a
+     * cruising vehicle's speed is not low, so it's exempt regardless of
+     * how quiet the instantaneous accel/gyro looks. */
+    private fun isQuiet(sample: FloatArray, currentSpeed: Float): Boolean {
+        if (currentSpeed >= zuptMaxSpeed) return false
         val accelMag = sqrt((sample[0] * sample[0] + sample[1] * sample[1]).toDouble()).toFloat()
         val gyroMag = sqrt((sample[3] * sample[3] + sample[4] * sample[4] + sample[5] * sample[5]).toDouble()).toFloat()
         return accelMag < quietAccelThresh && gyroMag < quietGyroThresh
