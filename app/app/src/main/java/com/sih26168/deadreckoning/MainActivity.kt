@@ -158,7 +158,16 @@ class MainActivity : AppCompatActivity() {
 
         if (!calibration.isLeveled) {
             calibration.addLevelSample(sample.rawAccel)
-            showCalibrating("leveling…")
+            // Distinguish "still collecting" from "collected, but you're
+            // not actually holding it still" — otherwise an unchanging
+            // "leveling…" looks like a hang when it's really waiting on
+            // the user (see CalibrationManager's stationarity gate).
+            showCalibrating(
+                getString(
+                    if (calibration.levelWaitingForStillness) R.string.calib_leveling_waiting
+                    else R.string.calib_leveling
+                )
+            )
             tickHandler.postDelayed(::tick, tickIntervalMs)
             return
         }
@@ -171,8 +180,9 @@ class MainActivity : AppCompatActivity() {
                 calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
             }
             showCalibrating(
-                if (usingReplay) "yaw alignment: collecting confident samples from the replay…"
-                else "yaw alignment: collecting confident samples — drive in a straight line with GPS"
+                getString(
+                    if (usingReplay) R.string.calib_yaw_replay else R.string.calib_yaw_live
+                )
             )
             tickHandler.postDelayed(::tick, tickIntervalMs)
             return
@@ -221,7 +231,10 @@ class MainActivity : AppCompatActivity() {
         setStatusDotColor(dotColor)
         detailText.text = "speed: ${"%.0f".format(s.speed * 3.6f)} km/h  |  heading: ${Math.toDegrees(s.heading.toDouble()).roundToInt()}°" +
             (if (usingReplay) "  |  [REPLAY]" else "") +
-            (if (demoBlackout) "  |  [SIMULATED BLACKOUT]" else "")
+            (if (demoBlackout) "  |  [SIMULATED BLACKOUT]" else "") +
+            // Everything downstream inherits a bad calibration, so say so
+            // rather than presenting a degraded fix as an equal one.
+            (if (calibration.isRoughCalibration) "  |  ⚠ ${getString(R.string.calib_rough)}" else "")
 
         tickHandler.postDelayed(::tick, tickIntervalMs)
     }

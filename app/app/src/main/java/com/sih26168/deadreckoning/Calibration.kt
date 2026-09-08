@@ -1,5 +1,6 @@
 package com.sih26168.deadreckoning
 
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
@@ -95,6 +96,56 @@ object Calibration {
      * robust to the low-magnitude samples where direction is ill-defined).
      */
     fun estimateYawMisalignment(levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>): Float {
+        val diffs = yawAngleDiffs(levelAccelXY, gtHeadingXY)
+        if (diffs.isEmpty()) return 0f
+        return diffs.sorted()[diffs.size / 2]
+    }
+
+    /**
+     * How much the samples behind [estimateYawMisalignment] actually agree
+     * with each other: circular variance (1 - mean resultant length) of
+     * the same filtered angle diffs. 0 = perfectly aligned, approaching
+     * 1 = scattered all around the circle. Roughly, an angular spread of
+     * sigma radians gives sigma^2 / 2.
+     *
+     * NOT part of the calibration.py port; added for *live* calibration.
+     * Offline, a bad window can just be re-run over different data. Live,
+     * the yaw estimate locks in once at trip start and everything after it
+     * inherits the error, so the initial stretch has to be checked for
+     * actually being the straight line the estimate assumes. The median
+     * alone can't reveal that: a stretch that swings between two headings
+     * (a turn, a lane change, stop-and-go) yields a perfectly *stable*
+     * median of two disagreeing populations.
+     *
+     * Circular variance specifically, rather than a median-absolute-
+     * deviation: MAD is robust to a minority of outliers, which is the
+     * exact opposite of what's wanted here. Found the hard way in
+     * CalibrationManagerTest — after the top-quartile magnitude filter
+     * leaves only a handful of samples, a genuinely bimodal stretch that
+     * happens to split 8-2 has an MAD of ~0 and sails through the gate.
+     * Circular variance is *sensitive* to that minority, and handles
+     * angle wrapping natively instead of by hand.
+     */
+    fun yawMisalignmentSpread(levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>): Float {
+        val diffs = yawAngleDiffs(levelAccelXY, gtHeadingXY)
+        if (diffs.size < 2) return 1f
+        var sumCos = 0.0
+        var sumSin = 0.0
+        for (d in diffs) {
+            sumCos += cos(d.toDouble())
+            sumSin += sin(d.toDouble())
+        }
+        val n = diffs.size
+        val resultant = sqrt((sumCos / n) * (sumCos / n) + (sumSin / n) * (sumSin / n))
+        return (1.0 - resultant).toFloat()
+    }
+
+    /** The per-sample (heading - accel direction) angle diffs both of the
+     * above are built on, restricted to the highest-magnitude quarter of
+     * samples — direction is ill-defined where horizontal accel is tiny.
+     * Shared so the estimate and its spread can never be computed over
+     * different sample sets. */
+    private fun yawAngleDiffs(levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>): List<Float> {
         val mags = levelAccelXY.map { sqrt((it[0] * it[0] + it[1] * it[1]).toDouble()).toFloat() }
         val sorted = mags.sorted()
         val p75 = sorted[(sorted.size * 0.75).toInt().coerceIn(0, sorted.size - 1)]
@@ -106,9 +157,10 @@ object Calibration {
             val diff = atan2(sin(gAng - aAng), cos(gAng - aAng))
             diffs.add(diff.toFloat())
         }
-        if (diffs.isEmpty()) return 0f
-        return diffs.sorted()[diffs.size / 2]
+        return diffs
     }
+
+    private fun wrap(a: Float): Float = atan2(sin(a.toDouble()), cos(a.toDouble())).toFloat()
 
     /** Apply the full phone->vehicle rotation to one raw IMU sample. */
     fun calibrateSample(raw: FloatArray, rLevel: FloatArray, psiYaw: Float): FloatArray {
