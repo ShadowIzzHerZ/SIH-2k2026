@@ -7,7 +7,6 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlin.math.roundToInt
@@ -19,16 +18,24 @@ import kotlin.math.roundToInt
  * the fixed src/fusion.py) -> BiasCorrectionModel (ONNX Runtime, the
  * checkpoints/dead_reckoning_model.onnx export) -> TrajectoryView.
  *
- * "Simulate GNSS blackout" exists because a live demo can't reliably walk
- * into a real tunnel on stage on cue — it forces the fusion engine into
- * BLACKOUT the same way src/simulate_blackout.py does offline, on real
- * live sensor data instead of a recorded trace.
+ * Two demo controls, orthogonal to each other:
+ *   - "Replay real recorded drive" swaps the data source from live
+ *     sensors/GPS to a real, previously-validated comma2k19 segment
+ *     bundled as an asset (see ReplayDataSource) — for demoing indoors,
+ *     with no GPS reception and no room to actually drive, using real
+ *     data instead of idealized synthetic motion.
+ *   - "Simulate GNSS blackout" forces the fusion engine into BLACKOUT
+ *     regardless of data source — the same thing src/simulate_blackout.py
+ *     does offline, live here on whichever source is active.
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var sensorReader: SensorReader
     private lateinit var locationReader: LocationReader
-    private lateinit var calibration: CalibrationManager
+    private lateinit var replayData: ReplayDataSource
+    private var replayIndex = 0
+
+    private var calibration = CalibrationManager()
     private lateinit var model: BiasCorrectionModel
     private lateinit var fusion: FusionEngine
 
@@ -36,6 +43,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var detailText: TextView
     private lateinit var trajectoryView: TrajectoryView
     private lateinit var blackoutToggle: SwitchMaterial
+    private lateinit var replayToggle: SwitchMaterial
+    private var wasReplaying = false
 
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickIntervalMs = 100L  // 10Hz — matches configs/default.yaml's sample_rate_hz
@@ -56,14 +65,15 @@ class MainActivity : AppCompatActivity() {
         detailText = findViewById(R.id.detailText)
         trajectoryView = findViewById(R.id.trajectoryView)
         blackoutToggle = findViewById(R.id.blackoutToggle)
+        replayToggle = findViewById(R.id.replayToggle)
 
         sensorReader = SensorReader(this)
         locationReader = LocationReader(this)
-        calibration = CalibrationManager()
+        replayData = ReplayDataSource(this)
         model = BiasCorrectionModel(this)
         fusion = FusionEngine(model)
 
-        // blackoutToggle.isChecked is read live in tick() — no listener needed here.
+        // blackoutToggle/replayToggle .isChecked read live in tick() — no listeners needed.
 
         val needed = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (needed.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
@@ -84,46 +94,78 @@ class MainActivity : AppCompatActivity() {
         tickHandler.postDelayed(::tick, tickIntervalMs)
     }
 
+    /** One sample, regardless of source — live sensors/GPS or the bundled replay. */
+    private data class Sample(
+        val rawAccel: FloatArray, val rawGyro: FloatArray,
+        val hasFix: Boolean, val lat: Double, val lon: Double, val speed: Float, val bearingRad: Float,
+    )
+
+    private fun readSample(usingReplay: Boolean): Sample {
+        if (usingReplay) {
+            val row = replayData.rows[replayIndex]
+            replayIndex = (replayIndex + 1) % replayData.rows.size
+            return Sample(row.accel, row.gyro, true, row.lat, row.lon, row.speed, row.bearingRad)
+        }
+        val loc = locationReader.lastLocation
+        val hasFix = locationReader.hasRecentFix() && loc != null
+        return Sample(
+            sensorReader.lastAccel, sensorReader.lastGyro, hasFix,
+            loc?.latitude ?: 0.0, loc?.longitude ?: 0.0, loc?.speed ?: 0f,
+            if (loc != null) Math.toRadians(loc.bearing.toDouble()).toFloat() else 0f,
+        )
+    }
+
     private fun tick() {
         if (!ticking) return
 
-        val rawAccel = sensorReader.lastAccel
-        val rawGyro = sensorReader.lastGyro
+        val usingReplay = replayToggle.isChecked
+        if (usingReplay != wasReplaying) {
+            // Switching data source mid-flight would mix live-phone leveling
+            // with a replayed car's motion scale (or vice versa) — restart
+            // calibration/fusion/trajectory cleanly for the new source
+            // instead of producing a nonsensical blend of the two.
+            calibration = CalibrationManager()
+            fusion.reset()
+            trajectoryView.clear()
+            replayIndex = 0
+            wasReplaying = usingReplay
+        }
+
+        val sample = readSample(usingReplay)
 
         if (!calibration.isLeveled) {
-            calibration.addLevelSample(rawAccel)
+            calibration.addLevelSample(sample.rawAccel)
             modeText.text = getString(R.string.status_calibrating)
             detailText.text = "leveling…"
             tickHandler.postDelayed(::tick, tickIntervalMs)
             return
         }
 
-        val loc = locationReader.lastLocation
         val demoBlackout = blackoutToggle.isChecked
-        val realFix = locationReader.hasRecentFix() && loc != null
-        val available = realFix && !demoBlackout
+        val available = sample.hasFix && !demoBlackout
 
         if (!calibration.isReady) {
-            if (realFix) {
-                calibration.addYawSample(rawAccel, loc!!.speed, Math.toRadians(loc.bearing.toDouble()).toFloat())
+            if (sample.hasFix) {
+                calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
             }
             modeText.text = getString(R.string.status_calibrating)
-            detailText.text = "yaw alignment: collecting confident samples — drive in a straight line with GPS"
+            detailText.text = if (usingReplay) "yaw alignment: collecting confident samples from the replay…"
+                else "yaw alignment: collecting confident samples — drive in a straight line with GPS"
             tickHandler.postDelayed(::tick, tickIntervalMs)
             return
         }
 
-        val calAccel = calibration.calibrate(rawAccel)
-        val calGyro = calibration.calibrate(rawGyro)
+        val calAccel = calibration.calibrate(sample.rawAccel)
+        val calGyro = calibration.calibrate(sample.rawGyro)
 
         fusion.tick(
             calibratedAccel = calAccel,
             calibratedGyro = calGyro,
             available = available,
-            lat = loc?.latitude ?: 0.0,
-            lon = loc?.longitude ?: 0.0,
-            gnssSpeed = loc?.speed ?: 0f,
-            gnssHeadingRad = if (loc != null) Math.toRadians(loc.bearing.toDouble()).toFloat() else 0f,
+            lat = sample.lat,
+            lon = sample.lon,
+            gnssSpeed = sample.speed,
+            gnssHeadingRad = sample.bearingRad,
         )
 
         val s = fusion.state
@@ -134,6 +176,7 @@ class MainActivity : AppCompatActivity() {
             FusionMode.BLEND -> getString(R.string.status_blend)
         }
         detailText.text = "speed: ${"%.1f".format(s.speed)} m/s  |  heading: ${Math.toDegrees(s.heading.toDouble()).roundToInt()}°" +
+            (if (usingReplay) "  |  [REPLAY]" else "") +
             (if (demoBlackout) "  |  [SIMULATED BLACKOUT]" else "")
 
         tickHandler.postDelayed(::tick, tickIntervalMs)
