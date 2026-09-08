@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Light-only, not DayNight: the app's layout hardcodes a white
+         background (activity_main.xml), so letting DayNight switch text
+         to light-on-dark colors under system dark mode made titles/labels
+         invisible against that white background — confirmed on a real
+         device (system dark mode) where the title and mode status text
+         were both actually rendering, just in white-on-white. -->
+    <style name="Theme.DeadReckoning" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorPrimaryDark">@color/brand_primary</item>
+        <item name="colorAccent">@color/brand_accent</item>
+    </style>
+</resources>

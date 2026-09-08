@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple compass-arrow glyph: a dead-reckoning "heading" mark. -->
+    <path
+        android:fillColor="#ffffff"
+        android:pathData="M54,20 L68,70 L54,58 L40,70 Z" />
+    <path
+        android:fillColor="#93c5fd"
+        android:pathData="M54,58 L68,70 L54,88 Z" />
+</vector>

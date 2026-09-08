@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SIH26168 Dead Reckoning</string>
+    <string name="status_calibrating">Calibrating… hold phone still, then drive</string>
+    <string name="simulate_blackout">Simulate GNSS blackout (demo)</string>
+    <string name="status_gnss">GNSS tracking</string>
+    <string name="status_blackout">GNSS blackout — INS only</string>
+    <string name="status_blend">Reconnecting…</string>
+</resources>
