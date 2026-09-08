@@ -85,6 +85,29 @@ class FusionEngine(
 
     private fun wrapAngle(a: Float): Float = atan2(sin(a.toDouble()), cos(a.toDouble())).toFloat()
 
+    /** Inverse of toLocalXY — lets a caller (e.g. MapMatcher, which works
+     * in real lat/lon) convert the fused local position back to a real
+     * coordinate, using this engine's own reference fix. Returns null
+     * before any GNSS fix has ever been seen (no reference point yet). */
+    fun localXYToLatLon(x: Float, y: Float): DoubleArray? {
+        val lat0 = refLat ?: return null
+        val lon0 = refLon ?: return null
+        val r = 6371000.0
+        val lat0Rad = Math.toRadians(lat0)
+        val lat = lat0 + Math.toDegrees(y / r)
+        val lon = lon0 + Math.toDegrees(x / (r * cos(lat0Rad)))
+        return doubleArrayOf(lat, lon)
+    }
+
+    /** Public counterpart to toLocalXY, for converting a *result* (e.g. a
+     * MapMatcher-snapped lat/lon) back into this same local frame for
+     * rendering alongside the fused trajectory. Returns null before any
+     * GNSS fix has ever been seen. */
+    fun latLonToLocalXY(lat: Double, lon: Double): FloatArray? {
+        if (refLat == null) return null
+        return toLocalXY(lat, lon)
+    }
+
     /**
      * One 10Hz tick. `calibratedAccel`/`calibratedGyro` are already in the
      * vehicle frame (see Calibration). `available`/`lat`/`lon`/`gnssSpeed`/
