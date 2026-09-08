@@ -73,6 +73,12 @@ dependencies {
     // Services, same free-OSM-tiles philosophy as LocationReader.kt's
     // choice of plain LocationManager over FusedLocationProviderClient.
     implementation("org.osmdroid:osmdroid-android:6.1.20")
+
+    // Plain JVM unit tests (FusionEngineTest) — no device/emulator needed,
+    // runs via `./gradlew test`. FusionEngine itself has no Android
+    // dependency; only BiasCorrectionModel does (Predictor exists so tests
+    // can swap in a fake instead).
+    testImplementation("junit:junit:4.13.2")
 }
 
 // Keeps the app's bundled model in sync with the real training artifact
