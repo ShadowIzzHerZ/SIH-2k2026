@@ -1,0 +1,10 @@
+{
+  "trace": "b0c9d2329ad1606b|2018-07-27--06-03-57/10",
+  "trace_duration_s": 59.800000000000004,
+  "blackout_start_s": 10.0,
+  "blackout_duration_s": 30.0,
+  "blackout_drift_pct": 2.9201345163634396,
+  "drift_target_pct": 10.0,
+  "under_target": true,
+  "reconnect_jump_m": 0.0
+}

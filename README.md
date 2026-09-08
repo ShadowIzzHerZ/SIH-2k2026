@@ -78,7 +78,10 @@ distance travelled — not a proxy.
 | [src/data/comma2k19_loader.py](src/data/comma2k19_loader.py) | Loads the [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) demo split — a second, independent real dataset for a generalization check |
 | [src/evaluate_comma2k19.py](src/evaluate_comma2k19.py) | Runs the IO-VNBD-trained model on comma2k19 with zero retraining |
 | [src/diagnose_drift.py](src/diagnose_drift.py) | Per-window drift diagnostics — correlates predicted drift-% against distance travelled, yaw rate, speed to find what's actually driving high-drift windows |
+| [src/fusion.py](src/fusion.py) | GNSS↔INS mode-switching — the PS's "instant seamless mode-switching" component. State machine that runs the trained network only during a GNSS blackout and blends smoothly back on reconnect |
+| [src/simulate_blackout.py](src/simulate_blackout.py) | Demo/eval for `fusion.py`: injects an artificial GNSS blackout into a real held-out drive (IO-VNBD or comma2k19), runs the mode-switcher through it, and plots + reports the result |
 | [tests/test_pipeline_smoke.py](tests/test_pipeline_smoke.py) | Synthetic-data sanity check for the integrator/model/train loop |
+| [tests/test_fusion.py](tests/test_fusion.py) | Synthetic sanity checks for `fusion.py`'s state machine (GNSS passthrough, blackout reconstruction, no-jump reconnect) |
 | [tests/test_map_matching.py](tests/test_map_matching.py) | Validates the map-matcher against a real road segment with a known-answer synthetic-drift-recovery check (needs network access) |
 | [tests/test_comma2k19_loader.py](tests/test_comma2k19_loader.py) | Sanity-checks the comma2k19 loader against the real demo split (needs it downloaded first) |
 
@@ -139,8 +142,14 @@ for i in range(3):
   - The actual pattern: median drift (66.96%) sits *above* the mean, i.e. bimodal — a cluster of easy, long, high-speed highway-like windows near 0% drift (matching comma2k19's strength) pulling the mean down, against a majority of short, low-speed, urban stop-and-go windows sitting around 60-90%.
   - **Conclusion: broad, spread-out underfitting on low-speed/urban driving specifically, not a fixable outlier bug or a single targeted failure mode.** Consistent with every other lever tried failing to move the number (warm restarts, the LR fix above, the v2 architecture, comma2k19 mixing).
 - **Given the above and the Sept 10 shortlist deadline, decided to stop chasing the combined/IO-VNBD drift number further and reframe the pitch honestly around what the evidence actually supports**: the model is genuinely strong on highway-style driving (comma2k19: 16.49% mean / 8.94% median, at/near the <10% target) and openly weaker on low-speed urban stop-and-go (IO-VNBD's harder case) — a real, defensible, and honestly-earned result, rather than an unqualified claim against the PS's flat 62.76%/60.92% headline numbers.
-- [ ] Non-holonomic motion constraints not yet enforced inside the matcher itself (relies on the road graph's own directionality for one-way streets, but no explicit "can't teleport backward along a one-way" cost yet)
-- [ ] GNSS+INS fusion mode-switching (seamless handoff between GPS-available and blackout) — not started, sits above both the network and the matcher
+- [x] **GNSS+INS fusion mode-switching implemented** ([src/fusion.py](src/fusion.py), demo/eval: [src/simulate_blackout.py](src/simulate_blackout.py)) — the PS's own "instant seamless mode-switching" line item, previously entirely unbuilt. A state machine (GNSS_TRACKING / BLACKOUT / BLEND) that runs the trained network only during a blackout and ramps smoothly back to GNSS on reconnect (measured reconnect jump: 0.0m — no teleport) rather than snapping.
+  - Building this surfaced a real train/deploy mismatch, not a mode-switching bug: the first version fed the network a rolling IMU window and used only its *last* position's correction each step (the exact per-sample contract [src/export_onnx.py](src/export_onnx.py) already documents for the on-device app). That measured **5-6x worse drift than `evaluate.py`'s reported numbers on identical held-out data for an identical span** — because `BiasCorrectionNet`'s output isn't position-invariant across its own 50-sample training window (position 0, almost no GRU context yet, behaves very differently from position 49), and training/eval always score it using *all* window positions integrated together from one fresh ground-truth anchor, never a single position alone.
+  - Fixed by integrating the *whole* window's correction sequence each step from an anchor state `window_size` samples back (real GNSS state for the first 5s of any blackout, the module's own prior estimate beyond that — full rationale in `fusion.py`'s docstring), reproducing the trained regime instead of a simpler-looking but untested one. Real held-out result: **comma2k19 (highway) 30s blackout: 2.9% drift — under the PS's 10% target**; 5s spans averaged 10.7% mean / 5.7% median across 20 segments, in line with the existing 16.49%/8.94% headline numbers (vs. 5-6x worse before the fix).
+  - **Does not fix IO-VNBD's known low-speed/urban weakness** — re-anchoring every 5s to the model's own increasingly-wrong estimate over a longer urban blackout compounds badly on top of an already high-variance model there (measured **259% drift over a real 45s IO-VNBD span**, worse than the per-window 62.33% headline number). Consistent with, not contradicting, every other IO-VNBD finding above — see `fusion.py`'s docstring for the full comparison.
+- [x] **Non-holonomic motion constraints in the matcher made explicit and verified** ([src/map_matching.py](src/map_matching.py), test: [tests/test_non_holonomic_matching.py](tests/test_non_holonomic_matching.py)). Two guarantees, checked separately against a small synthetic road (no network needed, unlike `test_map_matching.py`'s real-OSM drift-recovery test):
+  - **Wrong-way travel on a one-way street is structurally impossible**, not just discouraged — `osmnx_graph_to_inmem_map` only ever adds the directed edge(s) osmnx itself resolved, so a one-way street's reverse direction simply doesn't exist as an edge to match onto. Was already true, but only asserted in a comment before; now checked directly against the real function.
+  - **A single noisy backward-looking observation shouldn't teleport the matched path backward** — leuvenmapmatching's `avoid_goingback` transition penalty was already the library's implicit default (undocumented in this repo, silently inherited), now passed explicitly so it can't silently change/disable under us. Measured on a synthetic one-way road with an injected 18m backward jitter: matched path holds flat (0.0m backward movement) instead of following the jitter back — confirmed the explicit setting is actually taking effect, not just present in code. Re-ran the existing real-OSM drift-recovery test (`test_map_matching.py`) too — unaffected: still 20.1m → 7.6m mean error, 100% match rate.
+  - Remaining gap, explicitly not claimed as solved: this is a *soft* penalty (halves transition probability, not a hard ban) — a strongly-evidenced backward observation can still occasionally win. No test asserts the matcher enforces one-way directionality under GPS noise *pressuring* it the wrong way (only that the edge itself doesn't exist), since that would need a synthetic case with a parallel wrong-way road nearby to be meaningful.
 - [ ] Own campus recordings (see `data/own_recordings/`) — not yet collected; could help close the gap given IO-VNBD's mounting/session variety is a real source of error
 
 ## Running
@@ -167,6 +176,13 @@ python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints
 
 # sanity check any time you change the integrator/model/loss
 python -m tests.test_pipeline_smoke
+
+# sanity check any time you change fusion.py's state machine
+python -m tests.test_fusion
+
+# demo/eval the GNSS<->INS mode-switcher on a real held-out drive
+python -m src.simulate_blackout --dataset comma2k19 --blackout_start_s 10 --blackout_duration_s 30
+python -m src.simulate_blackout --dataset iovnbd --blackout_duration_s 45
 
 # validate the map-matcher against a real road segment (needs network access)
 python -m tests.test_map_matching

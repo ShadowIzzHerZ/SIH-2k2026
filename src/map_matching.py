@@ -129,7 +129,29 @@ def match_trajectory(map_con: InMemMap, latlon_path: list[tuple[float, float]],
         that it runs without error.
     """
     matcher = DistanceMatcher(map_con, obs_noise=obs_noise, max_dist=max_dist,
-                               non_emitting_states=True)
+                               non_emitting_states=True,
+                               # Non-holonomic constraint, PS doc §2's other named requirement
+                               # alongside map-matching itself: a vehicle can't instantaneously
+                               # reverse. avoid_goingback halves the transition probability (in
+                               # log-space) for any candidate that moves backward along the
+                               # *same* road edge relative to the previous matched point, or
+                               # revisits an edge the path has already left — leuvenmapmatching's
+                               # own mechanism for this (matcher/distance.py's logprob_trans),
+                               # made explicit here rather than left as an implicit library
+                               # default so it can't silently change/disable under us. This is
+                               # deliberately a soft penalty, not a hard ban: a genuinely
+                               # backward-looking observation (e.g. real GPS jitter) should still
+                               # be matchable if every forward alternative is a much worse fit,
+                               # rather than the matcher failing outright.
+                               #
+                               # Wrong-way travel on an actual one-way street is a stronger,
+                               # structural guarantee, not this parameter: osmnx_graph_to_inmem_map
+                               # only ever adds the directed edges osmnx itself resolved (a one-way
+                               # street contributes just one direction), so there is no reverse
+                               # edge to match onto at all — verified directly in
+                               # tests/test_non_holonomic_matching.py, not just asserted in a
+                               # comment.
+                               avoid_goingback=True)
     states, last_idx = matcher.match(latlon_path)
 
     snapped: list[tuple[float, float] | None] = [None] * len(latlon_path)
