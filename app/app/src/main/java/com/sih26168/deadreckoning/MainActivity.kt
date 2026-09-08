@@ -8,6 +8,7 @@ import android.os.Looper
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlin.math.roundToInt
 
@@ -16,7 +17,9 @@ import kotlin.math.roundToInt
  * validates in Python: SensorReader (raw IMU) -> CalibrationManager
  * (Calibration.kt, matching src/calibration.py) -> FusionEngine (matching
  * the fixed src/fusion.py) -> BiasCorrectionModel (ONNX Runtime, the
- * checkpoints/dead_reckoning_model.onnx export) -> TrajectoryView.
+ * checkpoints/dead_reckoning_model.onnx export) -> RoadMapView (a real
+ * OpenStreetMap-tile map, same free-tile approach as the Zen/DevStorm-2026
+ * project's Leaflet map).
  *
  * Two demo controls, orthogonal to each other:
  *   - "Replay real recorded drive" swaps the data source from live
@@ -42,9 +45,10 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var modeText: TextView
     private lateinit var detailText: TextView
-    private lateinit var trajectoryView: TrajectoryView
+    private lateinit var roadMapView: RoadMapView
     private lateinit var blackoutToggle: SwitchMaterial
     private lateinit var replayToggle: SwitchMaterial
+    private lateinit var recenterButton: FloatingActionButton
     private var wasReplaying = false
 
     private val tickHandler = Handler(Looper.getMainLooper())
@@ -64,9 +68,11 @@ class MainActivity : AppCompatActivity() {
 
         modeText = findViewById(R.id.modeText)
         detailText = findViewById(R.id.detailText)
-        trajectoryView = findViewById(R.id.trajectoryView)
+        roadMapView = findViewById(R.id.roadMapView)
         blackoutToggle = findViewById(R.id.blackoutToggle)
         replayToggle = findViewById(R.id.replayToggle)
+        recenterButton = findViewById(R.id.recenterButton)
+        recenterButton.setOnClickListener { roadMapView.recenterOnLatest() }
 
         sensorReader = SensorReader(this)
         locationReader = LocationReader(this)
@@ -129,7 +135,7 @@ class MainActivity : AppCompatActivity() {
             calibration = CalibrationManager()
             fusion.reset()
             mapMatcher.reset()
-            trajectoryView.clear()
+            roadMapView.clear()
             replayIndex = 0
             wasReplaying = usingReplay
         }
@@ -172,20 +178,16 @@ class MainActivity : AppCompatActivity() {
         )
 
         val s = fusion.state
-        trajectoryView.addPoint(s.x, s.y, s.mode)
-
-        // Map-match the fused position onto the bundled road graph — same
-        // idea as src/evaluate_with_mapmatching.py's before/after
-        // comparison, live here instead of an offline batch report. Most
-        // useful (and most likely to actually find a nearby road) during
-        // BLACKOUT/BLEND, where the raw fused estimate can drift off the
-        // true road; matching every mode too so the green overlay is a
-        // continuous, comparable trail rather than appearing/disappearing.
+        // RoadMapView draws in real lat/lon, not FusionEngine's local xy —
+        // convert once per tick using the engine's own reference fix.
         fusion.localXYToLatLon(s.x, s.y)?.let { (lat, lon) ->
+            roadMapView.addPoint(lat, lon, s.mode)
+
+            // Map-match the fused position onto the bundled road graph —
+            // same idea as src/evaluate_with_mapmatching.py's before/after
+            // comparison, live here instead of an offline batch report.
             mapMatcher.match(lat, lon)?.let { m ->
-                fusion.latLonToLocalXY(m.lat, m.lon)?.let { xy ->
-                    trajectoryView.addMatchedPoint(xy[0], xy[1])
-                }
+                roadMapView.addMatchedPoint(m.lat, m.lon)
             }
         }
 
@@ -199,6 +201,16 @@ class MainActivity : AppCompatActivity() {
             (if (demoBlackout) "  |  [SIMULATED BLACKOUT]" else "")
 
         tickHandler.postDelayed(::tick, tickIntervalMs)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        roadMapView.onResume()  // osmdroid tile cache lifecycle
+    }
+
+    override fun onPause() {
+        super.onPause()
+        roadMapView.onPause()
     }
 
     override fun onDestroy() {
