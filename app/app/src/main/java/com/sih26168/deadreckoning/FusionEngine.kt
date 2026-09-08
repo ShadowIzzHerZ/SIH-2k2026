@@ -3,6 +3,7 @@ package com.sih26168.deadreckoning
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 enum class FusionMode { GNSS_TRACKING, BLACKOUT, BLEND }
 
@@ -45,6 +46,25 @@ data class FusionState(
  * final chunk harvests fewer, each still computed with genuine real
  * leading context from the rolling buffer rather than fabricated/padded
  * samples.
+ *
+ * ZUPT (zero-velocity update): a real bug found live on-device, not in the
+ * validated offline eval. The bias-correction network was trained on real
+ * *vehicle* driving (comma2k19/IO-VNBD — mounted, road speeds) — it has
+ * never seen "phone picked up and carried by hand while basically
+ * standing still", which is wildly out-of-distribution. During a blackout
+ * that domain mismatch means its correction for near-zero real motion
+ * isn't reliably near-zero either, and a small constant residual yaw-rate
+ * bias integrated every tick for an entire chunk compounds, chunk after
+ * chunk, into a full circular loop — visibly "wandering to random places"
+ * while the phone was actually just sitting there. Fixed with a standard
+ * INS stabilization technique: when the raw (pre-correction) accel/gyro
+ * for a sample says the device is essentially at rest, don't integrate
+ * the network's correction for that instant at all — decay speed toward
+ * zero and hold heading instead of trusting a correction computed in a
+ * regime the network was never trained on. This does NOT change behavior
+ * during real motion (driving, or the validated replay segment) — quiet
+ * samples essentially never occur there except genuine stops, where
+ * exactly this behavior (hold position, don't drift) is correct.
  */
 class FusionEngine(
     private val model: BiasCorrectionModel,
@@ -53,6 +73,8 @@ class FusionEngine(
     private val blendSeconds: Float = 2.0f,
     private val vClampMin: Float = 0f,
     private val vClampMax: Float = 50f,
+    private val quietAccelThresh: Float = 0.35f,  // m/s^2, horizontal (ax,ay) magnitude
+    private val quietGyroThresh: Float = 0.05f,   // rad/s (~2.9 deg/s), full 3-axis magnitude
 ) {
     var state = FusionState()
         private set
@@ -207,16 +229,34 @@ class FusionEngine(
         var x = chunkAnchor.x
         var y = chunkAnchor.y
         for (i in startIdx until window.size) {
-            val forwardAccel = window[i][0] + corrections[i][0]
-            val yawRate = window[i][5] + corrections[i][1]
-            v = (v + forwardAccel * dt).coerceIn(vClampMin, vClampMax)
-            th = wrapAngle(th + yawRate * dt)
+            if (isQuiet(window[i])) {
+                // ZUPT — raw sensors say the device is at rest right now;
+                // don't trust the network's correction for this instant
+                // (out-of-distribution for anything but real driving), just
+                // decay any stale speed and hold heading. See class doc.
+                v *= 0.7f
+            } else {
+                val forwardAccel = window[i][0] + corrections[i][0]
+                val yawRate = window[i][5] + corrections[i][1]
+                v = (v + forwardAccel * dt).coerceIn(vClampMin, vClampMax)
+                th = wrapAngle(th + yawRate * dt)
+            }
             x += v * cos(th.toDouble()).toFloat() * dt
             y += v * sin(th.toDouble()).toFloat() * dt
         }
         state = FusionState(FusionMode.BLACKOUT, x, y, th, v)
         chunkAnchor = state.copy()
         pending = 0
+    }
+
+    /** True if a raw (pre-correction) calibrated sample [ax,ay,az,gx,gy,gz]
+     * indicates the device is essentially motionless right now — see class
+     * doc's ZUPT note for why resolveChunk uses this to distrust the
+     * network's correction instead of applying it. */
+    private fun isQuiet(sample: FloatArray): Boolean {
+        val accelMag = sqrt((sample[0] * sample[0] + sample[1] * sample[1]).toDouble()).toFloat()
+        val gyroMag = sqrt((sample[3] * sample[3] + sample[4] * sample[4] + sample[5] * sample[5]).toDouble()).toFloat()
+        return accelMag < quietAccelThresh && gyroMag < quietGyroThresh
     }
 
     fun reset() {
