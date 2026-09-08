@@ -54,11 +54,13 @@ class FusionEngineTest {
     @Test
     fun `blackout with a stationary device and a noisy correction does not spin into a circle`() {
         // A fake network hallucinating a modest constant yaw-rate bias
-        // (0.3 rad/s) on out-of-distribution input — left uncorrected at
-        // 5 m/s this traces a ~17m-radius circle within a few seconds
-        // (confirmed live on-device as the actual reported bug).
+        // (0.3 rad/s) on out-of-distribution input — left uncorrected this
+        // traces a wide circle within a few seconds (confirmed live
+        // on-device as the actual reported bug). 2 m/s: a brisk walk,
+        // realistically what GNSS was last reporting right before someone
+        // holding the phone stood still — comfortably under zuptMaxSpeed.
         val engine = FusionEngine(FakePredictor(deltaV = 0f, deltaTheta = 0.3f))
-        warmUpGnssTracking(engine, speed = 5f)
+        warmUpGnssTracking(engine, speed = 2f)
 
         // Blackout begins with the device genuinely at rest: raw
         // (pre-correction) accel/gyro both ~zero.
@@ -101,6 +103,37 @@ class FusionEngineTest {
         assertTrue(
             "genuine in-motion blackout should still displace the fused position substantially, got ${dist}m",
             dist > 20.0,
+        )
+    }
+
+    @Test
+    fun `blackout with a vehicle cruising at constant speed does not get ZUPT'd to a stop`() {
+        // Regression for a second real bug, found live via the replay
+        // demo: real ~110 km/h highway cruising (comma2k19, verified
+        // against the raw recorded data) has instantaneous accel/yaw-rate
+        // small enough to look "quiet" by magnitude alone — Newton's
+        // first law means constant velocity also reads as ~zero net
+        // force, same as genuinely being at rest. The first ZUPT version
+        // decayed a real 30 m/s cruise toward zero and the fused trail
+        // visibly reversed course mid-cruise. These numbers are the real
+        // ones measured from the bundled replay_drive.json at the point
+        // this happened: speed ~31 m/s, gz staying under 0.06 rad/s.
+        val engine = FusionEngine(FakePredictor(deltaV = 0f, deltaTheta = 0f))
+        warmUpGnssTracking(engine, speed = 31f)
+
+        repeat(windowSize * 3) { // 15s of "quiet-looking" but genuinely fast cruising
+            engine.tick(
+                calibratedAccel = floatArrayOf(0.2f, 0.1f, 0f), // quiet by the old accel-only check
+                calibratedGyro = floatArrayOf(0f, 0f, 0.04f),   // quiet by the old gyro-only check too
+                available = false,
+                lat = 0.0, lon = 0.0, gnssSpeed = 0f, gnssHeadingRad = 0f,
+            )
+        }
+
+        assertTrue(
+            "a vehicle genuinely cruising at ~31 m/s must not have its speed decayed toward zero " +
+                "just because the instantaneous reading looks quiet — got ${engine.state.speed} m/s",
+            engine.state.speed > 20f,
         )
     }
 }
