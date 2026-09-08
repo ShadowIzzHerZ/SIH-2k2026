@@ -2,9 +2,7 @@ package com.sih26168.deadreckoning
 
 import kotlin.math.atan2
 import kotlin.math.cos
-import kotlin.math.min
 import kotlin.math.sin
-import kotlin.math.sqrt
 
 enum class FusionMode { GNSS_TRACKING, BLACKOUT, BLEND }
 
@@ -25,11 +23,28 @@ data class FusionState(
  * ticks instead of a fixed offline array.
  *
  * Accuracy-critical integration only happens at chunk boundaries (every
- * windowSize samples of a blackout), exactly like the validated offline
- * version. Between boundaries, `tick()` extrapolates the displayed
- * position forward at the last known speed/heading (dead-simple constant-
- * velocity dead reckoning) purely for a smooth live UI — the authoritative
- * per-chunk result still corrects it every 5s, same as the real algorithm.
+ * windowSize samples of a blackout, or when GNSS returns mid-chunk).
+ * Between boundaries, `tick()` extrapolates the displayed position forward
+ * at the last known speed/heading (dead-simple constant-velocity dead
+ * reckoning) purely for a smooth live UI — the authoritative per-chunk
+ * result still corrects it every 5s, same as the real algorithm.
+ *
+ * The exported ONNX model (checkpoints/dead_reckoning_model.onnx) has a
+ * FIXED input shape — exactly windowSize samples, no dynamic axes (see
+ * export_onnx.py's docstring: "Dynamic axes are left off ... on purpose").
+ * Confirmed the hard way, crashing on a real device: a short final chunk
+ * (GNSS returning mid-chunk, e.g. 25 of 50 samples in) can't just be
+ * handed to the model at its own shorter length. Fixed with a continuous
+ * rolling buffer of the last windowSize *real* calibrated samples,
+ * updated every tick regardless of mode — a chunk resolution always feeds
+ * the model that buffer's current (always exactly windowSize, always
+ * real, never padded) contents, and only harvests the LAST `pending`
+ * corrections (the ones whose window position actually corresponds to
+ * this chunk's own new samples) for integration. A full mid-blackout
+ * chunk harvests all windowSize of them, identical to before; a short
+ * final chunk harvests fewer, each still computed with genuine real
+ * leading context from the rolling buffer rather than fabricated/padded
+ * samples.
  */
 class FusionEngine(
     private val model: BiasCorrectionModel,
@@ -45,8 +60,10 @@ class FusionEngine(
     private var refLat: Double? = null
     private var refLon: Double? = null
 
-    private val chunkAccel = ArrayList<FloatArray>(windowSize)
-    private val chunkGyro = ArrayList<FloatArray>(windowSize)
+    // Continuous real-sample history — always exactly windowSize once
+    // filled, fed every tick regardless of mode (see class doc).
+    private val rollingWindow = ArrayDeque<FloatArray>(windowSize)
+    private var pending = 0             // new blackout samples since the last chunk resolution
     private var chunkAnchor = FusionState()
 
     private val blendSamples = maxOf(1, (blendSeconds / dt).toInt())
@@ -85,16 +102,26 @@ class FusionEngine(
         gnssSpeed: Float,
         gnssHeadingRad: Float,
     ) {
-        if (available && !wasAvailable) {
-            // GNSS just came back — fold in any partial (< windowSize)
-            // chunk still buffered so a short blackout isn't silently
+        if (rollingWindow.size >= windowSize) rollingWindow.removeFirst()
+        rollingWindow.addLast(calibratedAccel + calibratedGyro)
+
+        // The model can only ever be called with a full windowSize buffer
+        // (see class doc) — force GNSS_TRACKING behavior, real or
+        // simulated blackout ignored, until there's enough real history to
+        // safely resolve a chunk. Only matters for the first ~5s right
+        // after calibration completes.
+        val effectiveAvailable = available || rollingWindow.size < windowSize
+
+        if (effectiveAvailable && !wasAvailable) {
+            // GNSS just came back — fold in any pending (< windowSize)
+            // blackout samples so a short blackout isn't silently
             // dropped, *then* snapshot state as the BLEND ramp's start.
-            flushPartialChunk()
+            flushPending()
             blendRemaining = blendSamples
             blendFrom = state.copy()
         }
 
-        if (available) {
+        if (effectiveAvailable) {
             val xy = toLocalXY(lat, lon)
             val gnssState = FusionState(FusionMode.GNSS_TRACKING, xy[0], xy[1], gnssHeadingRad, gnssSpeed)
 
@@ -111,53 +138,54 @@ class FusionEngine(
             } else {
                 gnssState
             }
-            chunkAccel.clear(); chunkGyro.clear()
+            pending = 0
         } else {
-            if (chunkAccel.isEmpty()) chunkAnchor = state.copy()
+            if (pending == 0) chunkAnchor = state.copy()
             blendRemaining = 0
-
-            chunkAccel.add(calibratedAccel)
-            chunkGyro.add(calibratedGyro)
+            pending++
 
             // Cheap live extrapolation between chunk boundaries — see class
             // doc. Uses the anchor's own speed/heading, not the network:
             // this is a display-only convenience, not part of the accuracy
             // path.
-            val elapsed = chunkAccel.size * dt
+            val elapsed = pending * dt
             val extrapX = chunkAnchor.x + chunkAnchor.speed * cos(chunkAnchor.heading.toDouble()).toFloat() * elapsed
             val extrapY = chunkAnchor.y + chunkAnchor.speed * sin(chunkAnchor.heading.toDouble()).toFloat() * elapsed
             state = FusionState(FusionMode.BLACKOUT, extrapX, extrapY, chunkAnchor.heading, chunkAnchor.speed)
 
-            if (chunkAccel.size >= windowSize) {
-                runChunk()
-            }
+            if (pending >= windowSize) resolveChunk()
         }
-        wasAvailable = available
+        wasAvailable = effectiveAvailable
     }
 
-    /** Call if a blackout ends (GNSS returns) with a partial (< windowSize)
-     * chunk still buffered — folds it in before the BLEND ramp starts, so
-     * a short blackout isn't silently dropped. */
-    private fun flushPartialChunk() {
-        if (chunkAccel.isNotEmpty()) runChunk()
+    /** Call if a blackout ends (GNSS returns) with pending (< windowSize)
+     * samples still unresolved — folds them in before the BLEND ramp
+     * starts, so a short blackout isn't silently dropped. */
+    private fun flushPending() {
+        if (pending > 0) resolveChunk()
     }
 
-    /** One discrete BLACKOUT chunk: full-window model call, whole
-     * correction sequence integrated together from chunkAnchor — see
-     * fusion.py's run_fusion for the exact same logic and why it matters
-     * (position-invariance across the network's own training window). */
-    private fun runChunk() {
-        val n = chunkAccel.size
-        val window = Array(n) { i -> chunkAccel[i] + chunkGyro[i] }  // (T, 6): [ax,ay,az,gx,gy,gz]
-        val corrections = model.predict(window)  // (T, 2): [delta_v, delta_theta]
+    /**
+     * Resolves `pending` new blackout samples: one model call on the
+     * rolling buffer's current windowSize real samples (always full —
+     * see class doc for why that matters), harvesting only the last
+     * `pending` corrections (the ones with real leading context from this
+     * chunk and whatever real data preceded it) and integrating them
+     * together from chunkAnchor — same "whole-window, not last-position"
+     * reasoning as the offline fusion.py's run_fusion.
+     */
+    private fun resolveChunk() {
+        val window = rollingWindow.toTypedArray()  // always windowSize once filled
+        val corrections = model.predict(window)     // (windowSize, 2)
+        val startIdx = window.size - pending
 
         var v = chunkAnchor.speed
         var th = chunkAnchor.heading
         var x = chunkAnchor.x
         var y = chunkAnchor.y
-        for (i in 0 until n) {
-            val forwardAccel = chunkAccel[i][0] + corrections[i][0]
-            val yawRate = chunkGyro[i][2] + corrections[i][1]
+        for (i in startIdx until window.size) {
+            val forwardAccel = window[i][0] + corrections[i][0]
+            val yawRate = window[i][5] + corrections[i][1]
             v = (v + forwardAccel * dt).coerceIn(vClampMin, vClampMax)
             th = wrapAngle(th + yawRate * dt)
             x += v * cos(th.toDouble()).toFloat() * dt
@@ -165,13 +193,14 @@ class FusionEngine(
         }
         state = FusionState(FusionMode.BLACKOUT, x, y, th, v)
         chunkAnchor = state.copy()
-        chunkAccel.clear(); chunkGyro.clear()
+        pending = 0
     }
 
     fun reset() {
         state = FusionState()
         refLat = null; refLon = null
-        chunkAccel.clear(); chunkGyro.clear()
+        rollingWindow.clear()
+        pending = 0
         blendRemaining = 0
         wasAvailable = true
     }
