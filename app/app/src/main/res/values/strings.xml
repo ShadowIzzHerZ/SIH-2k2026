@@ -12,4 +12,9 @@
     <string name="legend_blackout">Blackout</string>
     <string name="legend_blend">Reconnect</string>
     <string name="legend_matched">Map-matched</string>
+    <string name="calib_leveling">leveling — hold the phone still</string>
+    <string name="calib_leveling_waiting">leveling — still moving, waiting for the phone to settle</string>
+    <string name="calib_yaw_replay">yaw alignment: collecting confident samples from the replay…</string>
+    <string name="calib_yaw_live">yaw alignment: collecting confident samples — drive in a straight line with GPS</string>
+    <string name="calib_rough">rough calibration</string>
 </resources>
