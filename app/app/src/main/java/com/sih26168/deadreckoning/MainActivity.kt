@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private var calibration = CalibrationManager()
     private lateinit var model: BiasCorrectionModel
     private lateinit var fusion: FusionEngine
+    private lateinit var mapMatcher: MapMatcher
 
     private lateinit var modeText: TextView
     private lateinit var detailText: TextView
@@ -72,6 +73,7 @@ class MainActivity : AppCompatActivity() {
         replayData = ReplayDataSource(this)
         model = BiasCorrectionModel(this)
         fusion = FusionEngine(model)
+        mapMatcher = MapMatcher(RoadGraph(this))
 
         // blackoutToggle/replayToggle .isChecked read live in tick() — no listeners needed.
 
@@ -126,6 +128,7 @@ class MainActivity : AppCompatActivity() {
             // instead of producing a nonsensical blend of the two.
             calibration = CalibrationManager()
             fusion.reset()
+            mapMatcher.reset()
             trajectoryView.clear()
             replayIndex = 0
             wasReplaying = usingReplay
@@ -170,6 +173,22 @@ class MainActivity : AppCompatActivity() {
 
         val s = fusion.state
         trajectoryView.addPoint(s.x, s.y, s.mode)
+
+        // Map-match the fused position onto the bundled road graph — same
+        // idea as src/evaluate_with_mapmatching.py's before/after
+        // comparison, live here instead of an offline batch report. Most
+        // useful (and most likely to actually find a nearby road) during
+        // BLACKOUT/BLEND, where the raw fused estimate can drift off the
+        // true road; matching every mode too so the green overlay is a
+        // continuous, comparable trail rather than appearing/disappearing.
+        fusion.localXYToLatLon(s.x, s.y)?.let { (lat, lon) ->
+            mapMatcher.match(lat, lon)?.let { m ->
+                fusion.latLonToLocalXY(m.lat, m.lon)?.let { xy ->
+                    trajectoryView.addMatchedPoint(xy[0], xy[1])
+                }
+            }
+        }
+
         modeText.text = when (s.mode) {
             FusionMode.GNSS_TRACKING -> getString(R.string.status_gnss)
             FusionMode.BLACKOUT -> getString(R.string.status_blackout)

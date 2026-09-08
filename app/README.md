@@ -12,7 +12,24 @@ This is the on-device counterpart to `src/simulate_blackout.py` — same
 state machine, same discrete 5s-chunk BLACKOUT design, same reconnect
 BLEND — but driven by live sensor/location ticks instead of a recorded
 trace, with a **"Simulate GNSS blackout" toggle** for demoing on stage
-without needing to physically walk into a real tunnel on cue.
+without needing to physically walk into a real tunnel on cue. A
+**"Replay real recorded drive" toggle** swaps the live sensor/GPS data
+source for a real, previously-validated comma2k19 segment bundled as an
+asset (the one that measured 2.9% drift in the offline evaluation) — for
+demoing indoors with no GPS reception and no room to drive, using real
+data instead of idealized synthetic motion. It's also how the app's own
+bugs were actually found and fixed on a real device (see FusionEngine.kt's
+docstring).
+
+Map-matching (`RoadGraph.kt` + `MapMatcher.kt`) is wired in too — a real,
+working matcher against a pre-fetched OSM road extract for the replay
+route's area, snapping the live fused position onto roads (green overlay)
+with the same non-holonomic/continuity reasoning as `src/map_matching.py`
+(not naive nearest-point snapping). Verified live: during a simulated
+blackout, the raw fused trail (red) visibly drifts off the road while the
+map-matched trail (green) stays snapped to it — the same before/after
+improvement `src/evaluate_with_mapmatching.py` reports offline, live here
+instead.
 
 ## Architecture
 
@@ -24,7 +41,10 @@ without needing to physically walk into a real tunnel on cue.
 | [app/src/main/java/.../LocationReader.kt](app/src/main/java/com/sih26168/deadreckoning/LocationReader.kt) | Wraps LocationManager — no Play Services/API key needed. Uses `Location.getSpeed()`/`getBearing()` (the platform's own Doppler-derived values), not position-differencing — see `fusion.py`'s docstring for why that distinction mattered a lot in testing |
 | [app/src/main/java/.../BiasCorrectionModel.kt](app/src/main/java/com/sih26168/deadreckoning/BiasCorrectionModel.kt) | ONNX Runtime wrapper for the exported network |
 | [app/src/main/java/.../FusionEngine.kt](app/src/main/java/com/sih26168/deadreckoning/FusionEngine.kt) | The live GNSS↔INS state machine — same design as the fixed `src/fusion.py` |
-| [app/src/main/java/.../TrajectoryView.kt](app/src/main/java/com/sih26168/deadreckoning/TrajectoryView.kt) | Live trajectory trail, colored by mode — same visual language as `results/blackout_demo_*.png` |
+| [app/src/main/java/.../TrajectoryView.kt](app/src/main/java/com/sih26168/deadreckoning/TrajectoryView.kt) | Live trajectory trail, colored by mode — same visual language as `results/blackout_demo_*.png` — plus a green map-matched overlay |
+| [app/src/main/java/.../ReplayDataSource.kt](app/src/main/java/com/sih26168/deadreckoning/ReplayDataSource.kt) | Reads the bundled real-drive replay asset (`assets/replay_drive.json`) |
+| [app/src/main/java/.../RoadGraph.kt](app/src/main/java/com/sih26168/deadreckoning/RoadGraph.kt) | Loads the bundled pre-fetched OSM road extract (`assets/road_graph.json`) |
+| [app/src/main/java/.../MapMatcher.kt](app/src/main/java/com/sih26168/deadreckoning/MapMatcher.kt) | Live sequential map-matcher — snaps the fused position onto RoadGraph with the same non-holonomic/continuity reasoning as `src/map_matching.py`, simplified for online (not whole-path) matching |
 | [app/src/main/java/.../MainActivity.kt](app/src/main/java/com/sih26168/deadreckoning/MainActivity.kt) | Wires it all together, 10Hz tick loop |
 
 The app module's `syncModel` Gradle task copies `checkpoints/dead_reckoning_model.onnx`
@@ -67,11 +87,20 @@ On first launch:
 
 ## Known limitations / not yet in the app
 
-- **Map-matching** (`src/map_matching.py`) is not wired in — the app shows
-  the raw fused trajectory, not snapped to roads. Would need an offline
-  OSM extract bundled for the demo venue (network map-matching mid-demo
-  isn't reliable) — a real next step, not started.
-- Not tested on a physical device yet — built and verified structurally
-  (correct manifest/permissions/assets, valid signed debug APK) but the
-  live sensor/calibration/UI flow needs a real run to confirm.
+- **The bundled road graph only covers the replay route's area** (a ~1.8km
+  radius around it, fetched offline via `src/map_matching.py`'s own
+  `download_road_graph`). Live driving anywhere else won't find a nearby
+  road to match onto (`MapMatcher.match` returns null — the raw fused
+  trajectory still renders, just no green overlay). For a real demo venue,
+  re-fetch a road_graph.json for that specific area the same way (see the
+  inline snippet in RoadGraph.kt's usage, or ask to regenerate it).
+- **MapMatcher is a simplified greedy sequential matcher**, not a full
+  HMM/Viterbi port of `map_matching.py`'s DistanceMatcher — see
+  MapMatcher.kt's docstring for why (online matching can't score whole
+  future paths the way the offline evaluator can) and what's actually
+  implemented (distance + continuity/non-holonomic scoring, one point at a
+  time).
 - No persistence — closing the app loses the current trajectory.
+- Real (non-replay) live driving hasn't been tested — verified live only
+  via the replay data source so far (real GPS/IMU wiring is the same code
+  path, just unexercised end-to-end outdoors).
