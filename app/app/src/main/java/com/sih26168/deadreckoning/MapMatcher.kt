@@ -1,6 +1,9 @@
 package com.sih26168.deadreckoning
 
+import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.sin
 
 data class MapMatchResult(val lat: Double, val lon: Double, val edgeIdx: Int, val t: Double)
 
@@ -30,6 +33,18 @@ data class MapMatchResult(val lat: Double, val lon: Double, val edgeIdx: Int, va
  *     map_matching.py's avoid_goingback and osmnx_graph_to_inmem_map's
  *     directed-edges-only structure (a one-way street's reverse direction
  *     genuinely isn't a candidate edge at all, not just a penalized one).
+ *   - heading consistency: penalty for candidate edges whose own direction
+ *     (node `from` -> `to`) points far from the vehicle's current fused
+ *     heading. Added after a real bug found on a real device: at a
+ *     junction/roundabout, several short edges can all sit within
+ *     maxDistM with similar distance+continuity scores, and without this
+ *     term the matcher would happily snap onto a perpendicular or
+ *     doubling-back loop edge just because it was a few metres closer —
+ *     visibly "going backwards" on the map relative to the vehicle's
+ *     actual direction of travel. Continuity alone doesn't catch this:
+ *     it only checks whether edges are topologically connected, not
+ *     whether the *direction* of travel implied by hopping onto one makes
+ *     any sense.
  *
  * Linear scan over all edges every call — fine for a graph this size
  * (~10k edges, matched at 10Hz is ~100k point-to-segment distance checks/
@@ -73,10 +88,20 @@ class MapMatcher(private val graph: RoadGraph, private val maxDistM: Double = 60
         return Triple(dist, t, doubleArrayOf(projX, projY))
     }
 
+    private fun angleDiff(a: Double, b: Double): Double {
+        var d = a - b
+        while (d > Math.PI) d -= 2 * Math.PI
+        while (d < -Math.PI) d += 2 * Math.PI
+        return abs(d)
+    }
+
     /** Snap one live (lat, lon) onto the graph, or null if nothing is
      * within maxDistM (e.g. the bundled extract doesn't cover this area —
-     * a real deployment would need the demo route's own extract). */
-    fun match(lat: Double, lon: Double): MapMatchResult? {
+     * a real deployment would need the demo route's own extract).
+     * headingRad is the vehicle's current fused heading (radians, 0=east,
+     * ccw+, same convention as FusionState.heading) — see class doc for
+     * why this matters, not just distance+continuity. */
+    fun match(lat: Double, lon: Double, headingRad: Float): MapMatchResult? {
         val p = toXY(lat, lon)
         var bestIdx = -1
         var bestScore = Double.MAX_VALUE
@@ -90,6 +115,11 @@ class MapMatcher(private val graph: RoadGraph, private val maxDistM: Double = 60
             if (dist > maxDistM) continue
 
             var cost = dist
+
+            val edgeHeading = atan2(b[1] - a[1], b[0] - a[0])
+            val misalignment = angleDiff(edgeHeading, headingRad.toDouble())  // 0..pi
+            cost += 12.0 * misalignment
+
             if (lastEdgeIdx >= 0) {
                 when {
                     i == lastEdgeIdx && t < lastT -> cost += 15.0  // backward on the same edge — non-holonomic penalty

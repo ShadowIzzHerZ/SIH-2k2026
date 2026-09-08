@@ -167,6 +167,8 @@
         android:layout_height="wrap_content"
         android:layout_marginEnd="16dp"
         android:contentDescription="@string/recenter"
+        app:backgroundTint="@color/brand_accent"
+        app:tint="@android:color/white"
         app:srcCompat="@drawable/ic_recenter"
         app:layout_constraintBottom_toTopOf="@id/controlsCard"
         app:layout_constraintEnd_toEndOf="parent"
