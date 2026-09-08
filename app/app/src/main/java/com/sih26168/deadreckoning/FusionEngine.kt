@@ -67,7 +67,7 @@ data class FusionState(
  * exactly this behavior (hold position, don't drift) is correct.
  */
 class FusionEngine(
-    private val model: BiasCorrectionModel,
+    private val model: Predictor,
     private val windowSize: Int = 50,
     private val dt: Float = 0.1f,
     private val blendSeconds: Float = 2.0f,

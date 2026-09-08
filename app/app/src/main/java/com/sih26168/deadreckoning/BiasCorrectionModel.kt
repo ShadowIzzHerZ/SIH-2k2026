@@ -7,6 +7,16 @@ import android.content.Context
 import java.nio.FloatBuffer
 
 /**
+ * FusionEngine's only real dependency on BiasCorrectionModel — pulled out
+ * so a plain JVM unit test (no device, no ONNX runtime, no Android
+ * Context) can exercise FusionEngine's actual integration/ZUPT logic
+ * against a fake Predictor instead. See FusionEngineTest.
+ */
+interface Predictor {
+    fun predict(window: Array<FloatArray>): Array<FloatArray>
+}
+
+/**
  * Loads and runs the exported BiasCorrectionNet (checkpoints/
  * dead_reckoning_model.onnx, bundled as an asset by the app module's
  * syncModel Gradle task) via ONNX Runtime Mobile.
@@ -20,7 +30,7 @@ import java.nio.FloatBuffer
  * whatever's fed in; the ONNX graph itself was exported with a fixed
  * window_size (see export_onnx.py), matching FusionEngine's chunking.
  */
-class BiasCorrectionModel(context: Context, assetName: String = "dead_reckoning_model.onnx") {
+class BiasCorrectionModel(context: Context, assetName: String = "dead_reckoning_model.onnx") : Predictor {
 
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession
@@ -34,7 +44,7 @@ class BiasCorrectionModel(context: Context, assetName: String = "dead_reckoning_
      * window: T samples of [ax, ay, az, gx, gy, gz] (calibrated, vehicle
      * frame). Returns T samples of [delta_v, delta_theta].
      */
-    fun predict(window: Array<FloatArray>): Array<FloatArray> {
+    override fun predict(window: Array<FloatArray>): Array<FloatArray> {
         val t = window.size
         val flat = FloatArray(t * 6)
         for (i in 0 until t) {
