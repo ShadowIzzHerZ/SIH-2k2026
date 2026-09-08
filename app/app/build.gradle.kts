@@ -59,8 +59,13 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
-    // On-device inference for the exported dead-reckoning network.
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
+    // On-device inference for the exported dead-reckoning network. Pinned
+    // to a recent release (not the literal latest) specifically because
+    // 1.18.0's bundled libonnxruntime.so/libonnxruntime4j_jni.so aren't
+    // 16KB-page-size aligned (confirmed live: a real-device "Android app
+    // compatibility" warning) — newer NDK toolchains build 16KB-aligned by
+    // default, which a sufficiently recent release should pick up.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.2")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 

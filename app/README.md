@@ -123,13 +123,6 @@ On first launch:
   hits this since it never has stale prefs to begin with — but if tiles
   ever show as a gray checkerboard on a dev device, uninstall and
   reinstall clean before assuming it's a real bug.
-- **The bundled ONNX Runtime native libraries (`libonnxruntime.so`,
-  `libonnxruntime4j_jni.so`) aren't 16KB-page-size aligned** — surfaced as
-  a system "Android app compatibility" warning dialog on a real device
-  (debug builds only). Doesn't block anything on current devices, but a
-  future 16KB-page-only device could fail to load the native library
-  entirely. Fix is upstream (a newer `onnxruntime-android` release built
-  16KB-aligned) — not something to patch locally.
 - No persistence — closing the app loses the current trajectory.
 - Verified live with both the replay data source and real live GPS
   (walking, not driving) — a real driving test hasn't been done yet.
