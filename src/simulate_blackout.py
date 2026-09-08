@@ -32,7 +32,7 @@ import numpy as np
 import torch
 import yaml
 
-from src.data.io_vnbd_loader import ImuSequence, latlon_to_local_xy, load_sequence
+from src.data.io_vnbd_loader import ImuSequence, compass_deg_to_xy_unit, latlon_to_local_xy, load_sequence
 from src.data.windowing import calibrate_sequence, resample_uniform
 from src.fusion import FusionMode, blackout_drift_pct, reconnect_jump_m, run_fusion
 from src.models.bias_correction_net import BiasCorrectionNet
@@ -205,6 +205,18 @@ def main():
           f"= {blackout_start * dt:.0f}s to {blackout_end * dt:.0f}s "
           f"({args.blackout_duration_s:.0f}s) of a {n * dt:.0f}s trace")
 
+    # GPS-chip-reported speed/course, NOT derived from differencing xy —
+    # see fusion.py's run_fusion docstring for why that matters a lot at
+    # low speed specifically (confirmed on this exact kind of trace: a
+    # 103 m/s spike from position noise alone at ~3 m/s real speed).
+    gnss_speed = gnss_heading = None
+    if seq.speed_gt is not None and seq.heading_gt is not None:
+        gnss_speed = seq.speed_gt.astype(np.float64)
+        unit = compass_deg_to_xy_unit(seq.heading_gt)
+        gnss_heading = np.arctan2(unit[:, 1], unit[:, 0])
+    else:
+        print("[warn] no speed_gt/heading_gt on this trace — falling back to noisy position-diff seeding")
+
     model = BiasCorrectionNet(
         input_channels=cfg["model"]["input_channels"], cnn_channels=cfg["model"]["cnn_channels"],
         cnn_kernel_size=cfg["model"]["cnn_kernel_size"], gru_hidden=cfg["model"]["gru_hidden"],
@@ -217,6 +229,7 @@ def main():
     result = run_fusion(
         seq.accel, seq.gyro, xy, gnss_available, dt, model,
         window_size=cfg["data"]["window_size"], device=device, blend_seconds=args.blend_seconds,
+        gnss_speed=gnss_speed, gnss_heading=gnss_heading,
     )
 
     drift = blackout_drift_pct(result, xy, gnss_available)

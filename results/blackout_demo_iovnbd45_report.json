@@ -3,7 +3,7 @@
   "trace_duration_s": 2567.4,
   "blackout_start_s": 60.0,
   "blackout_duration_s": 45.0,
-  "blackout_drift_pct": 259.25062979641376,
+  "blackout_drift_pct": 234.04109398727448,
   "drift_target_pct": 10.0,
   "under_target": false,
   "reconnect_jump_m": 0.0
