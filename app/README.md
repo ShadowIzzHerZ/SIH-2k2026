@@ -99,19 +99,28 @@ On first launch:
 
 ## Known limitations
 
-- **The bundled road graph only covers the replay route's area** (a ~1.8km
-  radius around it, fetched offline via `src/map_matching.py`'s own
-  `download_road_graph`). Live driving anywhere else won't find a nearby
-  road to match onto (`MapMatcher.match` returns null — the raw fused
-  trajectory still renders, just no green overlay). For a real demo venue,
-  re-fetch a road_graph.json for that specific area the same way (see the
-  inline snippet in RoadGraph.kt's usage, or ask to regenerate it).
+- **The bundled road graph covers two areas** — the comma2k19 replay
+  route (California) and wherever real live testing happened (currently
+  Jalandhar, Punjab — both fetched offline via `src/map_matching.py`'s own
+  `download_road_graph` and merged into one `road_graph.json`, ~460KB).
+  Live driving/testing anywhere else won't find a nearby road to match
+  onto (`MapMatcher.match` returns null — the raw fused trajectory still
+  renders, just no green overlay). For a real demo venue, fetch and merge
+  in a road_graph.json for that specific area the same way (see git
+  history for the merge script, or ask to regenerate it).
 - **MapMatcher is a simplified greedy sequential matcher**, not a full
   HMM/Viterbi port of `map_matching.py`'s DistanceMatcher — see
   MapMatcher.kt's docstring for why (online matching can't score whole
   future paths the way the offline evaluator can) and what's actually
-  implemented (distance + continuity/non-holonomic scoring, one point at a
-  time).
+  implemented (distance + continuity/non-holonomic + heading-consistency
+  scoring, one point at a time). The heading term was added after a real
+  bug found on a real device: at a junction/roundabout, several short
+  edges can sit within maxDistM with similar distance+continuity scores,
+  and without checking whether a candidate edge's own direction is
+  anywhere close to the vehicle's current heading, the matcher would snap
+  onto a perpendicular or backward-looping edge just because it was a few
+  metres closer — visibly "going backwards" relative to the vehicle's
+  actual direction of travel.
 - **The map needs network access** to fetch OSM tiles (dead-reckoning
   itself stays fully offline — only the visual background needs a
   connection). A real dev-time gotcha, fixed but worth knowing: stale

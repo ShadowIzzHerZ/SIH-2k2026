@@ -207,7 +207,7 @@ class MainActivity : AppCompatActivity() {
             // Map-match the fused position onto the bundled road graph —
             // same idea as src/evaluate_with_mapmatching.py's before/after
             // comparison, live here instead of an offline batch report.
-            mapMatcher.match(lat, lon)?.let { m ->
+            mapMatcher.match(lat, lon, s.heading)?.let { m ->
                 roadMapView.addMatchedPoint(m.lat, m.lon)
             }
         }
@@ -219,7 +219,7 @@ class MainActivity : AppCompatActivity() {
         }
         modeText.text = statusText
         setStatusDotColor(dotColor)
-        detailText.text = "speed: ${"%.1f".format(s.speed)} m/s  |  heading: ${Math.toDegrees(s.heading.toDouble()).roundToInt()}°" +
+        detailText.text = "speed: ${"%.0f".format(s.speed * 3.6f)} km/h  |  heading: ${Math.toDegrees(s.heading.toDouble()).roundToInt()}°" +
             (if (usingReplay) "  |  [REPLAY]" else "") +
             (if (demoBlackout) "  |  [SIMULATED BLACKOUT]" else "")
 
