@@ -43,14 +43,29 @@
             android:textSize="16sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/modeText"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="@string/status_calibrating"
-            android:textColor="#1a202c"
-            android:textSize="15sp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <View
+                android:id="@+id/statusDot"
+                android:layout_width="10dp"
+                android:layout_height="10dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/status_dot" />
+
+            <TextView
+                android:id="@+id/modeText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/status_calibrating"
+                android:textColor="#1a202c"
+                android:textSize="15sp" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/detailText"
@@ -59,6 +74,48 @@
             android:layout_marginTop="2dp"
             android:textColor="#4a5568"
             android:textSize="12sp" />
+
+        <ProgressBar
+            android:id="@+id/calibrationProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:indeterminate="false"
+            android:max="100"
+            android:progressTint="#2563eb" />
+
+        <!-- Legend — appears once calibration finishes and the map starts
+             drawing, so a judge glancing at the screen doesn't need it
+             explained out loud. -->
+        <LinearLayout
+            android:id="@+id/legendRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <LinearLayout style="@style/LegendItem">
+                <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_gnss" />
+                <TextView style="@style/LegendLabel" android:text="@string/legend_gnss" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/LegendItem">
+                <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_blackout" />
+                <TextView style="@style/LegendLabel" android:text="@string/legend_blackout" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/LegendItem">
+                <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_blend" />
+                <TextView style="@style/LegendLabel" android:text="@string/legend_blend" />
+            </LinearLayout>
+
+            <LinearLayout style="@style/LegendItem">
+                <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_matched" />
+                <TextView style="@style/LegendLabel" android:text="@string/legend_matched" />
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Floating toggle card over the map, bottom-anchored. -->
