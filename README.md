@@ -5,8 +5,11 @@ alive through GPS blackouts (tunnels, underground parking, urban canyons)
 using phone IMU (accelerometer + gyroscope) and a physics-informed learned
 bias-correction network, trained on [IO-VNBD](https://github.com/onyekpeu/IO-VNBD).
 
-See `sih.md` (on the Desktop, one level up) for the full hackathon strategy
-doc this project implements the ML component of.
+See [docs/sih.md](docs/sih.md) for the full hackathon strategy doc this
+project implements the ML component of, and
+[docs/understanding.md](docs/understanding.md) for a judge-facing
+explainer of every component, the real results, and the bugs found and
+fixed along the way.
 
 ## Results
 
@@ -83,7 +86,14 @@ distance travelled — not a proxy.
 | [tests/test_pipeline_smoke.py](tests/test_pipeline_smoke.py) | Synthetic-data sanity check for the integrator/model/train loop |
 | [tests/test_fusion.py](tests/test_fusion.py) | Synthetic sanity checks for `fusion.py`'s state machine (GNSS passthrough, blackout reconstruction, no-jump reconnect) |
 | [tests/test_map_matching.py](tests/test_map_matching.py) | Validates the map-matcher against a real road segment with a known-answer synthetic-drift-recovery check (needs network access) |
+| [tests/test_non_holonomic_matching.py](tests/test_non_holonomic_matching.py) | Checks the non-holonomic constraints specifically (no wrong-way matching, no backward teleport on a noisy sample) against a small synthetic road — no network needed |
 | [tests/test_comma2k19_loader.py](tests/test_comma2k19_loader.py) | Sanity-checks the comma2k19 loader against the real demo split (needs it downloaded first) |
+
+Generated artifacts (trained checkpoints, eval reports) have their own
+index rather than being described file-by-file here:
+[checkpoints/README.md](checkpoints/README.md),
+[results/README.md](results/README.md). The Android app is a separate
+subproject — see [app/README.md](app/README.md).
 
 ## Setup
 

@@ -2,7 +2,7 @@
 
 This is where your team's own sensor-logging recordings go (see the
 campus data-collection protocol discussed in the project chat / can be
-added to `sih.md` §7.5). This is separate from `data/IO-VNBD/` — that's
+added to `docs/sih.md` §7.5). This is separate from `data/IO-VNBD/` — that's
 the public benchmark dataset; this folder is your own real-world runs on
 your actual demo phone/vehicle/route.
 
