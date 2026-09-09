@@ -1,0 +1,64 @@
+# ==============================================================================
+# SIH 2026: Nginx Reverse Proxy Configuration (WebSocket + SSL)
+# Location: /etc/nginx/sites-available/sih-backend
+# Symlink to: /etc/nginx/sites-enabled/
+# ==============================================================================
+
+# Rate limiting zone for REST endpoints (protects against flood/DDoS)
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=50r/s;
+
+# Upstream pool pointing to FastAPI uvicorn container/host
+upstream sih_backend_cluster {
+    server 127.0.0.1:8000;
+    keepalive 64;
+}
+
+server {
+    listen 80;
+    server_name your-domain.com www.your-domain.com; # Replace with your domain or VPS IP
+
+    # Redirect all HTTP to HTTPS (certbot will automate this)
+    # return 301 https://$host$request_uri;
+
+    # Maximum file upload size (if uploading calibration logs)
+    client_max_body_size 20M;
+
+    # 1. Real-Time WebSocket 10Hz Dead Reckoning Stream
+    location /ws/ {
+        proxy_pass http://sih_backend_cluster;
+        proxy_http_version 1.1;
+
+        # WebSocket Protocol Upgrade Headers
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Standard Proxy Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Crucial: Disable Proxy Buffering to prevent 100ms lag in 10Hz telemetry
+        proxy_buffering off;
+        proxy_cache off;
+
+        # Keep persistent WebSocket connections alive for 24 hours
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+
+    # 2. REST Endpoints, Dashboard UI, and OpenAPI Docs
+    location / {
+        proxy_pass http://sih_backend_cluster;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Enable gzip compression for HTML dashboard and JSON responses
+        gzip on;
+        gzip_types text/plain text/css application/json application/javascript text/xml;
+    }
+}

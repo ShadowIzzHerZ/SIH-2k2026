@@ -93,7 +93,9 @@ Generated artifacts (trained checkpoints, eval reports) have their own
 index rather than being described file-by-file here:
 [checkpoints/README.md](checkpoints/README.md),
 [results/README.md](results/README.md). The Android app is a separate
-subproject — see [app/README.md](app/README.md).
+subproject — see [app/README.md](app/README.md). There's also a
+standalone cloud backend — see [backend/README.md](backend/README.md)
+and [Backend](#backend) below.
 
 ## Setup
 
@@ -123,6 +125,39 @@ for i in range(3):
                      repo_type='dataset', local_dir='data/comma2k19_demo')
 "
 ```
+
+## Backend
+
+[backend/](backend/) is a standalone FastAPI cloud service (built
+separately, by a teammate — original repo:
+[manishpathak2407-bot/Sih-Backend](https://github.com/manishpathak2407-bot/Sih-Backend))
+brought into this repo so the whole team's submission lives in one
+place. It's a genuinely different technical approach from the rest of
+this repo — a classical **9-DOF Extended Kalman Filter** with
+Zero-Velocity Updates and pedestrian step-counting, deliberately
+**without** any ML component — rather than the physics+learned-residual
+network `src/` trains and `app/` runs on-device. It ingests live IMU
+data over WebSocket at 10Hz, with JWT auth, NTP clock-sync, a
+starvation-free priority queue for backlog recovery, Redis/in-memory
+caching, and TimescaleDB/SQLite persistence, plus a built-in browser
+dashboard. See [backend/README.md](backend/README.md) and
+[backend/our_project.md](backend/our_project.md) for the full
+architecture.
+
+**Honest current state**: brought into this repo and verified to
+actually boot — `pip install -r backend/requirements.txt`, then
+`python -m uvicorn app.main:app` starts cleanly, correctly falls back to
+an in-memory cache when Redis isn't running (confirmed via `/health`
+returning real JSON), exactly as its own docs describe. **Not yet wired
+to the Android app** — `app/` has no networking client for it, and the
+app's own on-device pipeline (calibration → strapdown INS →
+BiasCorrectionNet → GNSS/INS fusion → map-matching) is fully
+self-contained and doesn't depend on this service. Whether/how to wire
+them together (the backend's own README already documents an
+"Integration Contract for App Dev Team" — a WebSocket protocol it
+expects a mobile client to speak) is a deliberate follow-up decision,
+not done here to avoid destabilizing the already-verified live app this
+close to the deadline.
 
 ## Status
 

@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: sih_backend_app
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY:-change-me-generate-with-openssl-rand-hex-32}
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@timescaledb:5432/sih_db
+      - IMU_SAMPLING_RATE_HZ=10.0
+      - BACKLOG_CHUNK_SIZE=20
+      - MAX_QUEUE_SIZE=50000
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sih_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: sih_redis_cache
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    restart: unless-stopped
+    networks:
+      - sih_network
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: sih_timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=sih_db
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sih_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - sih_network
+
+volumes:
+  redis_data:
+    driver: local
+  timescaledb_data:
+    driver: local
+
+networks:
+  sih_network:
+    driver: bridge

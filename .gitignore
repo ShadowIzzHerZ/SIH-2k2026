@@ -15,8 +15,10 @@ data/comma2k19_demo/
 logs/*.log
 
 # osmnx's local HTTP response cache (raw Overpass API JSON) — a convenience
-# cache, not something to version
-cache/
+# cache, not something to version. Anchored to repo root (leading /) —
+# unanchored "cache/" silently matched backend/app/cache/ too (a real
+# source module, not a cache directory) and excluded it from tracking.
+/cache/
 
 # Generated plots/large CSVs — but keep checkpoints and small eval-result
 # JSON: they're real deliverables now (a trained model + its actual numbers),
