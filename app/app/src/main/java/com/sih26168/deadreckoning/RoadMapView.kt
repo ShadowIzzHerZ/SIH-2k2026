@@ -52,6 +52,20 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
     // recenterOnLatest() (the FAB) turns following back on.
     private var following = true
 
+    // One icon per mode, built once and reused — addPoint() is called at
+    // 10Hz, and the old code built a brand-new GradientDrawable+Bitmap on
+    // every single call, never recycling the previous one. That's real GC
+    // churn (thousands of small bitmap allocations a minute on a long
+    // run), a plausible real cause of the marker occasionally not
+    // rendering/flickering on a live device — osmdroid's own draw pass can
+    // land mid-GC-pause. Building 3 fixed icons up front and just
+    // swapping between them removes the churn entirely.
+    private val modeIcons: Map<FusionMode, android.graphics.drawable.BitmapDrawable> by lazy {
+        FusionMode.entries.associateWith { mode ->
+            android.graphics.drawable.BitmapDrawable(resources, drawableToBitmap(dotDrawable(modeColor(mode))))
+        }
+    }
+
     init {
         Configuration.getInstance().load(context, PreferenceManager.getDefaultSharedPreferences(context))
         Configuration.getInstance().userAgentValue = context.packageName
@@ -79,6 +93,33 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
             false  // don't consume — osmdroid still needs the event for pan/zoom
         }
         addView(mapView)
+    }
+
+    /**
+     * Points the camera at a rough real fix before real tracking has
+     * started — calibration (leveling, then yaw alignment) can take a
+     * while during live GPS use, sometimes minutes without a strong
+     * signal, and addPoint() (the only other place that ever calls
+     * setCenter()) doesn't run until it finishes.
+     *
+     * Real bug found live: without this, the map view's camera never
+     * moves off its default center — (0, 0), Null Island, open ocean —
+     * until calibration finishes. OpenStreetMap's Mapnik style renders
+     * open ocean as a flat light-blue fill, so this looked exactly like
+     * "the map isn't loading", for as long as calibration was still
+     * running — sometimes the entire session, during live GPS testing
+     * with a weak fix. It wasn't a tile-loading failure at all: the map
+     * was correctly rendering the middle of the Atlantic, because it was
+     * never told where the phone actually is yet. Masked during replay
+     * testing because replay's calibration completes in seconds (its GPS
+     * speed is always confidently above the yaw-alignment threshold).
+     *
+     * Only acts before the real marker exists — once addPoint() takes
+     * over, this must never fight the live follow-camera/pan state.
+     */
+    fun centerOnRoughLocation(lat: Double, lon: Double) {
+        if (youAreHereMarker != null) return
+        mapView.controller.setCenter(GeoPoint(lat, lon))
     }
 
     private fun modeColor(mode: FusionMode): Int = when (mode) {
@@ -128,7 +169,7 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
             mapView.controller.setCenter(p)
         }
         youAreHereMarker?.position = p
-        youAreHereMarker?.icon = android.graphics.drawable.BitmapDrawable(resources, drawableToBitmap(dotDrawable(modeColor(mode))))
+        youAreHereMarker?.icon = modeIcons.getValue(mode)
         if (following) mapView.controller.setCenter(p)  // "follow me" camera, paused by user pan
 
         // Bound overlay count on a long-running demo — same reasoning as
