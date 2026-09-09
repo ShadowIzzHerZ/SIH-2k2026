@@ -1,0 +1,19 @@
+[Unit]
+Description=SIH 2026 10Hz Dead Reckoning Backend Service
+After=network.target redis-server.service postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/sih-backend
+EnvironmentFile=/var/www/sih-backend/.env
+ExecStart=/var/www/sih-backend/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --ws websockets
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
