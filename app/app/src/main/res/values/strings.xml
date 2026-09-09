@@ -17,4 +17,10 @@
     <string name="calib_yaw_replay">yaw alignment: collecting confident samples from the replay…</string>
     <string name="calib_yaw_live">yaw alignment: collecting confident samples — drive in a straight line with GPS</string>
     <string name="calib_rough">rough calibration</string>
+    <string name="dev_mode_label">DEVELOPER MODE</string>
+    <string name="dev_record_toggle">Record training data</string>
+    <string name="dev_share_button">Share last recording</string>
+    <string name="dev_mode_on_toast">Developer mode on — long-press again to hide</string>
+    <string name="dev_mode_off_toast">Developer mode hidden</string>
+    <string name="dev_record_blocked_replay">Turn off Replay first — recording replay data would just duplicate existing training data</string>
 </resources>
