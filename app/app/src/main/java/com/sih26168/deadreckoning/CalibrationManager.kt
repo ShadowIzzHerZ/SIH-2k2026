@@ -234,6 +234,36 @@ class CalibrationManager(
         lastYawCheckpointSize = n
     }
 
+    /**
+     * Force both stages done with an identity/zero estimate — for the
+     * hidden Developer Mode's "Skip calibration" testing control ONLY,
+     * never on the real calibration path. Real calibration deliberately
+     * waits for the phone to actually be moving above minSpeedMps (see
+     * class doc) — there's no way to make that genuinely fast without
+     * weakening the checks this class exists for, and several of them
+     * (settledness, the agreement streak) were added after real bugs a
+     * faster/looser gate would have let back in. This exists so testing
+     * the pipeline past calibration doesn't require physically walking or
+     * driving every time.
+     *
+     * Marked not-converged on whichever stage(s) it actually skipped, so
+     * the UI's existing "rough calibration" warning still fires — this is
+     * a real shortcut, not something to quietly pass off as genuine.
+     * Already-converged stages (e.g. leveling finished for real before
+     * yaw got skipped) are left alone rather than overwritten.
+     */
+    fun skipForTesting() {
+        if (rLevel == null) {
+            rLevel = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
+            levelConverged = false
+        }
+        if (!isReady) {
+            psiYaw = 0f
+            yawConverged = false
+            isReady = true
+        }
+    }
+
     /** Calibrate one raw [ax,ay,az] or [gx,gy,gz] sample — leveling-only
      * (psiYaw=0) once leveled but before yaw locks in, full calibration
      * once isReady. Returns the raw sample unchanged if not even leveled

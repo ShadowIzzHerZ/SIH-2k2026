@@ -23,4 +23,5 @@
     <string name="dev_mode_on_toast">Developer mode on — long-press again to hide</string>
     <string name="dev_mode_off_toast">Developer mode hidden</string>
     <string name="dev_record_blocked_replay">Turn off Replay first — recording replay data would just duplicate existing training data</string>
+    <string name="dev_skip_calibration_button">Skip calibration (testing)</string>
 </resources>

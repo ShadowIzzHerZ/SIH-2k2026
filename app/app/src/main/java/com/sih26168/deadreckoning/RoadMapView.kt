@@ -3,6 +3,8 @@ package com.sih26168.deadreckoning
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.os.Handler
+import android.os.Looper
 import android.preference.PreferenceManager
 import android.util.AttributeSet
 import android.widget.FrameLayout
@@ -19,6 +21,8 @@ import org.osmdroid.views.overlay.Polyline
  * map: a real "you are here" marker the user immediately understands,
  * colored by FusionMode the same way the plots already did (blue/red/
  * orange), a live-following camera, plus the map-matched (green) overlay.
+ * The marker blinks (alpha, see blinkRunnable) to read as "this is live",
+ * not a static pin — same idea as a recording indicator.
  * No API key, no Google Play Services — osmdroid is the native-Android
  * equivalent of Zen's Leaflet+OSM approach, not Google Maps.
  *
@@ -34,6 +38,28 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
 
     private val mapView: MapView
     private var youAreHereMarker: Marker? = null
+
+    // Which mode the marker is currently showing (its BRIGHT/DIM variant
+    // swaps with blinkOn — see applyIcon). Debugged live via logcat: first
+    // tried mutating the shared icon Drawable's .alpha directly, gated to
+    // only reassign `.icon =` on an actual mode change (reassigning every
+    // 10Hz tick, even to the same object, was silently resetting alpha —
+    // confirmed via a debug log: alpha correctly went 255->80 on a blink
+    // tick, but was back to 255 by the very next blink tick 550ms later
+    // with nothing in blinkRunnable itself setting it back). That gate
+    // alone wasn't enough — alpha still reset, meaning something in
+    // osmdroid's own Marker draw/position-update path resets a Drawable's
+    // alpha independent of whether `.icon =` gets reassigned. Rather than
+    // chase that further, switched to a mechanism already proven to work:
+    // `.icon =` reassignment itself is how mode-color switching already
+    // renders correctly, so the blink swaps between two fully-baked
+    // bitmaps (modeIcons / modeIconsDim) instead of mutating alpha on one.
+    private var currentIconMode: FusionMode? = null
+
+    private fun applyIcon() {
+        val mode = currentIconMode ?: return
+        youAreHereMarker?.icon = (if (blinkOn) modeIcons else modeIconsDim).getValue(mode)
+    }
 
     // Trail broken into mode-colored segments, like the old TrajectoryView's
     // per-point coloring but as connected polylines — a new segment starts
@@ -66,6 +92,17 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
         }
     }
 
+    // The blink's dim phase — a second, fully baked bitmap per mode (real
+    // semi-transparent pixel data, composited once here), not a runtime
+    // alpha mutation on modeIcons' bitmaps. See currentIconMode's doc for
+    // why: mutating Drawable.alpha directly didn't stick, something in
+    // osmdroid's own Marker draw path reset it independent of that.
+    private val modeIconsDim: Map<FusionMode, android.graphics.drawable.BitmapDrawable> by lazy {
+        FusionMode.entries.associateWith { mode ->
+            android.graphics.drawable.BitmapDrawable(resources, drawableToBitmap(dotDrawable(modeColor(mode), alpha = 80)))
+        }
+    }
+
     init {
         Configuration.getInstance().load(context, PreferenceManager.getDefaultSharedPreferences(context))
         Configuration.getInstance().userAgentValue = context.packageName
@@ -93,6 +130,33 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
             false  // don't consume — osmdroid still needs the event for pan/zoom
         }
         addView(mapView)
+        // Blink loop starts in onResume() (called right after this, as
+        // part of the normal Activity lifecycle) — declaring blinkRunnable
+        // requires mapView already assigned (see its own doc), so it can't
+        // be started from here, before that property even exists yet.
+    }
+
+    // Blinks the live marker (alpha, not a rebuilt bitmap — see modeIcons'
+    // own doc for why per-tick bitmap churn was a real bug) so it reads as
+    // "this is live" the way a recording indicator or Google Maps' own
+    // pulsing blue dot does, not just a static icon. Independent of the
+    // 10Hz position-update tick — runs on its own slower cycle, and always
+    // re-reads youAreHereMarker.icon fresh each cycle so it applies
+    // correctly no matter which mode's (shared, cached) icon happens to be
+    // showing at that moment. Declared after init{} on purpose — mapView
+    // is assigned there, and an anonymous class capturing it (blinkRunnable
+    // below) has to come after that in declaration order, or the compiler
+    // can't prove mapView is assigned yet at the capture site.
+    private val blinkIntervalMs = 550L
+    private var blinkOn = true
+    private val blinkHandler = Handler(Looper.getMainLooper())
+    private val blinkRunnable: Runnable = object : Runnable {
+        override fun run() {
+            blinkOn = !blinkOn
+            applyIcon()
+            mapView.invalidate()
+            blinkHandler.postDelayed(this, blinkIntervalMs)
+        }
     }
 
     /**
@@ -144,7 +208,10 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
         // the legend already teaches ("GPS" = blue) — this marker IS a
         // raw GPS fix, just before the app's own pipeline has anything
         // fused to show instead.
-        youAreHereMarker?.icon = modeIcons.getValue(FusionMode.GNSS_TRACKING)
+        if (currentIconMode != FusionMode.GNSS_TRACKING) {
+            currentIconMode = FusionMode.GNSS_TRACKING
+            applyIcon()
+        }
         if (following) mapView.controller.setCenter(p)
         mapView.invalidate()
     }
@@ -155,11 +222,18 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
         FusionMode.BLEND -> Color.parseColor("#f59e0b")
     }
 
-    private fun dotDrawable(colorHex: Int, sizeDp: Int = 20): GradientDrawable {
+    // alpha baked directly into the fill/stroke ARGB colors (not a
+    // post-hoc Canvas composite over the bright bitmap — that path,
+    // tried first, produced a bitmap that still rendered fully opaque
+    // once handed to Marker/BitmapDrawable, confirmed live: logcat
+    // proved the dim bitmap really was being assigned, but the on-screen
+    // pixel still sampled as the full-opacity color). Same construction
+    // path as the bright icon either way, just a translucent color in.
+    private fun dotDrawable(colorHex: Int, sizeDp: Int = 14, alpha: Int = 255): GradientDrawable {
         val d = GradientDrawable()
         d.shape = GradientDrawable.OVAL
-        d.setColor(colorHex)
-        d.setStroke(3, Color.WHITE)
+        d.setColor((colorHex and 0x00FFFFFF) or (alpha shl 24))
+        d.setStroke(2, (Color.WHITE and 0x00FFFFFF) or (alpha shl 24))
         val px = (sizeDp * resources.displayMetrics.density).toInt()
         d.setSize(px, px)
         return d
@@ -196,7 +270,10 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
             mapView.controller.setCenter(p)
         }
         youAreHereMarker?.position = p
-        youAreHereMarker?.icon = modeIcons.getValue(mode)
+        if (currentIconMode != mode) {
+            currentIconMode = mode
+            applyIcon()
+        }
         if (following) mapView.controller.setCenter(p)  // "follow me" camera, paused by user pan
 
         // Bound overlay count on a long-running demo — same reasoning as
@@ -226,6 +303,7 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
     fun clear() {
         mapView.overlays.clear()
         youAreHereMarker = null
+        currentIconMode = null
         currentSegmentMode = null
         currentSegmentPoints = ArrayList()
         currentSegmentLine = null
@@ -260,6 +338,14 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
         return bmp
     }
 
-    fun onResume() = mapView.onResume()
-    fun onPause() = mapView.onPause()
+    fun onResume() {
+        mapView.onResume()
+        blinkHandler.removeCallbacks(blinkRunnable)
+        blinkHandler.postDelayed(blinkRunnable, blinkIntervalMs)
+    }
+
+    fun onPause() {
+        mapView.onPause()
+        blinkHandler.removeCallbacks(blinkRunnable)  // don't blink (or leak the handler) while backgrounded
+    }
 }

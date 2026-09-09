@@ -176,7 +176,7 @@
                 android:layout_height="1dp"
                 android:layout_marginTop="4dp"
                 android:layout_marginBottom="4dp"
-                android:background="#e2e8f0" />
+                android:background="#40FFFFFF" />
 
             <TextView
                 android:layout_width="match_parent"
@@ -218,6 +218,18 @@
                 android:text="@string/dev_share_button"
                 android:textAllCaps="false"
                 android:visibility="gone" />
+
+            <!-- Real calibration deliberately waits for genuine motion
+                 (see CalibrationManager's class doc) — this bypasses it for
+                 testing only, never meant to speed up a real demo run. Only
+                 does anything while calibration is still in progress. -->
+            <Button
+                android:id="@+id/devSkipCalibrationButton"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/dev_skip_calibration_button"
+                android:textAllCaps="false" />
         </LinearLayout>
     </LinearLayout>
 

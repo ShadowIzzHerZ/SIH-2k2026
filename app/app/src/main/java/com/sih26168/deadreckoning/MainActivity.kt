@@ -1,6 +1,7 @@
 package com.sih26168.deadreckoning
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -71,6 +72,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var devRecordToggle: SwitchMaterial
     private lateinit var devRecordStatus: TextView
     private lateinit var devShareButton: Button
+    private lateinit var devSkipCalibrationButton: Button
     private lateinit var devRecorder: DevRecorder
     private lateinit var prefs: SharedPreferences
     private var wasReplaying = false
@@ -107,6 +109,7 @@ class MainActivity : AppCompatActivity() {
         devRecordToggle = findViewById(R.id.devRecordToggle)
         devRecordStatus = findViewById(R.id.devRecordStatus)
         devShareButton = findViewById(R.id.devShareButton)
+        devSkipCalibrationButton = findViewById(R.id.devSkipCalibrationButton)
 
         sensorReader = SensorReader(this)
         locationReader = LocationReader(this)
@@ -172,6 +175,14 @@ class MainActivity : AppCompatActivity() {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(intent, file.name))
+        }
+        devSkipCalibrationButton.setOnClickListener {
+            // Testing-only shortcut past the real (deliberately slow, see
+            // CalibrationManager's class doc) calibration wait — the next
+            // scheduled tick() picks up isReady/isLeveled on its own, no
+            // extra kick needed.
+            calibration.skipForTesting()
+            Toast.makeText(this, "Calibration skipped (testing) — not a real estimate", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -301,9 +312,14 @@ class MainActivity : AppCompatActivity() {
 
         if (legendRow.visibility != View.VISIBLE) {
             // First tick past calibration — reveal the legend, hide the
-            // progress bar, once, rather than every tick.
+            // progress bar, once, rather than every tick. Faded in rather
+            // than just flipped to VISIBLE — this is the exact moment
+            // calibration hands off to real tracking, worth reading as a
+            // deliberate transition rather than a layout pop.
             calibrationProgress.visibility = View.GONE
+            legendRow.alpha = 0f
             legendRow.visibility = View.VISIBLE
+            legendRow.animate().alpha(1f).setDuration(300L).start()
         }
 
         val calAccel = calibration.calibrate(sample.rawAccel)
@@ -357,11 +373,30 @@ class MainActivity : AppCompatActivity() {
         modeText.text = getString(R.string.status_calibrating)
         detailText.text = detail
         setStatusDotColor(calibratingColor)
-        calibrationProgress.progress = calibration.progressPercent
+        // animate=true smoothly tweens toward the new value instead of a
+        // jump-cut fill — noticeable given this gets called every 100ms
+        // tick while collecting yaw samples, where the raw percent can
+        // sit still for a while then jump a few points at once.
+        calibrationProgress.setProgress(calibration.progressPercent, true)
     }
 
+    // Tracks the dot's current color so setStatusDotColor can animate
+    // *from* it — GradientDrawable itself has no "current color" getter.
+    private var currentDotColor: Int = calibratingColor
+
     private fun setStatusDotColor(color: Int) {
-        (statusDot.background as? GradientDrawable)?.setColor(color)
+        if (color == currentDotColor) return
+        val drawable = statusDot.background as? GradientDrawable ?: return
+        // Real mode changes (GNSS<->blackout<->blend) are the whole point
+        // of this app to notice — an instant color-snap is easy to miss in
+        // a glance at the corner of the screen; a quick tween draws the
+        // eye the way the blinking map marker (RoadMapView) does.
+        ValueAnimator.ofArgb(currentDotColor, color).apply {
+            duration = 250L
+            addUpdateListener { drawable.setColor(it.animatedValue as Int) }
+            start()
+        }
+        currentDotColor = color
     }
 
     override fun onResume() {
