@@ -1,5 +1,9 @@
 package com.sih26168.deadreckoning
 
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.sqrt
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -134,6 +138,61 @@ class FusionEngineTest {
             "a vehicle genuinely cruising at ~31 m/s must not have its speed decayed toward zero " +
                 "just because the instantaneous reading looks quiet — got ${engine.state.speed} m/s",
             engine.state.speed > 20f,
+        )
+    }
+
+    private fun angleDiff(a: Float, b: Float): Float {
+        val d = atan2(sin((a - b).toDouble()), cos((a - b).toDouble()))
+        return abs(d).toFloat()
+    }
+
+    @Test
+    fun `a real turn within one chunk doesn't snap into a single-tick kink`() {
+        // Regression for a real bug found reasoning through a live report
+        // (photos of the trail visibly zigzagging at a real road
+        // junction) — see resolveChunk's doc. Between chunk boundaries,
+        // the display extrapolates in a straight line at the PREVIOUS
+        // chunk's frozen heading (the real corrected heading for the
+        // current chunk isn't known until the whole chunk resolves).
+        // Before the fix, the instant a chunk resolved, `state` snapped
+        // straight to the true endpoint — however much the heading
+        // actually changed within that chunk, in one single tick. A real
+        // turn at a junction (curving substantially within one 5s chunk)
+        // produced a visible kink every single chunk boundary.
+        val turnRateCorrection = 0.2f // rad/s
+        val engine = FusionEngine(FakePredictor(deltaV = 0f, deltaTheta = turnRateCorrection))
+        warmUpGnssTracking(engine, speed = 15f) // chunkAnchor.heading = 0 after this
+
+        val headings = mutableListOf(engine.state.heading)
+        repeat(windowSize + 10) { // one full chunk + enough ticks to see the whole catch-up finish
+            engine.tick(
+                calibratedAccel = floatArrayOf(1.0f, 0f, 0f), // clearly non-quiet — a real turn, not ZUPT
+                calibratedGyro = floatArrayOf(0f, 0f, 0.1f),  // + the 0.2 correction = 0.3 rad/s true turn rate
+                available = false,
+                lat = 0.0, lon = 0.0, gnssSpeed = 0f, gnssHeadingRad = 0f,
+            )
+            headings.add(engine.state.heading)
+        }
+
+        val maxTickDelta = headings.zipWithNext { a, b -> angleDiff(b, a) }.max()
+        // The true total turn across the chunk is ~0.3 rad/s * 5s = 1.5
+        // rad. A single-tick snap (the bug) would show ~1.5 rad in one
+        // step; spread across the blend it should be a small fraction of
+        // that — 0.5 rad is a generous bound, still far below a real snap.
+        assertTrue(
+            "a single tick's heading changed by $maxTickDelta rad — that's a snap, not a smooth catch-up " +
+                "(full headings: $headings)",
+            maxTickDelta < 0.5f,
+        )
+
+        // The blend has to actually finish and reach the true value, not
+        // just avoid the snap — final heading should be close to the real
+        // integrated turn (~1.5 rad), not stuck partway.
+        val expectedFinalHeading = 0.3f * (windowSize * 0.1f)
+        assertTrue(
+            "final heading ${engine.state.heading} should have caught up to the true turn " +
+                "($expectedFinalHeading rad) well after the blend window",
+            angleDiff(engine.state.heading, expectedFinalHeading) < 0.1f,
         )
     }
 }

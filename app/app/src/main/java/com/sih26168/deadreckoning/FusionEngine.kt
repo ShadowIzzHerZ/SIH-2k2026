@@ -95,6 +95,13 @@ class FusionEngine(
     // brisk walk (the real "holding the phone" scenario this exists for)
     // and comfortably below any real vehicle cruising speed.
     private val zuptMaxSpeed: Float = 3.0f,
+    // Visual-only catch-up duration for a chunk transition — see
+    // resolveChunk's doc for the real bug this fixes (a visible kink
+    // every 5s wherever the real path curved within a chunk). Exposed as
+    // a constructor param (not just a private constant) so tests can
+    // dial it to 0 and confirm the kink it's meant to fix actually
+    // reappears without it — see FusionEngineTest.
+    private val chunkBlendSeconds: Float = 0.5f,
 ) {
     var state = FusionState()
         private set
@@ -111,6 +118,15 @@ class FusionEngine(
     private val blendSamples = maxOf(1, (blendSeconds / dt).toInt())
     private var blendRemaining = 0
     private var blendFrom = FusionState()
+
+    // Visual-only catch-up for chunk transitions — see resolveChunk's doc
+    // for the real bug this fixes (a visible kink/"zigzag" every 5s
+    // whenever the real path curved within a chunk). Short on purpose:
+    // long enough to not look like a jump, short enough that the display
+    // is back on the true resolved path well before the next chunk.
+    private val chunkBlendSamples = maxOf(1, (chunkBlendSeconds / dt).toInt())
+    private var chunkBlendRemaining = 0
+    private var chunkBlendFrom = FusionState()
 
     private var wasAvailable = true
 
@@ -180,10 +196,32 @@ class FusionEngine(
         if (effectiveAvailable && !wasAvailable) {
             // GNSS just came back — fold in any pending (< windowSize)
             // blackout samples so a short blackout isn't silently
-            // dropped, *then* snapshot state as the BLEND ramp's start.
+            // dropped, *then* snapshot the BLEND ramp's start.
+            //
+            // From chunkAnchor, NOT state: state can be mid-way through
+            // its own short visual catch-up from the last chunk boundary
+            // right now (see resolveChunk's doc) and so isn't necessarily
+            // the true last blackout position yet — chunkAnchor always is,
+            // updated immediately inside resolveChunk regardless of how
+            // long the display takes to visually catch up to it.
             flushPending()
             blendRemaining = blendSamples
-            blendFrom = state.copy()
+            blendFrom = chunkAnchor.copy()
+            chunkBlendRemaining = 0  // superseded by the GNSS-reconnect blend starting now
+        }
+        if (!effectiveAvailable && wasAvailable) {
+            // Blackout just started fresh (from GNSS_TRACKING or BLEND) —
+            // anchor to the real current state and start clean. Explicit
+            // transition check, not just "pending == 0": pending is ALSO
+            // 0 immediately after every chunk resolution (see
+            // resolveChunk), and conflating the two used to make this
+            // line stomp chunkAnchor with a stale mid-blend display value
+            // every 5s — found writing the chunk-transition blend below,
+            // not live; see resolveChunk's doc for why this line has to
+            // be unambiguous about which case it's actually handling.
+            chunkAnchor = state.copy()
+            pending = 0
+            chunkBlendRemaining = 0
         }
 
         if (effectiveAvailable) {
@@ -205,18 +243,33 @@ class FusionEngine(
             }
             pending = 0
         } else {
-            if (pending == 0) chunkAnchor = state.copy()
             blendRemaining = 0
             pending++
 
-            // Cheap live extrapolation between chunk boundaries — see class
-            // doc. Uses the anchor's own speed/heading, not the network:
-            // this is a display-only convenience, not part of the accuracy
-            // path.
-            val elapsed = pending * dt
-            val extrapX = chunkAnchor.x + chunkAnchor.speed * cos(chunkAnchor.heading.toDouble()).toFloat() * elapsed
-            val extrapY = chunkAnchor.y + chunkAnchor.speed * sin(chunkAnchor.heading.toDouble()).toFloat() * elapsed
-            state = FusionState(FusionMode.BLACKOUT, extrapX, extrapY, chunkAnchor.heading, chunkAnchor.speed)
+            state = if (chunkBlendRemaining > 0) {
+                // Easing toward a just-resolved chunk's true endpoint —
+                // see resolveChunk's doc. chunkAnchor is already the
+                // correct (accuracy-critical) value; only what's drawn
+                // eases toward it instead of snapping.
+                val w = 1f - chunkBlendRemaining / chunkBlendSamples.toFloat()
+                chunkBlendRemaining--
+                FusionState(
+                    FusionMode.BLACKOUT,
+                    (1 - w) * chunkBlendFrom.x + w * chunkAnchor.x,
+                    (1 - w) * chunkBlendFrom.y + w * chunkAnchor.y,
+                    wrapAngle((1 - w) * chunkBlendFrom.heading + w * chunkAnchor.heading),
+                    (1 - w) * chunkBlendFrom.speed + w * chunkAnchor.speed,
+                )
+            } else {
+                // Cheap live extrapolation between chunk boundaries — see
+                // class doc. Uses the anchor's own speed/heading, not the
+                // network: a display-only convenience, not part of the
+                // accuracy path.
+                val elapsed = pending * dt
+                val extrapX = chunkAnchor.x + chunkAnchor.speed * cos(chunkAnchor.heading.toDouble()).toFloat() * elapsed
+                val extrapY = chunkAnchor.y + chunkAnchor.speed * sin(chunkAnchor.heading.toDouble()).toFloat() * elapsed
+                FusionState(FusionMode.BLACKOUT, extrapX, extrapY, chunkAnchor.heading, chunkAnchor.speed)
+            }
 
             if (pending >= windowSize) resolveChunk()
         }
@@ -238,6 +291,27 @@ class FusionEngine(
      * chunk and whatever real data preceded it) and integrating them
      * together from chunkAnchor — same "whole-window, not last-position"
      * reasoning as the offline fusion.py's run_fusion.
+     *
+     * Real bug found reasoning through a live report (a photographed
+     * "the trail zigzags/goes backwards" at a real road junction, not
+     * something reproducible from a screenshot alone): this integrates
+     * the TRUE per-sample heading smoothly, sample by sample, as it
+     * should — but only the FINAL endpoint ever used to reach `state`
+     * directly. Every tick in between (see tick()'s else-branch) instead
+     * *guesses* with a straight line at the PREVIOUS chunk's frozen
+     * heading, because the real corrected heading for this chunk isn't
+     * known until the whole chunk (and its one model call) resolves.
+     * Whenever the real path actually curves within a chunk — exactly
+     * what happens at a junction — that straight-line guess drifts
+     * further off the true path throughout the chunk, then this function
+     * used to snap `state` straight to the true endpoint: a visible kink
+     * every single chunk boundary where the road curved, at 5s intervals.
+     * Fixed by not setting `state` here at all — chunkAnchor (the only
+     * value anything accuracy-critical, including the NEXT chunk's own
+     * integration, ever reads) still becomes the true resolved endpoint
+     * immediately, but tick() eases the *displayed* state toward it over
+     * chunkBlendSeconds instead of jumping, same idea as the existing
+     * GNSS-reconnect blend.
      */
     private fun resolveChunk() {
         val window = rollingWindow.toTypedArray()  // always windowSize once filled
@@ -264,8 +338,14 @@ class FusionEngine(
             x += v * cos(th.toDouble()).toFloat() * dt
             y += v * sin(th.toDouble()).toFloat() * dt
         }
-        state = FusionState(FusionMode.BLACKOUT, x, y, th, v)
-        chunkAnchor = state.copy()
+        val resolved = FusionState(FusionMode.BLACKOUT, x, y, th, v)
+
+        // `state` right now is wherever the last tick's straight-line
+        // guess landed (see class/tick() docs) — ease the display from
+        // there toward the true resolved endpoint instead of snapping.
+        chunkBlendFrom = state.copy()
+        chunkAnchor = resolved
+        chunkBlendRemaining = chunkBlendSamples
         pending = 0
     }
 
@@ -300,6 +380,8 @@ class FusionEngine(
         rollingWindow.clear()
         pending = 0
         blendRemaining = 0
+        chunkBlendRemaining = 0
+        chunkAnchor = FusionState()
         wasAvailable = true
     }
 }

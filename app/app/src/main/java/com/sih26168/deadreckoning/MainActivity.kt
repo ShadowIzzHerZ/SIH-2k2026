@@ -229,6 +229,15 @@ class MainActivity : AppCompatActivity() {
 
         val sample = readSample(usingReplay)
 
+        // Point the camera at wherever we actually are as soon as any real
+        // fix arrives — calibration (below) can take a while, sometimes
+        // the entire session, during live GPS with a weak signal, and
+        // nothing else moves the map's camera until it finishes. See
+        // RoadMapView.centerOnRoughLocation's doc for the real bug this
+        // fixes (the map sitting at Null Island, looking exactly like a
+        // tile-loading failure, for as long as calibration ran).
+        if (sample.hasFix) roadMapView.centerOnRoughLocation(sample.lat, sample.lon)
+
         if (devRecorder.isRecording) {
             if (usingReplay) {
                 // Replay got switched on mid-recording — stop rather than
