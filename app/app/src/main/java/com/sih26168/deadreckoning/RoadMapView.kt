@@ -96,30 +96,57 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
     }
 
     /**
-     * Points the camera at a rough real fix before real tracking has
-     * started — calibration (leveling, then yaw alignment) can take a
-     * while during live GPS use, sometimes minutes without a strong
-     * signal, and addPoint() (the only other place that ever calls
-     * setCenter()) doesn't run until it finishes.
+     * Moves (creating if needed) the live "you are here" marker from a
+     * raw GPS fix, before the accuracy pipeline (calibration -> fusion)
+     * has produced anything to plot yet. Google Maps' own blue dot works
+     * this way — it shows and tracks your real position immediately, not
+     * only once some app-specific pipeline finishes.
      *
-     * Real bug found live: without this, the map view's camera never
-     * moves off its default center — (0, 0), Null Island, open ocean —
-     * until calibration finishes. OpenStreetMap's Mapnik style renders
-     * open ocean as a flat light-blue fill, so this looked exactly like
-     * "the map isn't loading", for as long as calibration was still
-     * running — sometimes the entire session, during live GPS testing
-     * with a weak fix. It wasn't a tile-loading failure at all: the map
-     * was correctly rendering the middle of the Atlantic, because it was
-     * never told where the phone actually is yet. Masked during replay
-     * testing because replay's calibration completes in seconds (its GPS
-     * speed is always confidently above the yaw-alignment threshold).
+     * Two real bugs found live, both from the same root cause — nothing
+     * ever touched the marker/camera before calibration finished, and
+     * calibration (leveling, then yaw alignment) can take a while during
+     * live GPS use, sometimes the entire session without a strong signal
+     * or a confident straight-line stretch:
+     *   1. The map view's camera never moved off its default center —
+     *      (0, 0), Null Island, open ocean. OpenStreetMap's Mapnik style
+     *      renders open ocean as a flat light-blue fill, so this looked
+     *      exactly like "the map isn't loading". It wasn't a tile
+     *      failure: the map was correctly rendering the middle of the
+     *      Atlantic, because it was never told where the phone actually
+     *      is yet.
+     *   2. With no marker to move, there was also no live position
+     *      indicator on screen at all while calibrating — and
+     *      recenterOnLatest() (the FAB), which only ever acts on the
+     *      marker's position, silently did nothing when tapped, because
+     *      there was no marker yet to recenter on. Not a broken button;
+     *      nothing for it to act on.
+     * Masked during replay testing because replay's calibration always
+     * completes in seconds (its GPS speed is always confidently above
+     * the yaw-alignment threshold) — this is a live-GPS-specific gap.
      *
-     * Only acts before the real marker exists — once addPoint() takes
-     * over, this must never fight the live follow-camera/pan state.
+     * Once addPoint() takes over (real tracking has started), calls here
+     * are harmless no-ops in practice — MainActivity stops making them —
+     * but this still respects `following` either way so it can never
+     * fight a live pan.
      */
-    fun centerOnRoughLocation(lat: Double, lon: Double) {
-        if (youAreHereMarker != null) return
-        mapView.controller.setCenter(GeoPoint(lat, lon))
+    fun updateRoughLocation(lat: Double, lon: Double) {
+        val p = GeoPoint(lat, lon)
+        if (youAreHereMarker == null) {
+            val m = Marker(mapView)
+            m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            m.title = "You are here"
+            mapView.overlays.add(m)
+            youAreHereMarker = m
+            mapView.controller.setCenter(p)
+        }
+        youAreHereMarker?.position = p
+        // Blue — same color GNSS_TRACKING uses, and the same association
+        // the legend already teaches ("GPS" = blue) — this marker IS a
+        // raw GPS fix, just before the app's own pipeline has anything
+        // fused to show instead.
+        youAreHereMarker?.icon = modeIcons.getValue(FusionMode.GNSS_TRACKING)
+        if (following) mapView.controller.setCenter(p)
+        mapView.invalidate()
     }
 
     private fun modeColor(mode: FusionMode): Int = when (mode) {
@@ -210,11 +237,18 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
     }
 
     /** Same idea as Zen's mapView.js recenter button — the camera already
-     * follows automatically every tick (see addPoint), but a user who's
-     * panned away needs an explicit way back. */
+     * follows automatically every tick (see addPoint/updateRoughLocation),
+     * but a user who's panned away needs an explicit way back.
+     *
+     * Instant (setCenter), not animated (animateTo) — "instantly... like
+     * how it works on Google Maps" was explicitly requested. Works during
+     * calibration too now that updateRoughLocation keeps a real marker
+     * live from the first GPS fix onward, not just once real tracking
+     * starts — see that method's doc for the bug where this used to
+     * silently do nothing (no marker existed yet to recenter on). */
     fun recenterOnLatest() {
         following = true
-        youAreHereMarker?.position?.let { mapView.controller.animateTo(it) }
+        youAreHereMarker?.position?.let { mapView.controller.setCenter(it) }
     }
 
     private fun drawableToBitmap(d: GradientDrawable): android.graphics.Bitmap {

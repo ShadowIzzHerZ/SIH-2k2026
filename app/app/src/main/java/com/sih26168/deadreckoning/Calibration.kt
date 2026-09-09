@@ -174,6 +174,49 @@ object Calibration {
         return floatArrayOf(sin(rad).toFloat(), cos(rad).toFloat())
     }
 
+    /**
+     * Compass bearing (degrees, 0=N/90=E/clockwise — what Location.getBearing()
+     * and this app's replay/DevRecorder CSVs both store) -> this app's own
+     * internal heading convention (radians, 0=east, ccw+ — FusionState.heading,
+     * MapMatcher.match's headingRad, strapdown_ins.py's theta all agree on
+     * this). NOT a plain degrees->radians unit conversion — compass bearing is
+     * measured clockwise from north, this app's headings counterclockwise
+     * from east, so the axes have to be swapped, not just the units.
+     *
+     * Real bug this fixes: MainActivity.readSample() and ReplayDataSource
+     * both used to do only Math.toRadians(bearing) — degrees->radians, no
+     * axis swap — then hand that straight to FusionEngine.tick's
+     * gnssHeadingRad (assigned directly to state.heading) and to
+     * CalibrationManager.addYawSample (which itself correctly assumes an
+     * already-math-convention input). The result: chunkAnchor.heading at
+     * the start of a blackout, and the yaw-misalignment estimate underlying
+     * every calibrated sample all session, were both silently off by a
+     * heading-dependent amount (compass->math is a reflection, not a fixed
+     * rotation) — reported live as the blackout trail heading off in a very
+     * different direction from the real one. ReplayDataSource's own
+     * bearingRad doc ("already converted from compass degrees") describes
+     * the intent this function actually implements; the plain toRadians()
+     * call there never did.
+     */
+    fun compassDegToMathRad(bearingDeg: Float): Float {
+        val unit = compassDegToXyUnit(bearingDeg)  // [east, north]
+        return atan2(unit[1].toDouble(), unit[0].toDouble()).toFloat()
+    }
+
+    /** Inverse of compassDegToMathRad — this app's internal heading (radians,
+     * 0=east ccw+) -> compass bearing degrees (0=N, 90=E, clockwise), in
+     * [0, 360). For anything that has to show or store a real-world compass
+     * heading from a FusionState.heading value: the live UI's heading
+     * readout, and DevRecorder's heading_gt column (src/data/io_vnbd_loader.py
+     * and calibration.py/CalibrationManager both expect heading_gt in this
+     * same compass convention, not this app's internal math one). */
+    fun mathRadToCompassDeg(mathRad: Float): Float {
+        val east = cos(mathRad.toDouble())
+        val north = sin(mathRad.toDouble())
+        val deg = Math.toDegrees(atan2(east, north)).toFloat()
+        return if (deg < 0) deg + 360f else deg
+    }
+
     private fun identity3x3() = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
 
     private fun matmul3x3(a: FloatArray, b: FloatArray): FloatArray {
