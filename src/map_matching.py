@@ -24,7 +24,7 @@ kind of noisy, drifting input this pipeline actually produces.
 
 Road network comes from OpenStreetMap via osmnx — free, no API key, but
 needs network access at data-prep time (pre-download the extract for your
-actual demo route/venue before the event, per sih.md — don't rely on venue
+actual demo route/venue before the event, per docs/sih.md — don't rely on venue
 wifi).
 """
 from __future__ import annotations
