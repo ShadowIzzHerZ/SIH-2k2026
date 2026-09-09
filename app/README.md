@@ -55,7 +55,37 @@ street names rendered correctly, e.g. "Law Gate Rd", "NH44").
 | [app/src/main/java/.../ReplayDataSource.kt](app/src/main/java/com/sih26168/deadreckoning/ReplayDataSource.kt) | Reads the bundled real-drive replay asset (`assets/replay_drive.json`) |
 | [app/src/main/java/.../RoadGraph.kt](app/src/main/java/com/sih26168/deadreckoning/RoadGraph.kt) | Loads the bundled pre-fetched OSM road extract (`assets/road_graph.json`) |
 | [app/src/main/java/.../MapMatcher.kt](app/src/main/java/com/sih26168/deadreckoning/MapMatcher.kt) | Live sequential map-matcher — snaps the fused position onto RoadGraph with the same non-holonomic/continuity reasoning as `src/map_matching.py`, simplified for online (not whole-path) matching |
+| [app/src/main/java/.../DevRecorder.kt](app/src/main/java/com/sih26168/deadreckoning/DevRecorder.kt) | Developer mode's data logger — see below |
 | [app/src/main/java/.../MainActivity.kt](app/src/main/java/com/sih26168/deadreckoning/MainActivity.kt) | Wires it all together, 10Hz tick loop |
+
+### Developer mode — collecting real training data on a walk
+
+Long-press the title to reveal a hidden "Developer mode" section
+(persists across restarts; long-press again to hide — not something a
+judge stumbles into). Its one control, **"Record training data"**, logs
+real raw accel/gyro + GPS to a CSV at 10Hz — literal canonical column
+names (`accel_x`, `gyro_z`, `lat`, `speed_gt`, ...) that
+`src/data/io_vnbd_loader.py`'s fuzzy-matcher already recognizes with zero
+config, verified end-to-end: a phone-recorded file loads cleanly through
+the real, unmodified loader. A missing GPS fix is logged as blank fields,
+not skipped — a real blackout stretch inside a recording is expected and
+useful, per `data/own_recordings/README.md`'s own protocol. Blocked
+while "Replay" is on (recording replay data would just duplicate
+existing training data). Files land in the app's external-files
+`recordings/` folder — grab them with `adb pull`, or tap **"Share last
+recording"** for the normal Android share sheet (WhatsApp/Drive/email —
+verified live) if there's no computer handy.
+
+This is explicitly **data collection, not on-device training** — ONNX
+Runtime Mobile (this app's inference engine) has no backprop, and
+building a real training loop in Kotlin isn't something to rush before a
+hackathon deadline, nor would it run the same already-validated training
+code the project's real numbers come from. The actual workflow: record
+on a walk/drive, pull the CSV into `data/own_recordings/`, then really
+retrain with the existing, validated pipeline:
+```bash
+python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
+```
 
 The app module's `syncModel` Gradle task copies `checkpoints/dead_reckoning_model.onnx`
 into `assets/` at build time — it is never hand-copied/duplicated, so the

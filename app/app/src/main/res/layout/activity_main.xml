@@ -157,6 +157,68 @@
             android:text="@string/simulate_blackout"
             android:textColor="#1a202c"
             android:textSize="14sp" />
+
+        <!-- Developer mode — hidden until the title is long-pressed (see
+             MainActivity), not something a judge stumbles into by
+             accident. Records real sensor+GPS data to a CSV in the exact
+             shape src/data/io_vnbd_loader.py already fuzzy-matches — see
+             DevRecorder.kt's docstring for why this is data collection,
+             not on-device training. -->
+        <LinearLayout
+            android:id="@+id/devSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="4dp"
+                android:background="#e2e8f0" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="@string/dev_mode_label"
+                android:textColor="#94a3b8"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/devRecordToggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:text="@string/dev_record_toggle"
+                android:textColor="#1a202c"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/devRecordStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="4dp"
+                android:textColor="#4a5568"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/devShareButton"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/dev_share_button"
+                android:textAllCaps="false"
+                android:visibility="gone" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Recenter — a real map you can pan away from needs a way back,

@@ -33,6 +33,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Lets DevRecorder's saved CSVs be shared via the normal Android
+             share sheet (e.g. straight to a laptop over Drive/email)
+             without needing WRITE_EXTERNAL_STORAGE or adb — the file
+             itself stays in the app's own external-files area either way. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/provider_paths" />
+        </provider>
     </application>
 
 </manifest>

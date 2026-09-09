@@ -1,16 +1,21 @@
 package com.sih26168.deadreckoning
 
 import android.Manifest
+import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlin.math.roundToInt
@@ -33,6 +38,12 @@ import kotlin.math.roundToInt
  *   - "Simulate GNSS blackout" forces the fusion engine into BLACKOUT
  *     regardless of data source — the same thing src/simulate_blackout.py
  *     does offline, live here on whichever source is active.
+ *
+ * A third, hidden control (long-press the title) reveals Developer mode —
+ * DevRecorder logging real sensor+GPS samples to a CSV your team can
+ * actually retrain the model with afterward (see DevRecorder.kt's
+ * docstring for why this is data collection, not on-device training).
+ * Hidden by default so it's not something a judge stumbles into.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -55,6 +66,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var blackoutToggle: SwitchMaterial
     private lateinit var replayToggle: SwitchMaterial
     private lateinit var recenterButton: FloatingActionButton
+    private lateinit var titleText: TextView
+    private lateinit var devSection: View
+    private lateinit var devRecordToggle: SwitchMaterial
+    private lateinit var devRecordStatus: TextView
+    private lateinit var devShareButton: Button
+    private lateinit var devRecorder: DevRecorder
+    private lateinit var prefs: SharedPreferences
     private var wasReplaying = false
 
     private val calibratingColor = android.graphics.Color.parseColor("#94a3b8")  // neutral gray
@@ -84,6 +102,11 @@ class MainActivity : AppCompatActivity() {
         replayToggle = findViewById(R.id.replayToggle)
         recenterButton = findViewById(R.id.recenterButton)
         recenterButton.setOnClickListener { roadMapView.recenterOnLatest() }
+        titleText = findViewById(R.id.titleText)
+        devSection = findViewById(R.id.devSection)
+        devRecordToggle = findViewById(R.id.devRecordToggle)
+        devRecordStatus = findViewById(R.id.devRecordStatus)
+        devShareButton = findViewById(R.id.devShareButton)
 
         sensorReader = SensorReader(this)
         locationReader = LocationReader(this)
@@ -91,14 +114,64 @@ class MainActivity : AppCompatActivity() {
         model = BiasCorrectionModel(this)
         fusion = FusionEngine(model)
         mapMatcher = MapMatcher(RoadGraph(this))
+        devRecorder = DevRecorder(this)
 
         // blackoutToggle/replayToggle .isChecked read live in tick() — no listeners needed.
+
+        prefs = getSharedPreferences("dev_prefs", MODE_PRIVATE)
+        devSection.visibility = if (prefs.getBoolean("dev_mode_visible", false)) View.VISIBLE else View.GONE
+        titleText.setOnLongClickListener {
+            val nowVisible = devSection.visibility != View.VISIBLE
+            devSection.visibility = if (nowVisible) View.VISIBLE else View.GONE
+            prefs.edit().putBoolean("dev_mode_visible", nowVisible).apply()
+            Toast.makeText(
+                this,
+                getString(if (nowVisible) R.string.dev_mode_on_toast else R.string.dev_mode_off_toast),
+                Toast.LENGTH_SHORT,
+            ).show()
+            true
+        }
+        setupDevRecording()
 
         val needed = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (needed.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
             startPipeline()
         } else {
             requestPermissions.launch(needed)
+        }
+    }
+
+    /** Wires the dev-mode Record/Share controls — kept separate from the
+     * main tick() logic so the always-on pipeline isn't cluttered with a
+     * feature most runs never touch. */
+    private fun setupDevRecording() {
+        devRecordToggle.setOnCheckedChangeListener { _, checked ->
+            if (checked) {
+                if (replayToggle.isChecked) {
+                    Toast.makeText(this, R.string.dev_record_blocked_replay, Toast.LENGTH_LONG).show()
+                    devRecordToggle.isChecked = false
+                    return@setOnCheckedChangeListener
+                }
+                devShareButton.visibility = View.GONE
+                val file = devRecorder.start("openroute")
+                devRecordStatus.text = "Recording to ${file.name}…"
+            } else {
+                val file = devRecorder.stop()
+                devRecordStatus.text = if (file != null) {
+                    "Saved ${file.name} — ${devRecorder.sampleCount} samples"
+                } else ""
+                devShareButton.visibility = if (file != null) View.VISIBLE else View.GONE
+            }
+        }
+        devShareButton.setOnClickListener {
+            val file = devRecorder.currentFile ?: return@setOnClickListener
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/csv"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, file.name))
         }
     }
 
@@ -155,6 +228,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         val sample = readSample(usingReplay)
+
+        if (devRecorder.isRecording) {
+            if (usingReplay) {
+                // Replay got switched on mid-recording — stop rather than
+                // silently log replay data as if it were a new real drive.
+                devRecordToggle.isChecked = false // triggers stop() via the listener
+            } else {
+                devRecorder.logSample(
+                    sample.rawAccel, sample.rawGyro, sample.hasFix,
+                    sample.lat, sample.lon, sample.speed,
+                    Math.toDegrees(sample.bearingRad.toDouble()).toFloat(),
+                )
+                devRecordStatus.text = "Recording… ${devRecorder.sampleCount} samples" +
+                    (if (!sample.hasFix) "  [no GPS fix]" else "")
+            }
+        }
 
         if (!calibration.isLeveled) {
             calibration.addLevelSample(sample.rawAccel)
@@ -267,5 +356,6 @@ class MainActivity : AppCompatActivity() {
         sensorReader.stop()
         locationReader.stop()
         model.close()
+        devRecorder.stop()  // flush any in-progress recording rather than losing the tail
     }
 }
