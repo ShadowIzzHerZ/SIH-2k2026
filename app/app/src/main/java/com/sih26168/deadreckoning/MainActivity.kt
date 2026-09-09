@@ -203,7 +203,12 @@ class MainActivity : AppCompatActivity() {
         return Sample(
             sensorReader.lastAccel, sensorReader.lastGyro, hasFix,
             loc?.latitude ?: 0.0, loc?.longitude ?: 0.0, loc?.speed ?: 0f,
-            if (loc != null) Math.toRadians(loc.bearing.toDouble()).toFloat() else 0f,
+            // loc.bearing is Android's compass bearing (0=N/90=E, clockwise) —
+            // needs the compass->math axis swap, not just Math.toRadians().
+            // See Calibration.compassDegToMathRad's doc for the real bug a
+            // plain toRadians() here used to cause (blackout heading off in
+            // a very different direction from the real one).
+            if (loc != null) Calibration.compassDegToMathRad(loc.bearing) else 0f,
         )
     }
 
@@ -229,14 +234,15 @@ class MainActivity : AppCompatActivity() {
 
         val sample = readSample(usingReplay)
 
-        // Point the camera at wherever we actually are as soon as any real
-        // fix arrives — calibration (below) can take a while, sometimes
+        // Keep a real, live "you are here" marker moving from the very
+        // first GPS fix — calibration (below) can take a while, sometimes
         // the entire session, during live GPS with a weak signal, and
-        // nothing else moves the map's camera until it finishes. See
-        // RoadMapView.centerOnRoughLocation's doc for the real bug this
-        // fixes (the map sitting at Null Island, looking exactly like a
-        // tile-loading failure, for as long as calibration ran).
-        if (sample.hasFix) roadMapView.centerOnRoughLocation(sample.lat, sample.lon)
+        // nothing else moves the map's marker/camera until it finishes.
+        // See RoadMapView.updateRoughLocation's doc for the two real bugs
+        // this fixes (the map sitting at Null Island looking exactly like
+        // a tile-loading failure, and the recenter button silently doing
+        // nothing because there was no marker yet to recenter on).
+        if (sample.hasFix) roadMapView.updateRoughLocation(sample.lat, sample.lon)
 
         if (devRecorder.isRecording) {
             if (usingReplay) {
@@ -247,7 +253,14 @@ class MainActivity : AppCompatActivity() {
                 devRecorder.logSample(
                     sample.rawAccel, sample.rawGyro, sample.hasFix,
                     sample.lat, sample.lon, sample.speed,
-                    Math.toDegrees(sample.bearingRad.toDouble()).toFloat(),
+                    // sample.bearingRad is this app's internal (math, 0=east
+                    // ccw+) convention — heading_gt needs real compass
+                    // degrees, same convention src/data/io_vnbd_loader.py
+                    // and Calibration.kt's own yaw estimation expect. Plain
+                    // Math.toDegrees() here would silently write a math-
+                    // convention angle into a column downstream code reads
+                    // as compass bearing.
+                    Calibration.mathRadToCompassDeg(sample.bearingRad),
                 )
                 devRecordStatus.text = "Recording… ${devRecorder.sampleCount} samples" +
                     (if (!sample.hasFix) "  [no GPS fix]" else "")
@@ -327,7 +340,10 @@ class MainActivity : AppCompatActivity() {
         }
         modeText.text = statusText
         setStatusDotColor(dotColor)
-        detailText.text = "speed: ${"%.0f".format(s.speed * 3.6f)} km/h  |  heading: ${Math.toDegrees(s.heading.toDouble()).roundToInt()}°" +
+        // s.heading is this app's internal (math, 0=east ccw+) convention —
+        // show a real compass heading (0=N/90=E) to the user, not a plain
+        // toDegrees() of the math-convention value.
+        detailText.text = "speed: ${"%.0f".format(s.speed * 3.6f)} km/h  |  heading: ${Calibration.mathRadToCompassDeg(s.heading).roundToInt()}°" +
             (if (usingReplay) "  |  [REPLAY]" else "") +
             (if (demoBlackout) "  |  [SIMULATED BLACKOUT]" else "") +
             // Everything downstream inherits a bad calibration, so say so

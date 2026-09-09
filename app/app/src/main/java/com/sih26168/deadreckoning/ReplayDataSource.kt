@@ -47,7 +47,13 @@ class ReplayDataSource(context: Context, assetName: String = "replay_drive.json"
                     lat = r.getDouble("lat"),
                     lon = r.getDouble("lon"),
                     speed = r.getDouble("speed").toFloat(),
-                    bearingRad = Math.toRadians(r.getDouble("bearing")).toFloat(),
+                    // r.getDouble("bearing") is real compass bearing degrees
+                    // (confirmed against this file's own lat/lon: matches
+                    // computed great-circle bearing to ~0.1°) — needs the
+                    // compass->math axis swap, not just a unit conversion.
+                    // See Calibration.compassDegToMathRad's doc for the real
+                    // bug a plain Math.toRadians() here used to cause.
+                    bearingRad = Calibration.compassDegToMathRad(r.getDouble("bearing").toFloat()),
                 )
             )
         }
