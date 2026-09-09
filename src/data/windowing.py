@@ -187,6 +187,21 @@ def build_windows(seq: ImuSequence, window_size: int, stride: int, dt: float,
         if w_speed is None or w_pos is None:
             continue  # can't supervise this window without GT — skip
 
+        if not np.isfinite(w_speed).all() or not np.isfinite(w_pos).all():
+            # Window overlaps a real GPS blackout gap (blank lat/lon/speed
+            # fields -> NaN, see io_vnbd_loader.load_sequence) — no ground
+            # truth to supervise it. Found the hard way: NaN comparisons
+            # are always False in Python/numpy, so the min_distance_m check
+            # right below this (`step_dist.sum() < min_distance_m`) does
+            # NOT catch a NaN window — it silently let NaN speed_gt/pos_gt
+            # through into training, which corrupted the whole model's
+            # weights to NaN within the first batch that contained one.
+            # Never triggered on IO-VNBD (its files have no mid-file GPS
+            # dropouts), only surfaced once a real phone recording with a
+            # genuine blackout stretch (data/own_recordings/, expected and
+            # useful per that folder's README) got mixed into training.
+            continue
+
         step_dist = np.linalg.norm(np.diff(w_pos, axis=0), axis=1)
         if step_dist.sum() < min_distance_m:
             continue  # essentially stationary — see docstring
@@ -416,7 +431,8 @@ def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_r
     return out
 
 
-def load_combined_dataset_splits(comma2k19_dir: str | None = None, seed: int = 0, **iovnbd_kwargs):
+def load_combined_dataset_splits(comma2k19_dir: str | None = None, own_recordings_dir: str | None = None,
+                                  seed: int = 0, **iovnbd_kwargs):
     """load_dataset_splits(**iovnbd_kwargs), optionally with comma2k19
     windows mixed into the same train/val/test splits — split at the
     *segment* level (same leakage-avoidance reasoning as IO-VNBD's
@@ -432,60 +448,92 @@ def load_combined_dataset_splits(comma2k19_dir: str | None = None, seed: int = 0
     caller can check whether mixing comma2k19 into training measurably
     helped/hurt *IO-VNBD* test drift specifically, not just report a
     combined number that could hide either direction.
+
+    own_recordings_dir (e.g. "data/own_recordings", see DevRecorder /
+    data/own_recordings/README.md) mixes real phone recordings in too, but
+    deliberately *only into train*, never val/test — unlike comma2k19
+    above. These are ad hoc supplementary clips (often just one or two
+    files), not a benchmark: splitting a handful of files at the file
+    level the way comma2k19 does would, with n this small, plausibly send
+    100% of the windows to test and 0% to train — the opposite of the
+    point of collecting them. The project's real eval numbers keep coming
+    from the untouched IO-VNBD/comma2k19 test sets either way.
     """
     combined = load_dataset_splits(seed=seed, **iovnbd_kwargs)
-    if not comma2k19_dir:
-        return combined
-
-    comma_paths = sorted(glob.glob(f"{comma2k19_dir}/*.parquet"))
-    if not comma_paths:
-        print(f"[combined dataset] no comma2k19 parquet files under {comma2k19_dir} — skipping, IO-VNBD only")
-        return combined
-
-    from .comma2k19_loader import load_all_segments  # local import: extra deps (pyarrow, huggingface_hub)
+    out = combined
 
     sample_rate_hz = iovnbd_kwargs["sample_rate_hz"]
     window_size = iovnbd_kwargs["window_size"]
     window_stride = iovnbd_kwargs["window_stride"]
-    train_split = iovnbd_kwargs["train_split"]
-    val_split = iovnbd_kwargs["val_split"]
-
-    seqs = load_all_segments(comma_paths, target_hz=sample_rate_hz)
-    rng = np.random.default_rng(seed)
-    idxs = np.arange(len(seqs))
-    rng.shuffle(idxs)
-    n = len(idxs)
-    n_train = int(n * train_split)
-    n_val = int(n * val_split)
-    split_idxs = {"train": idxs[:n_train], "val": idxs[n_train:n_train + n_val], "test": idxs[n_train + n_val:]}
-
     dt = 1.0 / sample_rate_hz
-    comma_windows_by_split: dict[str, list[Window]] = {}
-    for split, ii in split_idxs.items():
-        windows: list[Window] = []
-        for i in ii:
-            seq = seqs[i]
-            try:
-                calibrate_sequence(seq)
-                windows.extend(build_windows(seq, window_size, window_stride, dt))
-            except Exception as e:
-                print(f"[skip] comma2k19 segment {seq.path}: {e}")
-        comma_windows_by_split[split] = windows
-        print(f"comma2k19 {split}: {len(ii)} segments -> {len(windows)} windows")
 
-    # Reuse whatever extra_features/norm stats load_dataset_splits already
-    # set up on the IO-VNBD side (computed from IO-VNBD *train* windows only)
-    # so comma2k19 windows get the identical treatment — a second,
-    # independently-fit normalization would make the two datasets' channels
-    # not directly comparable to the network.
-    extra_features = combined["train"].extra_features
-    norm_mean, norm_std = combined["train"].norm_mean, combined["train"].norm_std
+    if comma2k19_dir:
+        comma_paths = sorted(glob.glob(f"{comma2k19_dir}/*.parquet"))
+        if not comma_paths:
+            print(f"[combined dataset] no comma2k19 parquet files under {comma2k19_dir} — skipping, IO-VNBD only")
+        else:
+            from .comma2k19_loader import load_all_segments  # local import: extra deps (pyarrow, huggingface_hub)
 
-    out = {}
-    for split in ("train", "val", "test"):
-        out[split] = IOVNBDWindowDataset(list(combined[split].windows) + comma_windows_by_split[split],
-                                          extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
-    out["iovnbd_test_only"] = combined["test"]
-    out["comma2k19_test_only"] = IOVNBDWindowDataset(comma_windows_by_split["test"],
-                                                      extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+            train_split = iovnbd_kwargs["train_split"]
+            val_split = iovnbd_kwargs["val_split"]
+
+            seqs = load_all_segments(comma_paths, target_hz=sample_rate_hz)
+            rng = np.random.default_rng(seed)
+            idxs = np.arange(len(seqs))
+            rng.shuffle(idxs)
+            n = len(idxs)
+            n_train = int(n * train_split)
+            n_val = int(n * val_split)
+            split_idxs = {"train": idxs[:n_train], "val": idxs[n_train:n_train + n_val], "test": idxs[n_train + n_val:]}
+
+            comma_windows_by_split: dict[str, list[Window]] = {}
+            for split, ii in split_idxs.items():
+                windows: list[Window] = []
+                for i in ii:
+                    seq = seqs[i]
+                    try:
+                        calibrate_sequence(seq)
+                        windows.extend(build_windows(seq, window_size, window_stride, dt))
+                    except Exception as e:
+                        print(f"[skip] comma2k19 segment {seq.path}: {e}")
+                comma_windows_by_split[split] = windows
+                print(f"comma2k19 {split}: {len(ii)} segments -> {len(windows)} windows")
+
+            # Reuse whatever extra_features/norm stats load_dataset_splits already
+            # set up on the IO-VNBD side (computed from IO-VNBD *train* windows only)
+            # so comma2k19 windows get the identical treatment — a second,
+            # independently-fit normalization would make the two datasets' channels
+            # not directly comparable to the network.
+            extra_features = combined["train"].extra_features
+            norm_mean, norm_std = combined["train"].norm_mean, combined["train"].norm_std
+
+            out = {}
+            for split in ("train", "val", "test"):
+                out[split] = IOVNBDWindowDataset(list(combined[split].windows) + comma_windows_by_split[split],
+                                                  extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+            out["iovnbd_test_only"] = combined["test"]
+            out["comma2k19_test_only"] = IOVNBDWindowDataset(comma_windows_by_split["test"],
+                                                              extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+
+    if own_recordings_dir:
+        own_paths = sorted(glob.glob(f"{own_recordings_dir}/*.csv"))
+        if not own_paths:
+            print(f"[combined dataset] no own_recordings CSVs under {own_recordings_dir} — skipping")
+        else:
+            own_windows: list[Window] = []
+            for p in own_paths:
+                try:
+                    seq = load_sequence(Path(p))
+                    seq = resample_uniform(seq, sample_rate_hz)
+                    calibrate_sequence(seq)
+                    own_windows.extend(build_windows(seq, window_size, window_stride, dt))
+                except Exception as e:
+                    print(f"[skip] own_recording {p}: {e}")
+            print(f"own_recordings: {len(own_paths)} files -> {len(own_windows)} windows (added to train only)")
+
+            extra_features = out["train"].extra_features
+            norm_mean, norm_std = out["train"].norm_mean, out["train"].norm_std
+            out["train"] = IOVNBDWindowDataset(list(out["train"].windows) + own_windows,
+                                                extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+
     return out

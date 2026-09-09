@@ -29,8 +29,12 @@ results/*.csv
 
 # Local safety backups made by `src.train --resume` before it overwrites
 # best.pt / train_history.json — convenience for the person running it, not
-# a deliverable worth versioning.
+# a deliverable worth versioning. Globbed (not just the default filename)
+# since a custom --own_recordings_dir/--comma2k19_dir run names its own
+# history file, and its _prev backup follows suit.
 checkpoints/best_prev.pt
+checkpoints/*_prev.pt
 results/train_history_prev.json
+results/*_prev.json
 
 .DS_Store

@@ -97,6 +97,16 @@ def main():
              "omitted (the default) trains on IO-VNBD only, unchanged from before.",
     )
     parser.add_argument(
+        "--own_recordings_dir", default=None,
+        help="Mix real phone recordings (see DevRecorder / "
+             "data/own_recordings/README.md) into training, e.g. "
+             "--own_recordings_dir data/own_recordings. Added to *train only* "
+             "(never val/test) — these are ad hoc supplementary clips, not a "
+             "benchmark, unlike --comma2k19_dir. Opt-in — omitted (the "
+             "default) trains on IO-VNBD (+ comma2k19 if given) only, "
+             "unchanged from before.",
+    )
+    parser.add_argument(
         "--extra_features", action="store_true",
         help="Append windowing.py's engineer_features() 6 extra channels (accel/gyro "
              "magnitude, jerk, local smoothing+roughness) to the raw 6, z-score-normalized "
@@ -125,6 +135,7 @@ def main():
 
     splits = load_combined_dataset_splits(
         comma2k19_dir=args.comma2k19_dir,
+        own_recordings_dir=args.own_recordings_dir,
         data_root=cfg["data"]["root"],
         variant=cfg["data"]["variant"],
         column_map=cfg["data"]["column_map"],
