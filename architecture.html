@@ -1,0 +1,361 @@
+<!doctype html>
+<title>Dead Reckoning Architecture</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #F5F2EC;
+    --paper: #FFFFFF;
+    --ink: #1C2430;
+    --muted: #667080;
+    --line: #C7CCD3;
+    --line-soft: #DADEE3;
+    --lane1-tint: #EEF2F6;
+    --lane2-tint: #FFFCF5;
+    --lane3-tint: #F0EFEC;
+    --blue: #2563EB;
+    --red: #DC2626;
+    --amber: #F59E0B;
+    --green: #16A34A;
+    --code-bg: #ECE8DE;
+  }
+  :root:not([data-theme="light"]) {
+    @media (prefers-color-scheme: dark) {
+      --bg: #14171C;
+      --paper: #1A1E25;
+      --ink: #E9ECF1;
+      --muted: #9AA5B1;
+      --line: #3C4552;
+      --line-soft: #2E3642;
+      --lane1-tint: #1A222C;
+      --lane2-tint: #201C15;
+      --lane3-tint: #1C1B19;
+      --code-bg: #262B22;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171C;
+    --paper: #1A1E25;
+    --ink: #E9ECF1;
+    --muted: #9AA5B1;
+    --line: #3C4552;
+    --line-soft: #2E3642;
+    --lane1-tint: #1A222C;
+    --lane2-tint: #201C15;
+    --lane3-tint: #1C1B19;
+    --code-bg: #262B22;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+  }
+  .wrap {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 48px 24px 64px;
+  }
+  .eyebrow {
+    font: 600 12px/1 "IBM Plex Mono", monospace;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font: 600 34px/1.15 "IBM Plex Sans", sans-serif;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 10px;
+  }
+  .dek {
+    font: 400 15.5px/1.55 "IBM Plex Sans", sans-serif;
+    color: var(--muted);
+    max-width: 62ch;
+    margin: 0 0 36px;
+  }
+  .dek code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.92em;
+    background: var(--code-bg);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+
+  figure { margin: 0; }
+  .diagram-frame {
+    background: var(--paper);
+    border: 1px solid var(--line-soft);
+    border-radius: 16px;
+    padding: 20px;
+    overflow-x: auto;
+  }
+  svg.arch { display: block; width: 100%; height: auto; min-width: 900px; }
+
+  /* lane containers */
+  .lane { fill: var(--paper); stroke: var(--line); stroke-width: 1.5; }
+  .lane-live { stroke-width: 2.5; }
+  .lane-dashed { stroke-dasharray: 7 5; }
+  .lane1-fill { fill: var(--lane1-tint); }
+  .lane2-fill { fill: var(--lane2-tint); }
+  .lane3-fill { fill: var(--lane3-tint); }
+
+  .eyebrow-svg {
+    font: 600 12px "IBM Plex Mono", monospace;
+    letter-spacing: 0.06em;
+    fill: var(--muted);
+  }
+
+  /* neutral component boxes */
+  .box { fill: var(--paper); stroke: var(--line); stroke-width: 1.3; }
+  .box-title { font: 600 13.5px "IBM Plex Sans", sans-serif; fill: var(--ink); }
+  .box-sub { font: 400 10.5px "IBM Plex Mono", monospace; fill: var(--muted); }
+
+  /* backend "not implemented" box */
+  .box-hypothetical { fill: var(--paper); stroke: var(--muted); stroke-width: 1.3; stroke-dasharray: 5 4; }
+
+  /* fusion group */
+  .group-box { fill: none; stroke: var(--line); stroke-width: 1.3; stroke-dasharray: 4 4; }
+  .group-label { font: 500 11px "IBM Plex Mono", monospace; fill: var(--muted); }
+
+  /* state nodes */
+  .node-title { font: 700 13.5px "IBM Plex Sans", sans-serif; text-anchor: middle; }
+  .node-sub { font: 400 10px "IBM Plex Mono", monospace; text-anchor: middle; }
+  .node-blue { fill: var(--blue); }
+  .node-red { fill: var(--red); }
+  .node-amber { fill: var(--amber); }
+  .text-on-dark { fill: #FFFFFF; }
+  .text-on-amber { fill: #2B1B02; }
+
+  .merge-dot { fill: var(--ink); }
+
+  /* connectors */
+  .conn { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+  .conn-muted { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+  .edge-label { font: 500 10px "IBM Plex Mono", monospace; fill: var(--muted); }
+  .edge-label-em { font: 500 10px "IBM Plex Mono", monospace; fill: var(--ink); }
+
+  /* break connector */
+  .break-line { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-dasharray: 5 4; }
+  .break-mark { stroke: var(--red); stroke-width: 2; }
+  .break-label { font: 500 10.5px "IBM Plex Mono", monospace; fill: var(--muted); font-style: italic; }
+
+  figcaption {
+    font: 400 13.5px/1.6 "IBM Plex Sans", sans-serif;
+    color: var(--muted);
+    max-width: 88ch;
+    margin: 18px 2px 0;
+  }
+  figcaption b { color: var(--ink); font-weight: 600; }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">SIH26168 · Intelligent Dead Reckoning</p>
+  <h1>Dead Reckoning Architecture</h1>
+  <p class="dek">
+    Three parts, two of them connected: an offline training pipeline hands a
+    trained checkpoint to a live Android app; a separate, classical backend
+    exists independently, with no client in this repo wired to it. Full
+    file-by-file detail lives in <code>JUDGES.md</code>.
+  </p>
+
+  <figure>
+    <div class="diagram-frame">
+      <svg class="arch" viewBox="0 0 1500 950" role="img" aria-label="Architecture diagram: an offline Python training pipeline (datasets through windowing, a train loop, a checkpoint, and an ONNX export) feeds its exported model into an Android app's live FusionEngine state machine, which switches between GNSS tracking, INS-only blackout, and a blend-back mode, then snaps the result onto a road graph and renders it. A separate classical EKF backend at the bottom is architecturally independent, with a dashed break marking that no client in this repository connects it to the app.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--ink)"></path>
+          </marker>
+          <marker id="arrow-muted" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+          </marker>
+        </defs>
+
+        <!-- ============ LANE 1: TRAINING ============ -->
+        <rect class="lane lane1-fill" x="30" y="70" width="1440" height="190" rx="14"></rect>
+        <text class="eyebrow-svg" x="60" y="100">TRAINING — OFFLINE, PYTHON (src/)</text>
+
+        <!-- boxes -->
+        <g>
+          <rect class="box" x="70" y="140" width="230" height="76" rx="8"></rect>
+          <text class="box-title" x="84" y="166">Datasets</text>
+          <text class="box-sub" x="84" y="184">IO-VNBD · comma2k19 ·</text>
+          <text class="box-sub" x="84" y="197">own_recordings/</text>
+        </g>
+        <g>
+          <rect class="box" x="355" y="140" width="230" height="76" rx="8"></rect>
+          <text class="box-title" x="369" y="166">Windowing</text>
+          <text class="box-sub" x="369" y="184">windowing.py — trip-level</text>
+          <text class="box-sub" x="369" y="197">train/val/test split</text>
+        </g>
+        <g>
+          <rect class="box" x="640" y="140" width="230" height="76" rx="8"></rect>
+          <text class="box-title" x="654" y="166">Train loop</text>
+          <text class="box-sub" x="654" y="184">BiasCorrectionNet +</text>
+          <text class="box-sub" x="654" y="197">StrapdownINS — train.py</text>
+        </g>
+        <g>
+          <rect class="box" x="925" y="140" width="230" height="76" rx="8"></rect>
+          <text class="box-title" x="939" y="166">Checkpoint</text>
+          <text class="box-sub" x="939" y="184">checkpoints/best.pt</text>
+        </g>
+        <g>
+          <rect class="box" x="1210" y="140" width="230" height="76" rx="8"></rect>
+          <text class="box-title" x="1224" y="166">ONNX export</text>
+          <text class="box-sub" x="1224" y="184">export_onnx.py</text>
+        </g>
+
+        <path class="conn" marker-end="url(#arrow)" d="M300,178 L351,178"></path>
+        <path class="conn" marker-end="url(#arrow)" d="M585,178 L636,178"></path>
+        <path class="conn" marker-end="url(#arrow)" d="M870,178 L921,178"></path>
+        <path class="conn" marker-end="url(#arrow)" d="M1155,178 L1206,178"></path>
+
+        <!-- ============ LANE 2: ANDROID APP ============ -->
+        <rect class="lane lane-live lane2-fill" x="30" y="300" width="1440" height="390" rx="14"></rect>
+        <text class="eyebrow-svg" x="60" y="330">ANDROID APP — LIVE, FULLY ON-DEVICE, 10HZ (app/)</text>
+
+        <!-- bridge arrow from ONNX export -->
+        <path class="conn" marker-end="url(#arrow)" d="M1325,216 L1325,280 L835,280 L835,346"></path>
+        <text class="edge-label" x="880" y="274">copied into app/assets/ at build (Gradle syncModel)</text>
+
+        <g>
+          <rect class="box" x="740" y="350" width="190" height="55" rx="8"></rect>
+          <text class="box-title" x="754" y="372">ONNX model</text>
+          <text class="box-sub" x="754" y="389">BiasCorrectionModel.kt</text>
+        </g>
+
+        <!-- fusion engine group -->
+        <rect class="group-box" x="500" y="415" width="510" height="235" rx="10"></rect>
+        <text class="group-label" x="516" y="435">FusionEngine.kt — state machine</text>
+
+        <path class="conn" marker-end="url(#arrow)" d="M832,405 L830,426"></path>
+        <text class="edge-label" x="845" y="417">Δv,Δθ / 5s</text>
+
+        <g>
+          <rect class="node-blue" x="520" y="470" width="170" height="60" rx="30" stroke="none"></rect>
+          <text class="node-title text-on-dark" x="605" y="495">GNSS_TRACKING</text>
+          <text class="node-sub text-on-dark" x="605" y="510" opacity="0.85">trust GPS directly</text>
+        </g>
+        <g>
+          <rect class="node-red" x="745" y="430" width="170" height="60" rx="30" stroke="none"></rect>
+          <text class="node-title text-on-dark" x="830" y="455">BLACKOUT</text>
+          <text class="node-sub text-on-dark" x="830" y="470" opacity="0.85">INS-only, 5s chunks</text>
+        </g>
+        <g>
+          <rect class="node-amber" x="745" y="570" width="170" height="60" rx="30" stroke="none"></rect>
+          <text class="node-title text-on-amber" x="830" y="595">BLEND</text>
+          <text class="node-sub text-on-amber" x="830" y="610" opacity="0.85">ramp to GPS, 2s</text>
+        </g>
+
+        <!-- transitions -->
+        <path class="conn" marker-end="url(#arrow)" d="M690,515 L715,515 L715,460 L741,460"></path>
+        <text class="edge-label-em" x="600" y="452">GPS lost</text>
+
+        <path class="conn" marker-end="url(#arrow)" d="M830,490 L830,566"></path>
+        <text class="edge-label-em" x="838" y="533">GPS returns</text>
+
+        <path class="conn" marker-end="url(#arrow)" d="M741,600 L680,600 L680,534"></path>
+        <text class="edge-label-em" x="555" y="597">ramped 2s → 0.0m jump</text>
+
+        <!-- output merge -->
+        <circle class="merge-dot" cx="968" cy="500" r="5"></circle>
+        <path class="conn" d="M690,485 L945,485 L945,495"></path>
+        <path class="conn" d="M915,460 L945,460 L945,495"></path>
+        <path class="conn" d="M915,600 L945,600 L945,505"></path>
+
+        <path class="conn" marker-end="url(#arrow)" d="M973,500 L1026,500"></path>
+        <text class="edge-label" x="978" y="480">fused (x, y, heading)</text>
+
+        <!-- left inputs -->
+        <g>
+          <rect class="box" x="70" y="470" width="180" height="60" rx="8"></rect>
+          <text class="box-title" x="84" y="495">Live sensors</text>
+          <text class="box-sub" x="84" y="512">IMU + GPS, 10Hz tick</text>
+        </g>
+        <g>
+          <rect class="box" x="300" y="470" width="180" height="60" rx="8"></rect>
+          <text class="box-title" x="314" y="495">Calibration</text>
+          <text class="box-sub" x="314" y="512">level + yaw align</text>
+        </g>
+        <path class="conn" marker-end="url(#arrow)" d="M250,500 L296,500"></path>
+        <path class="conn" marker-end="url(#arrow)" d="M480,500 L516,500"></path>
+
+        <!-- right outputs -->
+        <g>
+          <rect class="box" x="1030" y="470" width="180" height="60" rx="8"></rect>
+          <text class="box-title" x="1044" y="495">MapMatcher</text>
+          <text class="box-sub" x="1044" y="512">snap onto road graph</text>
+        </g>
+        <g>
+          <rect class="box" x="1260" y="470" width="180" height="60" rx="8"></rect>
+          <text class="box-title" x="1274" y="495">RoadMapView</text>
+          <text class="box-sub" x="1274" y="512">map · trail · marker</text>
+        </g>
+        <path class="conn" marker-end="url(#arrow)" d="M1210,500 L1256,500"></path>
+        <text class="edge-label" x="1214" y="480">snapped (lat, lon)</text>
+
+        <!-- ============ BREAK CONNECTOR ============ -->
+        <path class="break-line" d="M175,690 L175,783"></path>
+        <line class="break-mark" x1="166" y1="731" x2="184" y2="743"></line>
+        <line class="break-mark" x1="184" y1="731" x2="166" y2="743"></line>
+        <text class="break-label" x="196" y="732">not connected —</text>
+        <text class="break-label" x="196" y="746">independent implementation</text>
+
+        <!-- ============ LANE 3: BACKEND ============ -->
+        <rect class="lane lane-dashed lane3-fill" x="30" y="730" width="1440" height="180" rx="14"></rect>
+        <text class="eyebrow-svg" x="60" y="760">BACKEND — INDEPENDENT SERVER, NO ML (backend/, teammate-built)</text>
+
+        <g>
+          <rect class="box-hypothetical" x="70" y="785" width="210" height="70" rx="8"></rect>
+          <text class="box-title" x="84" y="810">Mobile client</text>
+          <text class="box-sub" x="84" y="827">10Hz IMU / WebSocket</text>
+          <text class="box-sub" x="84" y="840">— none in this repo</text>
+        </g>
+        <g>
+          <rect class="box" x="325" y="785" width="210" height="70" rx="8"></rect>
+          <text class="box-title" x="339" y="810">FastAPI ingest</text>
+          <text class="box-sub" x="339" y="827">priority queue: live P0</text>
+          <text class="box-sub" x="339" y="840">before backlog P1</text>
+        </g>
+        <g>
+          <rect class="box" x="580" y="785" width="210" height="70" rx="8"></rect>
+          <text class="box-title" x="594" y="810">9-DOF EKF</text>
+          <text class="box-sub" x="594" y="827">+ ZUPT, step-count</text>
+          <text class="box-sub" x="594" y="840">backend/app/main.py</text>
+        </g>
+        <g>
+          <rect class="box" x="835" y="785" width="210" height="70" rx="8"></rect>
+          <text class="box-title" x="849" y="810">Redis + TimescaleDB</text>
+          <text class="box-sub" x="849" y="827">1h cache, permanent</text>
+          <text class="box-sub" x="849" y="840">trajectory store</text>
+        </g>
+        <g>
+          <rect class="box" x="1090" y="785" width="210" height="70" rx="8"></rect>
+          <text class="box-title" x="1104" y="810">Dashboard</text>
+          <text class="box-sub" x="1104" y="827">queryable trajectory</text>
+          <text class="box-sub" x="1104" y="840">API + live view</text>
+        </g>
+
+        <path class="conn-muted" marker-end="url(#arrow-muted)" d="M280,820 L321,820"></path>
+        <path class="conn-muted" marker-end="url(#arrow-muted)" d="M535,820 L576,820"></path>
+        <path class="conn-muted" marker-end="url(#arrow-muted)" d="M790,820 L831,820"></path>
+        <path class="conn-muted" marker-end="url(#arrow-muted)" d="M1045,820 L1086,820"></path>
+      </svg>
+    </div>
+    <figcaption>
+      <b>Top:</b> the offline training pipeline — the only link between the
+      two halves is the exported ONNX checkpoint, copied into the app at
+      build time. <b>Middle:</b> the live app's actual mechanism —
+      <code>FusionEngine.kt</code> only calls the trained model while in
+      <b>BLACKOUT</b>; while GPS is available it trusts GPS directly, and
+      reconnect ramps over 2s rather than snapping (measured 0.0m jump).
+      Node colors match the app's own live trail. <b>Bottom:</b> a second,
+      independent implementation — classical, no ML — with no mobile client
+      in this repo actually connecting it to the app above.
+    </figcaption>
+  </figure>
+</div>
