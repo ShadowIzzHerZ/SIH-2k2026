@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The mode-status banner's icon chip — rounded-xl, tinted per mode via
+     android:backgroundTint (bg-orange-50/border-orange-200 in the
+     mockup's own blackout state; GNSS/BLEND use the app's real trail
+     colors instead — see modeIconChip's usage in activity_main.xml). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFF7ED" />
+    <corners android:radius="14dp" />
+    <stroke android:width="1dp" android:color="#FED7AA" />
+</shape>

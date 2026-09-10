@@ -1,15 +1,120 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Light-only, not DayNight: the app's layout hardcodes a white
-         background (activity_main.xml), so letting DayNight switch text
-         to light-on-dark colors under system dark mode made titles/labels
-         invisible against that white background — confirmed on a real
-         device (system dark mode) where the title and mode status text
-         were both actually rendering, just in white-on-white. -->
+    <!-- Light-only, not DayNight: the app's layout hardcodes a light
+         background, so letting DayNight switch text to light-on-dark
+         colors under system dark mode made titles/labels invisible
+         against that background — confirmed on a real device. The "Zen
+         Civic" palette (colors.xml) is itself a light, off-white system,
+         so this constraint costs nothing. -->
     <style name="Theme.DeadReckoning" parent="Theme.MaterialComponents.Light.NoActionBar">
-        <item name="colorPrimary">@color/brand_primary</item>
-        <item name="colorPrimaryDark">@color/brand_primary</item>
-        <item name="colorAccent">@color/brand_accent</item>
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryDark">@color/primary_press</item>
+        <item name="colorAccent">@color/primary</item>
+        <item name="colorSurface">@color/surface</item>
+        <!-- NOT a theme-level default fontFamily — a real bug found live:
+             AppCompat's TextAppearance resolution applies a theme-level
+             android:fontFamily/fontFamily AFTER a view's own style, so it
+             silently won every TextView regardless of which Text.* style
+             (and its own fontFamily) was actually applied. Harmless-
+             looking for body text (Plus Jakarta Sans Regular looked
+             plausible even where a style asked for Bold/SemiBold), but
+             conclusively exposed on Text.Icon: every icon TextView needs
+             PUA codepoints Plus Jakarta Sans doesn't have, so Android's
+             font-fallback chain kicked in — landing on the device's own
+             fallback font, which rendered real (wrong) CJK glyphs at
+             those codepoints instead of the intended icons. Every real
+             Text.* style below sets its own fontFamily explicitly; there
+             is no longer a theme-level one for those to lose to. -->
+        <item name="android:windowBackground">@color/canvas</item>
+    </style>
+
+    <!-- ===== Type scale — subset of the Stitch "Zen Civic" DESIGN.md
+         tokens actually used by this app's real screens. Font weight
+         comes from which .ttf is referenced (fontFamily), not
+         android:textStyle="bold" — Plus Jakarta Sans' weights are
+         separate font files, not a synthetic bold of the regular one. ===== -->
+
+    <style name="Text.HeadlineLg" parent="">
+        <item name="android:fontFamily">@font/plus_jakarta_sans_bold</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">28sp</item>
+        <item name="android:lineSpacingMultiplier">1.15</item>
+    </style>
+
+    <style name="Text.HeadlineMd" parent="">
+        <item name="android:fontFamily">@font/plus_jakarta_sans_bold</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">20sp</item>
+        <item name="android:lineSpacingMultiplier">1.2</item>
+    </style>
+
+    <style name="Text.HeadlineSm" parent="">
+        <item name="android:fontFamily">@font/plus_jakarta_sans_semibold</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="Text.BodyLg" parent="">
+        <item name="android:fontFamily">@font/plus_jakarta_sans_regular</item>
+        <item name="android:textColor">@color/on_surface_variant</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:lineSpacingMultiplier">1.4</item>
+    </style>
+
+    <style name="Text.BodyMd" parent="">
+        <item name="android:fontFamily">@font/plus_jakarta_sans_regular</item>
+        <item name="android:textColor">@color/on_surface_variant</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:lineSpacingMultiplier">1.35</item>
+    </style>
+
+    <style name="Text.LabelMd" parent="">
+        <item name="android:fontFamily">@font/plus_jakarta_sans_medium</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="Text.LabelSm" parent="">
+        <item name="android:fontFamily">@font/plus_jakarta_sans_semibold</item>
+        <item name="android:textColor">@color/on_surface_muted</item>
+        <item name="android:textSize">10.5sp</item>
+        <item name="android:letterSpacing">0.04</item>
+    </style>
+
+    <!-- Precision metrics (speed/heading readout) — DESIGN.md's
+         mono-metric role, Roboto Mono in place of Geist (not on Android's
+         curated Google-Fonts-provider catalog; Roboto Mono is the closest
+         widely-available equivalent and ships from the same foundry as
+         the rest of stock Android, so it never looks like a mismatched
+         substitution). -->
+    <style name="Text.MonoMetric" parent="">
+        <item name="android:fontFamily">@font/roboto_mono_medium</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <!-- Renders one Material Symbols Outlined glyph — same icon font the
+         Stitch mockups themselves use (see strings.xml's ic_* codepoint
+         constants), not a hand-drawn approximation. -->
+    <style name="Text.Icon" parent="">
+        <item name="android:fontFamily">@font/material_symbols_outlined</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:gravity">center</item>
+    </style>
+
+    <!-- Telemetry tile big number (dead_reckoning_navigation mockup's
+         "text-3xl font-bold" values — 42.8, 184°). -->
+    <style name="Text.TileValue" parent="">
+        <item name="android:fontFamily">@font/plus_jakarta_sans_bold</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">26sp</item>
+        <item name="android:letterSpacing">-0.01</item>
+    </style>
+
+    <style name="Text.TileLabel" parent="">
+        <item name="android:fontFamily">@font/plus_jakarta_sans_medium</item>
+        <item name="android:textColor">@color/on_surface_muted</item>
+        <item name="android:textSize">11.5sp</item>
     </style>
 
     <!-- Map color legend (status card) — one colored dot + label per
@@ -23,11 +128,70 @@
         <item name="android:gravity">center_vertical</item>
     </style>
 
-    <style name="LegendLabel">
-        <item name="android:layout_width">wrap_content</item>
+    <style name="LegendLabel" parent="Text.LabelSm">
+        <!-- 0dp+weight, not wrap_content: ellipsize only actually clips
+             text when the view has a bounded width to clip against —
+             wrap_content just grows to fit the text instead, which is
+             what was overflowing "Map-matched" into a second line inside
+             its 1/4-width column on a real device. This fills whatever
+             space is left in its LegendItem row after the fixed-size dot. -->
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_weight">1</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginStart">4dp</item>
-        <item name="android:textColor">#4a5568</item>
-        <item name="android:textSize">10sp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:textSize">9.5sp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+
+    <!-- ===== Widget styles — Zen Civic ===== -->
+
+    <style name="Widget.App.Switch" parent="Widget.MaterialComponents.CompoundButton.Switch">
+        <item name="thumbTint">@color/switch_thumb_tint</item>
+        <item name="trackTint">@color/switch_track_tint</item>
+        <item name="android:fontFamily">@font/plus_jakarta_sans_regular</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <style name="Widget.App.RadioButton" parent="Widget.MaterialComponents.CompoundButton.RadioButton">
+        <item name="buttonTint">@color/primary</item>
+        <item name="android:fontFamily">@font/plus_jakarta_sans_regular</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <style name="Widget.App.Button.Primary" parent="Widget.MaterialComponents.Button">
+        <item name="android:background">@drawable/pill_primary_button</item>
+        <item name="android:textColor">@color/on_primary</item>
+        <item name="android:fontFamily">@font/plus_jakarta_sans_semibold</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:paddingTop">14dp</item>
+        <item name="android:paddingBottom">14dp</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <style name="Widget.App.Button.Secondary" parent="Widget.MaterialComponents.Button.TextButton">
+        <item name="android:background">@drawable/pill_secondary_button</item>
+        <item name="android:textColor">@color/on_surface</item>
+        <item name="android:fontFamily">@font/plus_jakarta_sans_medium</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+
+    <style name="Widget.App.Button.Ghost" parent="Widget.MaterialComponents.Button.TextButton">
+        <item name="android:textColor">@color/primary</item>
+        <item name="android:fontFamily">@font/plus_jakarta_sans_medium</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="rippleColor">@color/primary_container</item>
     </style>
 </resources>
