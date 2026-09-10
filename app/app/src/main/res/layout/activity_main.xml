@@ -872,6 +872,14 @@
                         android:layout_height="wrap_content"
                         android:paddingVertical="4dp"
                         android:text="@string/demo_6_label" />
+
+                    <RadioButton
+                        android:id="@+id/demo7Radio"
+                        style="@style/Widget.App.RadioButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingVertical="4dp"
+                        android:text="@string/demo_7_label" />
                 </RadioGroup>
 
                 <!-- Developer mode — hidden until the title is long-

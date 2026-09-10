@@ -10,6 +10,7 @@
     <string name="demo_4_label">Demo 4 — Jalandhar, Sept 10 · 13:32 (23 min)</string>
     <string name="demo_5_label">Demo 5 — Jalandhar, Sept 10 · 21:17 (18 min)</string>
     <string name="demo_6_label">Demo 6 — Jalandhar, Sept 10 · 21:42 (14 min)</string>
+    <string name="demo_7_label">Demo 7 — comma2k19 highway segment (reference dataset, not ours)</string>
     <string name="status_gnss">GNSS tracking</string>
     <string name="status_blackout">GNSS blackout — INS only</string>
     <string name="status_blend">Reconnecting…</string>
