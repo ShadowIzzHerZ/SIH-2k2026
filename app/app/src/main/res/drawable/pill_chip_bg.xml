@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generic rounded-full chip — tint per use-site with
+     android:backgroundTint (status badges, legend labels). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/surface_sunken" />
+    <corners android:radius="999dp" />
+</shape>

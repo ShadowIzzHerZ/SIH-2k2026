@@ -1,16 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Frosted-glass card look: translucent white pane (map visible through
-     it) with a soft vertical gradient and a light border to read as an
-     actual pane of glass, not just a flat semi-transparent rectangle.
-     True backdrop blur (RenderEffect) needs API 31+ and would need a
-     per-device fallback anyway — this reads as "glassy" on every
-     supported device (minSdk 26) with no version-gating needed. -->
+<!-- Zen Civic card: pure white surface, 20dp corners, a hairline border —
+     replaces the earlier translucent "glass" look (see DESIGN.md's Cards
+     & Grid Panels section). Depth comes from the layout's own elevation
+     (soft ambient shadow), not from the fill itself. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <gradient
-        android:angle="90"
-        android:startColor="#C8FFFFFF"
-        android:centerColor="#B3FFFFFF"
-        android:endColor="#A6FFFFFF" />
+    <solid android:color="@color/surface" />
     <corners android:radius="20dp" />
-    <stroke android:width="1dp" android:color="#A0FFFFFF" />
+    <stroke android:width="1dp" android:color="@color/outline" />
 </shape>

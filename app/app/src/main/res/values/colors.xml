@@ -1,5 +1,77 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- "Zen Civic" palette — exact hex values confirmed directly against
+     the Stitch mockups' own rendered markup (grepped from all three
+     stitch_android_app_stability_audit/*/code.html files, not just
+     DESIGN.md's prose description or its config block, which don't
+     fully agree with what the mockups actually render — e.g. the config
+     names #832b0a "primary" and #a34220 "primary-container", but the
+     button markup itself is `bg-primary hover:bg-primary-container`, so
+     #832b0a is the real resting button color and #a34220 the real
+     press/hover one, the reverse of what the prose section claims).
+     Used verbatim, unchanged, replacing the earlier blue-accent glass-
+     card look. Kept light-only on purpose — see themes.xml's comment
+     for the real dark-mode text-invisibility bug that already fixed. -->
 <resources>
-    <color name="brand_primary">#1a365d</color>
-    <color name="brand_accent">#2563eb</color>
+    <!-- legacy aliases some drawables/layouts still reference -->
+    <color name="brand_primary">#141B2B</color>
+    <color name="brand_accent">#832B0A</color>
+
+    <!-- canvas / surfaces — <body class="bg-[#fafafa]/bg-[#F9FAFB]"> in
+         2 of 3 mockups, prose confirms #FAFAFA; cards are bg-white. -->
+    <color name="canvas">#FAFAFA</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_sunken">#E9EDFF</color>
+
+    <!-- text — text-[#141b2b]/text-on-surface for headings,
+         text-secondary (config: "secondary": "#545f72") for body/muted,
+         confirmed used identically across all three mockups. -->
+    <color name="on_surface">#141B2B</color>
+    <color name="on_surface_variant">#545F72</color>
+    <color name="on_surface_muted">#545F72</color>
+
+    <!-- borders — every real card in the markup is literally
+         "border-slate-200" (Tailwind's stock slate-200), not the custom
+         "outline" token DESIGN.md's config defines but the markup never
+         actually applies to a border. -->
+    <color name="outline">#E2E8F0</color>
+    <color name="outline_strong">#CBD5E1</color>
+
+    <!-- primary accent — terracotta/rust. #832B0A is the real default
+         button fill (bg-primary); #A34220 is the real hover/press color
+         (hover:bg-primary-container) — reversed from DESIGN.md's own
+         prose section, which doesn't match its generated markup here. -->
+    <color name="primary">#832B0A</color>
+    <color name="primary_hover">#A34220</color>
+    <color name="primary_press">#A34220</color>
+    <!-- icon-circle fill is literally Tailwind's stock orange-100 at
+         ~70% opacity (bg-orange-100/70), with the icon itself in
+         text-primary (#832B0A) — confirmed on both the location-access
+         and sensor-calibration mockups. -->
+    <color name="primary_container">#FFEDD5</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="on_primary_container">#832B0A</color>
+
+    <!-- secondary — slate, same value/role as on_surface_variant above. -->
+    <color name="secondary">#545F72</color>
+
+    <!-- status colors — same real hex the app's live trail already uses
+         (RoadMapView.kt's modeColor()); kept identical so the legend and
+         the state-machine trail always agree with each other. Not part
+         of the Stitch design (its own screens don't define blackout/
+         reconnect states), so left as the app's own established colors
+         rather than invented to match. -->
+    <color name="status_gnss">#2563EB</color>
+    <color name="status_blackout">#DC2626</color>
+    <color name="status_blend">#F59E0B</color>
+    <color name="status_matched">#16A34A</color>
+    <color name="status_calibrating">#545F72</color>
+
+    <!-- semantic — sensor_calibration's own warning/info banner is
+         literally bg-orange-50 / border-orange-200 / text-primary-container. -->
+    <color name="warning">#832B0A</color>
+    <color name="warning_container">#FFF7ED</color>
+    <color name="on_warning_container">#832B0A</color>
+    <color name="success">#2D6A4F</color>
+    <color name="error">#BA1A1A</color>
+    <color name="error_container">#FFDAD6</color>
 </resources>

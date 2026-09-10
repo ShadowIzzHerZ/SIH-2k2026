@@ -1,13 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Zen Civic — pixel-matched to the Stitch mockups' own structure
+     (stitch_android_app_stability_audit/*/code.html): fixed top app bar,
+     full-bleed map with floating cards over it, fixed bottom nav with
+     real destinations. Only real app data/actions are wired in — the
+     mockups' own CAN Bus tag, "100Hz", pedestrian step tile, and ×1/×2/×5
+     simulation-speed control have no real backing in this app and are
+     left out rather than faked; everything else (structure, spacing,
+     colors, icons — the real Material Symbols Outlined font, same as the
+     mockups use) follows the design exactly. -->
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#ffffff">
+    android:background="@color/canvas">
 
-    <!-- Full-bleed real map — see RoadMapView.kt (osmdroid + OSM tiles,
-         same free-tile approach as the Zen/DevStorm-2026 project's
-         Leaflet map, ported to native Android). -->
+    <!-- Full-bleed real map — see RoadMapView.kt. Sits under the fixed
+         top bar and bottom nav, and under the floating content cards. -->
     <com.sih26168.deadreckoning.RoadMapView
         android:id="@+id/roadMapView"
         android:layout_width="0dp"
@@ -17,269 +25,1227 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
-    <!-- Floating status card over the map, app-like rather than pushing
-         the map down. -->
+    <!-- ==================== FIXED TOP APP BAR ====================
+         Text swaps per active tab (Live Map / Sensors) — see
+         MainActivity.updateHeaderForTab() — same header view, not two
+         duplicated bars, since only the copy differs, not the data. -->
     <LinearLayout
-        android:id="@+id/statusCard"
+        android:id="@+id/topAppBar"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:orientation="vertical"
-        android:background="@drawable/card_background"
-        android:padding="14dp"
-        android:elevation="6dp"
+        android:layout_height="64dp"
+        android:background="@color/surface"
+        android:elevation="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <TextView
-            android:id="@+id/titleText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/app_name"
-            android:textColor="#1a202c"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <View
-                android:id="@+id/statusDot"
-                android:layout_width="10dp"
-                android:layout_height="10dp"
-                android:layout_marginEnd="8dp"
-                android:background="@drawable/status_dot" />
+        <FrameLayout
+            android:id="@+id/headerIconCircle"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/icon_circle_bg">
 
             <TextView
-                android:id="@+id/modeText"
-                android:layout_width="0dp"
+                android:id="@+id/headerIcon"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:text="@string/ic_near_me"
+                android:textColor="@color/on_primary_container"
+                android:textSize="18sp"
+                style="@style/Text.Icon" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/titleText"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/status_calibrating"
-                android:textColor="#1a202c"
-                android:textSize="15sp" />
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/offline_navigation_title"
+                style="@style/Text.HeadlineSm" />
+
+            <TextView
+                android:id="@+id/subtitleText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/offline_navigation_subtitle"
+                style="@style/Text.TileLabel" />
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/detailText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:textColor="#4a5568"
-            android:textSize="12sp" />
-
-        <ProgressBar
-            android:id="@+id/calibrationProgress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:indeterminate="false"
-            android:max="100"
-            android:progressTint="#2563eb" />
-
-        <!-- Legend — appears once calibration finishes and the map starts
-             drawing, so a judge glancing at the screen doesn't need it
-             explained out loud. -->
+        <!-- Motion-sensors-ready pill — real: this header only ever
+             renders once sensorReader.available already passed (see
+             missingSensorsCard for the alternative), so it's an honest
+             constant status, not a fabricated always-green light. -->
         <LinearLayout
-            android:id="@+id/legendRow"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:background="@drawable/pill_white_bg"
+            android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:visibility="gone">
+            android:paddingStart="10dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
 
-            <LinearLayout style="@style/LegendItem">
-                <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_gnss" />
-                <TextView style="@style/LegendLabel" android:text="@string/legend_gnss" />
-            </LinearLayout>
+            <View
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/legend_dot_matched" />
 
-            <LinearLayout style="@style/LegendItem">
-                <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_blackout" />
-                <TextView style="@style/LegendLabel" android:text="@string/legend_blackout" />
-            </LinearLayout>
-
-            <LinearLayout style="@style/LegendItem">
-                <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_blend" />
-                <TextView style="@style/LegendLabel" android:text="@string/legend_blend" />
-            </LinearLayout>
-
-            <LinearLayout style="@style/LegendItem">
-                <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_matched" />
-                <TextView style="@style/LegendLabel" android:text="@string/legend_matched" />
-            </LinearLayout>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/sensors_ready_pill"
+                style="@style/Text.LabelMd" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Floating toggle card over the map, bottom-anchored. -->
+    <!-- ==================== LIVE MAP TAB — floating content ==================== -->
     <LinearLayout
-        android:id="@+id/controlsCard"
+        android:id="@+id/liveMapContent"
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="20dp"
+        android:layout_height="0dp"
         android:orientation="vertical"
-        android:background="@drawable/card_background"
-        android:padding="6dp"
-        android:elevation="6dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        android:paddingHorizontal="12dp"
+        android:paddingTop="10dp"
+        app:layout_constraintTop_toBottomOf="@id/topAppBar"
+        app:layout_constraintBottom_toTopOf="@id/bottomNav"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <com.google.android.material.switchmaterial.SwitchMaterial
-            android:id="@+id/replayToggle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingTop="8dp"
-            android:paddingBottom="4dp"
-            android:text="@string/replay_real_drive"
-            android:textColor="#1a202c"
-            android:textSize="14sp" />
-
-        <!-- Which real recorded drive to replay — both are genuine
-             DevRecorder captures from live testing in Jalandhar, Punjab
-             (see data/own_recordings/), not synthetic data. Only shown
-             while replayToggle is on. -->
-        <RadioGroup
-            android:id="@+id/demoSelector"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingBottom="4dp"
-            android:visibility="gone">
-
-            <RadioButton
-                android:id="@+id/demo1Radio"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:checked="true"
-                android:text="@string/demo_1_label"
-                android:textColor="#1a202c"
-                android:textSize="13sp" />
-
-            <RadioButton
-                android:id="@+id/demo2Radio"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/demo_2_label"
-                android:textColor="#1a202c"
-                android:textSize="13sp" />
-        </RadioGroup>
-
-        <com.google.android.material.switchmaterial.SwitchMaterial
-            android:id="@+id/blackoutToggle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="8dp"
-            android:text="@string/simulate_blackout"
-            android:textColor="#1a202c"
-            android:textSize="14sp" />
-
-        <!-- Developer mode — hidden until the title is long-pressed (see
-             MainActivity), not something a judge stumbles into by
-             accident. Records real sensor+GPS data to a CSV in the exact
-             shape src/data/io_vnbd_loader.py already fuzzy-matches — see
-             DevRecorder.kt's docstring for why this is data collection,
-             not on-device training. -->
+        <!-- Calibrating state: ring + stage text — same real
+             CalibrationManager.progressPercent value as before, just
+             re-homed as the first floating card instead of one big card. -->
         <LinearLayout
-            android:id="@+id/devSection"
+            android:id="@+id/calibratingCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_background"
+            android:elevation="3dp"
+            android:orientation="vertical"
+            android:padding="18dp">
+
+            <TextView
+                android:id="@+id/detailText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                style="@style/Text.BodyMd" />
+
+            <!-- ConstraintLayout, not FrameLayout+layout_gravity: pins the
+                 percent text's all 4 edges directly to the ring's own,
+                 immune to any gravity-resolution surprise from the ring's
+                 own internal drawing inset — the real "the percentage was
+                 outside the circle" bug traced back to exactly that kind
+                 of independent-centering path once already (see the
+                 96dp-container fix below it inherits), and re-surfaced
+                 after this section was rebuilt for the Zen Civic port, so
+                 this version makes the two positions structurally
+                 impossible to diverge rather than relying on them
+                 independently agreeing. -->
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:id="@+id/calibrationRingContainer"
+                android:layout_width="96dp"
+                android:layout_height="96dp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="14dp">
+
+                <!-- app:indicatorSize is the real fix: CircularProgressIndicator
+                     draws its ring at indicatorSize regardless of the
+                     view's own measured layout bounds (that's a separate,
+                     Material-internal default — NOT derived from
+                     layout_width/height, even when those are set to fill
+                     the parent) — the actual root cause of the ring
+                     drawing small and off-center while the text centered
+                     correctly on the full 96dp box around it. -->
+                <com.google.android.material.progressindicator.CircularProgressIndicator
+                    android:id="@+id/calibrationProgress"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:indeterminate="false"
+                    android:max="100"
+                    app:indicatorColor="@color/primary"
+                    app:indicatorSize="88dp"
+                    app:trackColor="@color/surface_sunken"
+                    app:trackCornerRadius="6dp"
+                    app:trackThickness="7dp"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintEnd_toEndOf="parent" />
+
+                <TextView
+                    android:id="@+id/calibrationPercentText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:text="0%"
+                    style="@style/Text.HeadlineMd"
+                    app:layout_constraintTop_toTopOf="@id/calibrationProgress"
+                    app:layout_constraintBottom_toBottomOf="@id/calibrationProgress"
+                    app:layout_constraintStart_toStartOf="@id/calibrationProgress"
+                    app:layout_constraintEnd_toEndOf="@id/calibrationProgress" />
+            </androidx.constraintlayout.widget.ConstraintLayout>
+        </LinearLayout>
+
+        <!-- Tracking state: mode banner, legend pill, telemetry grid,
+             controls dock — all real, all gone until calibration
+             finishes (see MainActivity's legend-reveal block). -->
+        <LinearLayout
+            android:id="@+id/trackingContent"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:visibility="gone">
 
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginTop="4dp"
-                android:layout_marginBottom="4dp"
-                android:background="#40FFFFFF" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:text="@string/dev_mode_label"
-                android:textColor="#94a3b8"
-                android:textSize="11sp"
-                android:textStyle="bold" />
-
-            <com.google.android.material.switchmaterial.SwitchMaterial
-                android:id="@+id/devRecordToggle"
+            <!-- Mode-status banner — icon chip + dot colored per the
+                 app's real FusionMode (blue/red/amber, same hex the trail
+                 itself uses), title/body text per mode, "Simulated" badge
+                 only when the demo toggle (not a real blackout) is on,
+                 elapsed time only meaningful in BLACKOUT. -->
+            <LinearLayout
+                android:id="@+id/modeBanner"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="4dp"
-                android:text="@string/dev_record_toggle"
-                android:textColor="#1a202c"
-                android:textSize="14sp" />
+                android:background="@drawable/card_background"
+                android:elevation="3dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="14dp">
 
-            <TextView
-                android:id="@+id/devRecordStatus"
+                <FrameLayout
+                    android:id="@+id/modeIconChip"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/mode_icon_chip_bg">
+
+                    <TextView
+                        android:id="@+id/modeIconText"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:text="@string/ic_near_me"
+                        android:textColor="@color/on_primary_container"
+                        android:textSize="20sp"
+                        style="@style/Text.Icon" />
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/modeText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/status_calibrating"
+                            style="@style/Text.HeadlineSm" />
+
+                        <TextView
+                            android:id="@+id/simulatedBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:background="@drawable/pill_chip_bg"
+                            android:paddingHorizontal="8dp"
+                            android:paddingVertical="2dp"
+                            android:text="@string/badge_simulated"
+                            android:visibility="gone"
+                            style="@style/Text.LabelSm" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/modeBodyText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        style="@style/Text.BodyMd" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Legend pill — real 4-item legend (GPS/Blackout/Reconnect/
+                 Map-matched), floating over the map like the mockup's own
+                 path-legend pill, populated with what this app actually
+                 draws rather than the mockup's 2-item placeholder. -->
+            <LinearLayout
+                android:id="@+id/legendRow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/pill_white_bg"
+                android:elevation="2dp"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="8dp">
+
+                <LinearLayout style="@style/LegendItem">
+                    <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_gnss" />
+                    <TextView style="@style/LegendLabel" android:text="@string/legend_gnss" />
+                </LinearLayout>
+
+                <LinearLayout style="@style/LegendItem" android:layout_marginStart="10dp">
+                    <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_blackout" />
+                    <TextView style="@style/LegendLabel" android:text="@string/legend_blackout" />
+                </LinearLayout>
+
+                <LinearLayout style="@style/LegendItem" android:layout_marginStart="10dp">
+                    <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_blend" />
+                    <TextView style="@style/LegendLabel" android:text="@string/legend_blend" />
+                </LinearLayout>
+
+                <LinearLayout style="@style/LegendItem" android:layout_marginStart="10dp">
+                    <View android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/legend_dot_matched" />
+                    <TextView style="@style/LegendLabel" android:text="@string/legend_matched" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Telemetry grid — 2 real tiles (Speed, Heading). The
+                 mockup's other two tiles (Drift/Confidence, Pedestrian
+                 steps) have no real per-tick backing in this app — no
+                 live drift estimate during a real blackout (ground truth
+                 is exactly what's missing then), no step-counter — so
+                 they're left out rather than shown with invented numbers. -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingStart="10dp"
-                android:paddingEnd="10dp"
-                android:paddingBottom="4dp"
-                android:textColor="#4a5568"
-                android:textSize="12sp" />
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/devShareButton"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/card_background"
+                    android:elevation="3dp"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="16dp"
+                            android:layout_height="16dp"
+                            android:text="@string/ic_speed"
+                            android:textColor="@color/on_surface_muted"
+                            android:textSize="14sp"
+                            style="@style/Text.Icon" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:layout_weight="1"
+                            android:text="@string/tile_current_speed"
+                            style="@style/Text.TileLabel" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:gravity="bottom">
+
+                        <TextView
+                            android:id="@+id/speedValueText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0.0"
+                            style="@style/Text.TileValue" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:paddingBottom="3dp"
+                            android:text="km/h"
+                            style="@style/Text.TileLabel" />
+                    </LinearLayout>
+
+                    <ProgressBar
+                        android:id="@+id/speedBar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="6dp"
+                        android:layout_marginTop="8dp"
+                        android:indeterminate="false"
+                        android:max="100"
+                        android:progressBackgroundTint="@color/surface_sunken"
+                        android:progressTint="@color/primary" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/card_background"
+                    android:elevation="3dp"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="16dp"
+                            android:layout_height="16dp"
+                            android:text="@string/ic_explore"
+                            android:textColor="@color/on_surface_muted"
+                            android:textSize="14sp"
+                            style="@style/Text.Icon" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:layout_weight="1"
+                            android:text="@string/tile_heading"
+                            style="@style/Text.TileLabel" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:gravity="bottom">
+
+                        <TextView
+                            android:id="@+id/headingValueText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0°"
+                            style="@style/Text.TileValue" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/headingCompassText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:textColor="@color/primary"
+                        android:textSize="11.5sp"
+                        style="@style/Text.LabelMd" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Controls dock — mirrors the mockup's own dock exactly:
+                 blackout toggle + Reset filter + Recording log. The
+                 mockup's ×1/×2/×5 simulation-speed control has no real
+                 feature behind it in this app and is left out. -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/dev_share_button"
-                android:textAllCaps="false"
-                android:visibility="gone" />
+                android:layout_marginTop="10dp"
+                android:background="@drawable/card_background"
+                android:elevation="3dp"
+                android:orientation="vertical"
+                android:padding="14dp">
 
-            <!-- Real calibration deliberately waits for genuine motion
-                 (see CalibrationManager's class doc) — this bypasses it for
-                 testing only, never meant to speed up a real demo run. Only
-                 does anything while calibration is still in progress. -->
-            <Button
-                android:id="@+id/devSkipCalibrationButton"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/dev_skip_calibration_button"
-                android:textAllCaps="false" />
+                <com.google.android.material.switchmaterial.SwitchMaterial
+                    android:id="@+id/blackoutToggle"
+                    style="@style/Widget.App.Switch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingBottom="12dp"
+                    android:text="@string/simulate_blackout" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/resetFilterButton"
+                        style="@style/Widget.App.Button.Secondary"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/reset_filter_button" />
+
+                    <LinearLayout
+                        android:id="@+id/recordingLogChip"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:background="@drawable/mode_icon_chip_bg"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="12dp"
+                        android:paddingVertical="10dp"
+                        android:visibility="gone">
+
+                        <View
+                            android:layout_width="9dp"
+                            android:layout_height="9dp"
+                            android:background="@drawable/legend_dot_blackout" />
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/recording_log_label"
+                                style="@style/Text.LabelSm" />
+
+                            <TextView
+                                android:id="@+id/recordingLogTimeText"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="00:00:00"
+                                style="@style/Text.MonoMetric" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 
-    <!-- Recenter — a real map you can pan away from needs a way back,
-         same idea as Zen's mapView.js recenter button. -->
+    <!-- ==================== SENSORS TAB ====================
+         Pixel-matched to the sensor_calibration mockup: live raw accel/
+         gyro X/Y/Z (real, sensorReader), the same Skip-calibration
+         control (real, already existed), and the same replay-fallback
+         card (real — flips replayToggle). The mockup's "Walking Paces"/
+         "Distance Moved" dual-metric boxes and ZUPT segment bar have no
+         real backing in CalibrationManager and are left out. -->
+    <ScrollView
+        android:id="@+id/sensorsPanel"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/canvas"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/topAppBar"
+        app:layout_constraintBottom_toTopOf="@id/bottomNav"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/sensors_panel_title"
+                    style="@style/Text.HeadlineSm" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/pill_chip_bg"
+                    android:backgroundTint="#ECFDF5"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="5dp">
+
+                    <View
+                        android:layout_width="7dp"
+                        android:layout_height="7dp"
+                        android:background="@drawable/legend_dot_matched" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:text="@string/sensors_panel_live_badge"
+                        android:textColor="@color/success"
+                        style="@style/Text.LabelSm" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Accelerometer -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/card_background"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:text="@string/ic_speed"
+                        android:textColor="@color/primary"
+                        android:textSize="15sp"
+                        style="@style/Text.Icon" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:text="@string/sensors_accelerometer"
+                        style="@style/Text.HeadlineSm" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/sensors_accelerometer_unit"
+                        style="@style/Text.MonoMetric" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+
+                    <include android:id="@+id/accelX" layout="@layout/axis_readout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+                    <include android:id="@+id/accelY" layout="@layout/axis_readout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="8dp" />
+                    <include android:id="@+id/accelZ" layout="@layout/axis_readout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="8dp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Gyroscope -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/card_background"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:text="@string/ic_rotate_right"
+                        android:textColor="@color/primary"
+                        android:textSize="15sp"
+                        style="@style/Text.Icon" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:layout_weight="1"
+                        android:text="@string/sensors_gyroscope"
+                        style="@style/Text.HeadlineSm" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/sensors_gyroscope_unit"
+                        style="@style/Text.MonoMetric" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+
+                    <include android:id="@+id/gyroX" layout="@layout/axis_readout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+                    <include android:id="@+id/gyroY" layout="@layout/axis_readout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="8dp" />
+                    <include android:id="@+id/gyroZ" layout="@layout/axis_readout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="8dp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Skip calibration — same real testing-only shortcut as
+                 before (CalibrationManager.skipForTesting()), restyled. -->
+            <Button
+                android:id="@+id/devSkipCalibrationButton"
+                style="@style/Widget.App.Button.Secondary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/dev_skip_calibration_button" />
+
+            <!-- Replay fallback — real: flips the same replayToggle the
+                 Simulation tab exposes directly. -->
+            <LinearLayout
+                android:id="@+id/replayFallbackCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/banner_warning_bg"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <FrameLayout
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:background="@drawable/icon_circle_bg">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:text="@string/ic_info"
+                            android:textColor="@color/on_primary_container"
+                            android:textSize="15sp"
+                            style="@style/Text.Icon" />
+                    </FrameLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/location_needed_settings_title"
+                            style="@style/Text.LabelMd" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/replay_real_drive"
+                            style="@style/Text.BodyMd" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/switchToReplayButton"
+                    style="@style/Widget.App.Button.Secondary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/replay_real_drive" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ==================== SIMULATION TAB ====================
+         Every real demo/testing control this app has that doesn't fit
+         the mockups' minimal always-on dock: which real recorded drive
+         to replay, and the hidden Developer Mode data-collection tools. -->
+    <ScrollView
+        android:id="@+id/simulationPanel"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/canvas"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/topAppBar"
+        app:layout_constraintBottom_toTopOf="@id/bottomNav"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="14dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="10dp"
+                android:text="@string/simulation_panel_title"
+                style="@style/Text.HeadlineSm" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/card_background"
+                android:orientation="vertical"
+                android:padding="8dp">
+
+                <com.google.android.material.switchmaterial.SwitchMaterial
+                    android:id="@+id/replayToggle"
+                    style="@style/Widget.App.Switch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="4dp"
+                    android:text="@string/replay_real_drive" />
+
+                <!-- Which real recorded drive to replay — both are
+                     genuine DevRecorder captures from live testing in
+                     Jalandhar, Punjab (see data/own_recordings/), not
+                     synthetic data. -->
+                <RadioGroup
+                    android:id="@+id/demoSelector"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="4dp"
+                    android:visibility="gone">
+
+                    <RadioButton
+                        android:id="@+id/demo1Radio"
+                        style="@style/Widget.App.RadioButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:checked="true"
+                        android:text="@string/demo_1_label" />
+
+                    <RadioButton
+                        android:id="@+id/demo2Radio"
+                        style="@style/Widget.App.RadioButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/demo_2_label" />
+                </RadioGroup>
+
+                <!-- Developer mode — hidden until the title is long-
+                     pressed, not something a judge stumbles into. -->
+                <LinearLayout
+                    android:id="@+id/devSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="4dp"
+                        android:background="@color/outline" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:text="@string/dev_mode_label"
+                        style="@style/Text.LabelSm" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/devRecordToggle"
+                        style="@style/Widget.App.Switch"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:paddingTop="4dp"
+                        android:paddingBottom="4dp"
+                        android:text="@string/dev_record_toggle" />
+
+                    <TextView
+                        android:id="@+id/devRecordStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:paddingBottom="4dp"
+                        style="@style/Text.BodyMd" />
+
+                    <Button
+                        android:id="@+id/devShareButton"
+                        style="@style/Widget.App.Button.Ghost"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/dev_share_button"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Recenter — floats above the bottom nav, over the map. -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/recenterButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
         android:contentDescription="@string/recenter"
-        app:backgroundTint="@color/brand_accent"
-        app:tint="@android:color/white"
+        app:backgroundTint="@color/primary"
+        app:tint="@color/on_primary"
         app:srcCompat="@drawable/ic_recenter"
-        app:layout_constraintBottom_toTopOf="@id/controlsCard"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginBottom="12dp" />
+        app:layout_constraintBottom_toTopOf="@id/bottomNav"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- ==================== FIXED BOTTOM NAVIGATION ====================
+         4 real destinations: Live Map (default) / Sensors / Simulation
+         (all real content panels above) / Reset (a real immediate
+         action, not a screen — see MainActivity.performResetFilter()). -->
+    <LinearLayout
+        android:id="@+id/bottomNav"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@color/surface"
+        android:elevation="6dp"
+        android:orientation="horizontal"
+        android:paddingVertical="8dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:id="@+id/navLiveMap"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/mode_icon_chip_bg"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingVertical="8dp">
+
+            <TextView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:text="@string/ic_explore"
+                android:textColor="@color/on_primary_container"
+                android:textSize="17sp"
+                style="@style/Text.Icon" />
+
+            <TextView
+                android:id="@+id/navLiveMapLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/nav_live_map"
+                android:textColor="@color/on_primary_container"
+                style="@style/Text.LabelSm" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/navSensors"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingVertical="8dp">
+
+            <TextView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:text="@string/ic_sensors"
+                android:textColor="@color/on_surface_muted"
+                android:textSize="17sp"
+                style="@style/Text.Icon" />
+
+            <TextView
+                android:id="@+id/navSensorsLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/nav_sensors"
+                android:textColor="@color/on_surface_muted"
+                style="@style/Text.LabelSm" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/navSimulation"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingVertical="8dp">
+
+            <TextView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:text="@string/ic_signal_disconnected"
+                android:textColor="@color/on_surface_muted"
+                android:textSize="17sp"
+                style="@style/Text.Icon" />
+
+            <TextView
+                android:id="@+id/navSimulationLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/nav_simulation"
+                android:textColor="@color/on_surface_muted"
+                style="@style/Text.LabelSm" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/navReset"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingVertical="8dp">
+
+            <TextView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:text="@string/ic_restart_alt"
+                android:textColor="@color/on_surface_muted"
+                android:textSize="17sp"
+                style="@style/Text.Icon" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/nav_reset"
+                android:textColor="@color/on_surface_muted"
+                style="@style/Text.LabelSm" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ============================================================
+         Location-access-needed — unchanged from before, still covers
+         everything above when location permission isn't granted. ============================== -->
+    <LinearLayout
+        android:id="@+id/locationRequiredCard"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/canvas"
+        android:orientation="vertical"
+        android:paddingHorizontal="28dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <Space android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+
+        <FrameLayout
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_gravity="center_horizontal"
+            android:background="@drawable/icon_circle_bg">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:text="@string/ic_near_me"
+                android:textColor="@color/on_primary_container"
+                android:textSize="44sp"
+                style="@style/Text.Icon" />
+        </FrameLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:gravity="center"
+            android:text="@string/location_needed_title"
+            style="@style/Text.HeadlineLg" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:text="@string/location_needed_body"
+            style="@style/Text.BodyLg" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/card_background"
+            android:orientation="horizontal"
+            android:padding="16dp">
+
+            <FrameLayout
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/icon_circle_bg">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:text="@string/ic_near_me"
+                    android:textColor="@color/on_primary_container"
+                    android:textSize="18sp"
+                    style="@style/Text.Icon" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/location_needed_feature_title"
+                    style="@style/Text.HeadlineSm" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/location_needed_feature_body"
+                    style="@style/Text.BodyMd" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/enableLocationButton"
+            style="@style/Widget.App.Button.Primary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/location_needed_enable_button" />
+
+        <LinearLayout
+            android:id="@+id/openSettingsButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/pill_secondary_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="14dp">
+
+            <TextView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:text="@string/ic_settings"
+                android:textColor="@color/on_surface_variant"
+                android:textSize="18sp"
+                style="@style/Text.Icon" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/location_needed_settings_title"
+                    style="@style/Text.LabelMd" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/location_needed_settings_body"
+                    style="@style/Text.BodyMd" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/continueDemoLink"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:padding="10dp"
+            android:text="@string/location_needed_demo_link"
+            style="@style/Text.LabelMd"
+            android:textColor="@color/primary" />
+
+        <Space android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+    </LinearLayout>
+
+    <!-- Missing accelerometer/gyroscope — genuinely nothing to retry. -->
+    <LinearLayout
+        android:id="@+id/missingSensorsCard"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@color/canvas"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingHorizontal="28dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <FrameLayout
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_gravity="center_horizontal"
+            android:background="@drawable/icon_circle_bg"
+            android:backgroundTint="@color/error_container">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:text="@string/ic_near_me"
+                android:textColor="@color/error"
+                android:textSize="44sp"
+                style="@style/Text.Icon" />
+        </FrameLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:gravity="center"
+            android:text="@string/missing_sensors_title"
+            style="@style/Text.HeadlineLg" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:text="@string/missing_sensors_body"
+            style="@style/Text.BodyLg" />
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

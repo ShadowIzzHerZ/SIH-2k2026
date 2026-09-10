@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One accel/gyro axis cell — matches the sensor_calibration mockup's
+     per-axis boxes (label, mono value, small fill bar). Included 6x
+     (accelX/Y/Z, gyroX/Y/Z) from activity_main.xml; MainActivity looks
+     up each instance's children via its include id + findViewById on
+     the inflated root. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/surface_sunken"
+    android:orientation="vertical"
+    android:padding="8dp">
+
+    <TextView
+        android:id="@+id/axisLabel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="X"
+        style="@style/Text.LabelSm" />
+
+    <TextView
+        android:id="@+id/axisValue"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:gravity="center"
+        android:text="+0.000"
+        style="@style/Text.MonoMetric" />
+
+    <ProgressBar
+        android:id="@+id/axisBar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_marginTop="6dp"
+        android:indeterminate="false"
+        android:max="100"
+        android:progress="0"
+        android:progressBackgroundTint="@color/outline"
+        android:progressTint="@color/primary" />
+
+</LinearLayout>

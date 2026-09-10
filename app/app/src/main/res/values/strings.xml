@@ -26,4 +26,83 @@
     <string name="dev_mode_off_toast">Developer mode hidden</string>
     <string name="dev_record_blocked_replay">Turn off Replay first — recording replay data would just duplicate existing training data</string>
     <string name="dev_skip_calibration_button">Skip calibration (testing)</string>
+
+    <!-- Location-access-needed screen (Zen Civic restyle) — a real screen
+         replacing what used to be a dead-end status-text swap with no
+         way forward. See MainActivity's permission-handling code for the
+         three real actions this wires to. -->
+    <string name="location_needed_badge">GPS paused</string>
+    <string name="location_needed_title">Location access needed</string>
+    <string name="location_needed_body">We need your location to keep track of where you\'re going when GPS drops.</string>
+    <string name="location_needed_feature_title">Dead-reckoning fusion</string>
+    <string name="location_needed_feature_body">Anchors the motion sensors so dead reckoning can pick up the moment GPS goes quiet — in a tunnel, a parking garage, between buildings.</string>
+    <string name="location_needed_enable_button">Enable location access</string>
+    <string name="location_needed_settings_title">Open app settings</string>
+    <string name="location_needed_settings_body">If location was previously denied in OS permissions</string>
+    <string name="location_needed_demo_link">Continue in demo mode</string>
+    <string name="missing_sensors_title">Motion sensors unavailable</string>
+    <string name="missing_sensors_body">This device is missing an accelerometer or gyroscope — dead reckoning needs both and can\'t run without them.</string>
+
+    <!-- Material Symbols Outlined codepoints — the exact icon font/glyphs
+         the Stitch mockups themselves use (material-symbols-outlined
+         span, e.g. near_me/gps_off/speed/explore/restart_alt/sensors),
+         confirmed against Google's own published codepoints file, not
+         hand-drawn approximations. Rendered via a TextView styled with
+         Text.Icon (fontFamily=material_symbols_outlined). -->
+    <string name="ic_near_me">&#xe569;</string>
+    <string name="ic_gps_off">&#xe1b6;</string>
+    <string name="ic_gps_not_fixed">&#xe1b7;</string>
+    <string name="ic_sync">&#xe627;</string>
+    <string name="ic_speed">&#xe9e4;</string>
+    <string name="ic_explore">&#xe87a;</string>
+    <string name="ic_restart_alt">&#xf053;</string>
+    <string name="ic_sensors">&#xe51e;</string>
+    <string name="ic_signal_disconnected">&#xf239;</string>
+    <string name="ic_flash_off">&#xe3e6;</string>
+    <string name="ic_settings">&#xe8b8;</string>
+    <string name="ic_chevron_right">&#xe5cc;</string>
+    <string name="ic_fast_forward">&#xe01f;</string>
+    <string name="ic_info">&#xe88e;</string>
+    <string name="ic_history_toggle_off">&#xf17d;</string>
+    <string name="ic_rotate_right">&#xe41a;</string>
+    <string name="ic_autorenew">&#xe863;</string>
+
+    <!-- Live-map screen (Zen Civic, pixel-matched to the
+         dead_reckoning_navigation mockup) -->
+    <string name="offline_navigation_title">Offline Navigation</string>
+    <string name="offline_navigation_subtitle">Dead reckoning active · 10Hz</string>
+    <string name="sensors_ready_pill">Motion sensors ready</string>
+    <string name="banner_gnss_title">GPS tracking</string>
+    <string name="banner_gnss_body">Live position from GPS</string>
+    <string name="banner_blackout_title">GPS signal dropped</string>
+    <string name="banner_blackout_body">Tracking your path with motion sensors</string>
+    <string name="banner_blend_title">GPS reconnecting</string>
+    <string name="banner_blend_body">Blending back to GPS over 2s</string>
+    <string name="badge_simulated">Simulated</string>
+    <string name="tile_current_speed">Current speed</string>
+    <string name="tile_heading">Heading</string>
+    <string name="reset_filter_button">Reset filter</string>
+    <string name="reset_filter_toast">Filter reset — trail and fusion state cleared, calibration kept</string>
+    <string name="recording_log_label">Recording log</string>
+    <string name="nav_live_map">Live Map</string>
+    <string name="nav_sensors">Sensors</string>
+    <string name="nav_simulation">Simulation</string>
+    <string name="nav_reset">Reset</string>
+
+    <!-- Sensors tab (pixel-matched to the sensor_calibration mockup's
+         own "Motion Stream" section — same real live accel/gyro axis
+         readout, just as its own destination instead of only shown
+         during calibration). -->
+    <string name="sensors_panel_title">Motion Stream</string>
+    <string name="sensors_panel_live_badge">Live · 10Hz</string>
+    <string name="sensors_accelerometer">Accelerometer</string>
+    <string name="sensors_accelerometer_unit">m/s²</string>
+    <string name="sensors_gyroscope">Gyroscope</string>
+    <string name="sensors_gyroscope_unit">rad/s</string>
+
+    <!-- Simulation tab — every existing demo/testing control, moved out
+         of the always-on HUD dock (which now only keeps the mockup's own
+         blackout toggle + reset + recording log) into its own real
+         destination, matching the bottom nav's own "Simulation" tab. -->
+    <string name="simulation_panel_title">Simulation &amp; testing</string>
 </resources>
