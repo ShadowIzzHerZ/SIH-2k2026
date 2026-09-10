@@ -13,11 +13,17 @@ data class ReplayRow(
 )
 
 /**
- * Replays a real, previously-validated drive (assets/replay_drive.json —
- * a raw comma2k19 highway segment, the same one that measured 2.9% drift
- * over a real 30s continuous blackout in src/simulate_blackout.py's
- * offline evaluation) through the exact same live tick loop MainActivity
- * uses for real sensors/GPS.
+ * Replays a real, previously-recorded drive through the exact same live
+ * tick loop MainActivity uses for real sensors/GPS. Generic over which
+ * asset (assetName) — MainActivity loads two by default,
+ * assets/replay_demo1.json and replay_demo2.json, both converted from
+ * genuine DevRecorder captures (data/own_recordings/openroute_20260909_
+ * {1908,1821}.csv) from real live testing in Jalandhar, Punjab, not
+ * synthetic or relabeled data. assets/replay_drive.json (a raw comma2k19
+ * highway segment, the one that measured 2.9% drift over a real 30s
+ * continuous blackout in src/simulate_blackout.py's offline evaluation)
+ * is kept in the repo as the original reference dataset but isn't wired
+ * into MainActivity's demo picker.
  *
  * Exists for two reasons: (1) it's how this app was actually verified
  * end-to-end on a real device without needing to physically drive around
