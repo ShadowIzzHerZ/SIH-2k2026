@@ -46,13 +46,17 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var sensorReader: SensorReader
     private lateinit var locationReader: LocationReader
-    // Two real recorded drives to choose from (see demoSelector) — both
-    // genuine DevRecorder captures from live testing in Jalandhar, Punjab
-    // (data/own_recordings/openroute_20260909_{1908,1821}.csv), not
-    // comma2k19/synthetic data. Both loaded upfront so switching between
-    // them mid-session (tick()) is instant, no asset I/O on the hot path.
-    private lateinit var replayDataDemo1: ReplayDataSource
-    private lateinit var replayDataDemo2: ReplayDataSource
+    // All 6 real recorded drives to choose from (see demoSelector) — every
+    // one a genuine DevRecorder capture from live testing in Jalandhar,
+    // Punjab (see data/own_recordings/), not comma2k19/synthetic data.
+    // Loaded upfront (index 0 = Demo 1) so switching sources mid-session
+    // (tick()) is instant, no asset I/O on the hot path. Asset filenames
+    // and demoNRadio ids below are paired 1:1 by list position.
+    private lateinit var replaySources: List<ReplayDataSource>
+    private val demoRadioIds = intArrayOf(
+        R.id.demo1Radio, R.id.demo2Radio, R.id.demo3Radio,
+        R.id.demo4Radio, R.id.demo5Radio, R.id.demo6Radio,
+    )
     private var replayIndex = 0
 
     private var calibration = CalibrationManager()
@@ -129,11 +133,16 @@ class MainActivity : AppCompatActivity() {
 
     private enum class Tab { LIVE_MAP, SENSORS, SIMULATION }
 
-    /** One accel/gyro axis cell's inflated children — see axis_readout.xml. */
-    private class AxisViews(root: View) {
+    /** One accel/gyro axis cell's inflated children — see axis_readout.xml.
+     * axis_readout.xml hardcodes "X" as a placeholder (an <include> can't
+     * override a nested child's text on its own) — a real bug found here:
+     * all 6 cells rendered "X" regardless of which axis they actually
+     * were. labelText fixes each instance to its real axis. */
+    private class AxisViews(root: View, labelText: String) {
         val label: TextView = root.findViewById(R.id.axisLabel)
         val value: TextView = root.findViewById(R.id.axisValue)
         val bar: ProgressBar = root.findViewById(R.id.axisBar)
+        init { label.text = labelText }
     }
 
     private val tickHandler = Handler(Looper.getMainLooper())
@@ -191,12 +200,12 @@ class MainActivity : AppCompatActivity() {
         recenterButton = findViewById(R.id.recenterButton)
         recenterButton.setOnClickListener { roadMapView.recenterOnLatest() }
 
-        accelX = AxisViews(findViewById(R.id.accelX))
-        accelY = AxisViews(findViewById(R.id.accelY))
-        accelZ = AxisViews(findViewById(R.id.accelZ))
-        gyroX = AxisViews(findViewById(R.id.gyroX))
-        gyroY = AxisViews(findViewById(R.id.gyroY))
-        gyroZ = AxisViews(findViewById(R.id.gyroZ))
+        accelX = AxisViews(findViewById(R.id.accelX), "X")
+        accelY = AxisViews(findViewById(R.id.accelY), "Y")
+        accelZ = AxisViews(findViewById(R.id.accelZ), "Z")
+        gyroX = AxisViews(findViewById(R.id.gyroX), "X")
+        gyroY = AxisViews(findViewById(R.id.gyroY), "Y")
+        gyroZ = AxisViews(findViewById(R.id.gyroZ), "Z")
         devSkipCalibrationButton = findViewById(R.id.devSkipCalibrationButton)
         switchToReplayButton = findViewById(R.id.switchToReplayButton)
 
@@ -226,8 +235,14 @@ class MainActivity : AppCompatActivity() {
 
         sensorReader = SensorReader(this)
         locationReader = LocationReader(this)
-        replayDataDemo1 = ReplayDataSource(this, "replay_demo1.json")
-        replayDataDemo2 = ReplayDataSource(this, "replay_demo2.json")
+        replaySources = listOf(
+            ReplayDataSource(this, "replay_demo1.json"),
+            ReplayDataSource(this, "replay_demo2.json"),
+            ReplayDataSource(this, "replay_demo_1305.json"),
+            ReplayDataSource(this, "replay_demo_1332.json"),
+            ReplayDataSource(this, "replay_demo_2117.json"),
+            ReplayDataSource(this, "replay_demo_2142.json"),
+        )
         model = BiasCorrectionModel(this)
         fusion = FusionEngine(model)
         mapMatcher = MapMatcher(RoadGraph(this))
@@ -402,7 +417,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun readSample(usingReplay: Boolean, demo: Int): Sample {
         if (usingReplay) {
-            val replayData = if (demo == 2) replayDataDemo2 else replayDataDemo1
+            val replayData = replaySources[demo - 1]
             val row = replayData.rows[replayIndex]
             replayIndex = (replayIndex + 1) % replayData.rows.size
             return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad)
@@ -421,7 +436,11 @@ class MainActivity : AppCompatActivity() {
         if (!ticking) return
 
         val usingReplay = replayToggle.isChecked
-        val demo = if (demoSelector.checkedRadioButtonId == R.id.demo2Radio) 2 else 1
+        // demoRadioIds.indexOf returns -1 if somehow nothing's checked
+        // (shouldn't happen — demo1Radio starts pre-checked in XML) —
+        // +1 turns that into 0, coerced back up to a safe Demo 1 default
+        // rather than an invalid replaySources[-1] index.
+        val demo = (demoRadioIds.indexOf(demoSelector.checkedRadioButtonId) + 1).coerceAtLeast(1)
         if (usingReplay != wasReplaying || (usingReplay && demo != wasDemo)) {
             calibration = CalibrationManager()
             fusion.reset()
