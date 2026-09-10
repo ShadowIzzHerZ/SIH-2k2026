@@ -20,6 +20,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlin.math.roundToInt
 
@@ -46,16 +47,20 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var sensorReader: SensorReader
     private lateinit var locationReader: LocationReader
-    // All 6 real recorded drives to choose from (see demoSelector) — every
-    // one a genuine DevRecorder capture from live testing in Jalandhar,
-    // Punjab (see data/own_recordings/), not comma2k19/synthetic data.
-    // Loaded upfront (index 0 = Demo 1) so switching sources mid-session
-    // (tick()) is instant, no asset I/O on the hot path. Asset filenames
-    // and demoNRadio ids below are paired 1:1 by list position.
+    // 6 real recorded drives (Demo 1-6) — every one a genuine DevRecorder
+    // capture from live testing in Jalandhar, Punjab (see
+    // data/own_recordings/), not comma2k19/synthetic data — plus Demo 7,
+    // the original comma2k19 highway segment this project started from
+    // (see ReplayDataSource's own doc comment: the same clip that measured
+    // 2.9% drift over a real 30s continuous blackout). Kept in its own
+    // clearly-labeled slot rather than dropped, since it's real recorded
+    // data too, just not ours. Loaded upfront so switching sources
+    // mid-session (tick()) is instant, no asset I/O on the hot path. Asset
+    // filenames and demoNRadio ids below are paired 1:1 by list position.
     private lateinit var replaySources: List<ReplayDataSource>
     private val demoRadioIds = intArrayOf(
         R.id.demo1Radio, R.id.demo2Radio, R.id.demo3Radio,
-        R.id.demo4Radio, R.id.demo5Radio, R.id.demo6Radio,
+        R.id.demo4Radio, R.id.demo5Radio, R.id.demo6Radio, R.id.demo7Radio,
     )
     private var replayIndex = 0
 
@@ -131,6 +136,18 @@ class MainActivity : AppCompatActivity() {
     private var previousFusionMode: FusionMode? = null
     private var blackoutStartUptimeMs: Long? = null
 
+    // Dedicated sentinel for "have we already swapped the calibrating card
+    // for the tracking content this run" — NOT legendRow.visibility. legendRow
+    // is a child of trackingContent with no explicit android:visibility in
+    // the XML, so it inflates as VISIBLE by default; reading that as an
+    // "already switched" flag meant the switch never fired on a fresh
+    // launch (it looked already-switched from frame one), which is exactly
+    // what made calibration look stuck at 50% forever even once isReady
+    // flipped true.
+    private var calibrationUiSwitched = false
+    private var calibrationStartUptimeMs: Long? = null
+    private var calibrationSlowNoticeShown = false
+
     private enum class Tab { LIVE_MAP, SENSORS, SIMULATION }
 
     /** One accel/gyro axis cell's inflated children — see axis_readout.xml.
@@ -148,6 +165,17 @@ class MainActivity : AppCompatActivity() {
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickIntervalMs = 100L  // 10Hz — matches configs/default.yaml's sample_rate_hz
     private var ticking = false
+
+    // How long calibration can run before we tell the user it's taking a
+    // while. NOT 2s: leveling alone (CalibrationManager's levelSamples=20
+    // @ 10Hz) needs 2.0s minimum just to collect its stillness window, so a
+    // 2s trigger would fire on essentially every real calibration, not just
+    // stuck ones. Yaw alignment on top of that needs minConfidentSamples
+    // (30) valid GPS-backed samples, which under ordinary driving takes
+    // several seconds more. 10s gives a normal calibration room to finish
+    // while still catching real stalls (phone not held still, no GPS fix,
+    // vehicle stationary) with a clear, actionable notice.
+    private val calibrationSlowNoticeMs = 10_000L
 
     // Real "location access needed" screen (Zen Civic restyle) — replaces
     // the old dead-end status-text swap on denial with three real actions.
@@ -242,6 +270,7 @@ class MainActivity : AppCompatActivity() {
             ReplayDataSource(this, "replay_demo_1332.json"),
             ReplayDataSource(this, "replay_demo_2117.json"),
             ReplayDataSource(this, "replay_demo_2142.json"),
+            ReplayDataSource(this, "replay_drive.json"),
         )
         model = BiasCorrectionModel(this)
         fusion = FusionEngine(model)
@@ -456,6 +485,9 @@ class MainActivity : AppCompatActivity() {
             calibrationProgress.progress = 0
             calibrationPercentText.text = "0%"
             legendRow.visibility = View.GONE
+            calibrationUiSwitched = false
+            calibrationStartUptimeMs = null
+            calibrationSlowNoticeShown = false
         }
 
         val sample = readSample(usingReplay, demo)
@@ -481,6 +513,17 @@ class MainActivity : AppCompatActivity() {
             }
         }
         updateRecordingLogChip()
+
+        if (!calibration.isReady) {
+            if (calibrationStartUptimeMs == null) {
+                calibrationStartUptimeMs = SystemClock.uptimeMillis()
+            }
+            val elapsedMs = SystemClock.uptimeMillis() - calibrationStartUptimeMs!!
+            if (elapsedMs >= calibrationSlowNoticeMs && !calibrationSlowNoticeShown) {
+                calibrationSlowNoticeShown = true
+                showCalibrationSlowNotice()
+            }
+        }
 
         if (!calibration.isLeveled) {
             calibration.addLevelSample(sample.rawAccel)
@@ -510,7 +553,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (legendRow.visibility != View.VISIBLE) {
+        if (!calibrationUiSwitched) {
+            calibrationUiSwitched = true
             // First tick past calibration — swap the calibrating card for
             // the real tracking content, once, rather than every tick.
             calibratingCard.visibility = View.GONE
@@ -551,6 +595,24 @@ class MainActivity : AppCompatActivity() {
         detailText.text = getString(R.string.status_calibrating) + "\n" + detail
         calibrationProgress.setProgress(calibration.progressPercent, true)
         calibrationPercentText.text = "${calibration.progressPercent}%"
+    }
+
+    /** Fires once per calibration attempt if it's still running after
+     * [calibrationSlowNoticeMs] — a real, actionable notice rather than
+     * letting the ring silently sit there. Names the actual real-world
+     * cause for whichever stage it's stuck in, so it reads as diagnostic
+     * help rather than a generic "still working" spinner message. */
+    private fun showCalibrationSlowNotice() {
+        val reason = if (!calibration.isLeveled) {
+            "Hold the phone still and flat so it can finish leveling."
+        } else {
+            "Drive with a GPS fix so it can lock in your heading."
+        }
+        Snackbar.make(
+            findViewById(android.R.id.content),
+            "Calibration is taking longer than usual. $reason",
+            Snackbar.LENGTH_INDEFINITE,
+        ).setAction("Dismiss") {}.show()
     }
 
     /** Mode-status banner — icon chip + dot colored per the app's real
