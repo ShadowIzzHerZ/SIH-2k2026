@@ -125,6 +125,21 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
         mapView.setUseDataConnection(true)
         mapView.setMultiTouchControls(true)
         mapView.controller.setZoom(17.0)
+        // Real bug found live (see updateRoughLocation's own doc for the
+        // exact same failure mode there): with no setCenter() call, the
+        // camera sits at its default (0, 0) -- Null Island, open ocean --
+        // until the first GPS fix or replay tick arrives, which can take a
+        // few seconds (permission dialog, calibration leveling wait, GPS
+        // acquisition indoors). OpenStreetMap's Mapnik style renders open
+        // ocean as a flat light-blue fill, which reads exactly like "the
+        // map failed to load," not "still waiting for a fix." Centering
+        // immediately on a real, meaningful place -- Jalandhar, Punjab,
+        // the same area the bundled road_graph.json and replay demos cover
+        // -- means real streets are on screen from the very first frame.
+        // updateRoughLocation/addPoint silently take over and recenter as
+        // soon as a real fix (live or replay) exists; this is only ever
+        // visible for that brief startup window.
+        mapView.controller.setCenter(GeoPoint(31.2576, 75.7065))
         mapView.setOnTouchListener { _, event ->
             if (event.action == android.view.MotionEvent.ACTION_DOWN) following = false
             false  // don't consume — osmdroid still needs the event for pan/zoom

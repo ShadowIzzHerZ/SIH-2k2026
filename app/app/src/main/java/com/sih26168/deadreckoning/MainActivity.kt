@@ -12,6 +12,7 @@ import android.os.Looper
 import android.view.View
 import android.widget.Button
 import android.widget.ProgressBar
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -32,10 +33,15 @@ import kotlin.math.roundToInt
  *
  * Two demo controls, orthogonal to each other:
  *   - "Replay real recorded drive" swaps the data source from live
- *     sensors/GPS to a real, previously-validated comma2k19 segment
- *     bundled as an asset (see ReplayDataSource) — for demoing indoors,
- *     with no GPS reception and no room to actually drive, using real
- *     data instead of idealized synthetic motion.
+ *     sensors/GPS to a real, previously-recorded drive bundled as an asset
+ *     (see ReplayDataSource) — for demoing indoors, with no GPS reception
+ *     and no room to actually drive, using real data instead of idealized
+ *     synthetic motion. demoSelector picks which of two: both are genuine
+ *     DevRecorder captures from live testing in Jalandhar, Punjab
+ *     (data/own_recordings/openroute_20260909_{1908,1821}.csv), not
+ *     comma2k19 — so the demo route, and the road-matching overlay against
+ *     the bundled road_graph.json, are both real for wherever this app is
+ *     actually being shown.
  *   - "Simulate GNSS blackout" forces the fusion engine into BLACKOUT
  *     regardless of data source — the same thing src/simulate_blackout.py
  *     does offline, live here on whichever source is active.
@@ -50,7 +56,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var sensorReader: SensorReader
     private lateinit var locationReader: LocationReader
-    private lateinit var replayData: ReplayDataSource
+    // Two real recorded drives to choose from (see demoSelector) — both
+    // genuine DevRecorder captures from live testing in Jalandhar, Punjab
+    // (data/own_recordings/openroute_20260909_{1908,1821}.csv), not
+    // comma2k19/synthetic data. Both loaded upfront so switching between
+    // them mid-session (tick()) is instant, no asset I/O on the hot path.
+    private lateinit var replayDataDemo1: ReplayDataSource
+    private lateinit var replayDataDemo2: ReplayDataSource
     private var replayIndex = 0
 
     private var calibration = CalibrationManager()
@@ -66,6 +78,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var roadMapView: RoadMapView
     private lateinit var blackoutToggle: SwitchMaterial
     private lateinit var replayToggle: SwitchMaterial
+    private lateinit var demoSelector: RadioGroup
     private lateinit var recenterButton: FloatingActionButton
     private lateinit var titleText: TextView
     private lateinit var devSection: View
@@ -76,6 +89,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var devRecorder: DevRecorder
     private lateinit var prefs: SharedPreferences
     private var wasReplaying = false
+    private var wasDemo = 1
 
     private val calibratingColor = android.graphics.Color.parseColor("#94a3b8")  // neutral gray
 
@@ -102,6 +116,7 @@ class MainActivity : AppCompatActivity() {
         roadMapView = findViewById(R.id.roadMapView)
         blackoutToggle = findViewById(R.id.blackoutToggle)
         replayToggle = findViewById(R.id.replayToggle)
+        demoSelector = findViewById(R.id.demoSelector)
         recenterButton = findViewById(R.id.recenterButton)
         recenterButton.setOnClickListener { roadMapView.recenterOnLatest() }
         titleText = findViewById(R.id.titleText)
@@ -113,13 +128,20 @@ class MainActivity : AppCompatActivity() {
 
         sensorReader = SensorReader(this)
         locationReader = LocationReader(this)
-        replayData = ReplayDataSource(this)
+        replayDataDemo1 = ReplayDataSource(this, "replay_demo1.json")
+        replayDataDemo2 = ReplayDataSource(this, "replay_demo2.json")
         model = BiasCorrectionModel(this)
         fusion = FusionEngine(model)
         mapMatcher = MapMatcher(RoadGraph(this))
         devRecorder = DevRecorder(this)
 
-        // blackoutToggle/replayToggle .isChecked read live in tick() — no listeners needed.
+        // blackoutToggle/replayToggle/demoSelector .isChecked read live in
+        // tick() — only replayToggle needs a listener, purely to show/hide
+        // the demo picker (which demo to read stays live-read in tick()
+        // like the other toggles).
+        replayToggle.setOnCheckedChangeListener { _, checked ->
+            demoSelector.visibility = if (checked) View.VISIBLE else View.GONE
+        }
 
         prefs = getSharedPreferences("dev_prefs", MODE_PRIVATE)
         devSection.visibility = if (prefs.getBoolean("dev_mode_visible", false)) View.VISIBLE else View.GONE
@@ -197,22 +219,29 @@ class MainActivity : AppCompatActivity() {
         tickHandler.postDelayed(::tick, tickIntervalMs)
     }
 
-    /** One sample, regardless of source — live sensors/GPS or the bundled replay. */
+    /** One sample, regardless of source — live sensors/GPS or the bundled
+     * replay. hasFix gates fusion (needs a real speed/bearing to feed
+     * GNSS_TRACKING); hasRoughFix is the weaker "do we know roughly where
+     * the phone is" check the map marker uses — see
+     * LocationReader.hasAnyRecentFix's doc for why these need to differ. */
     private data class Sample(
         val rawAccel: FloatArray, val rawGyro: FloatArray,
-        val hasFix: Boolean, val lat: Double, val lon: Double, val speed: Float, val bearingRad: Float,
+        val hasFix: Boolean, val hasRoughFix: Boolean,
+        val lat: Double, val lon: Double, val speed: Float, val bearingRad: Float,
     )
 
-    private fun readSample(usingReplay: Boolean): Sample {
+    private fun readSample(usingReplay: Boolean, demo: Int): Sample {
         if (usingReplay) {
+            val replayData = if (demo == 2) replayDataDemo2 else replayDataDemo1
             val row = replayData.rows[replayIndex]
             replayIndex = (replayIndex + 1) % replayData.rows.size
-            return Sample(row.accel, row.gyro, true, row.lat, row.lon, row.speed, row.bearingRad)
+            return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad)
         }
         val loc = locationReader.lastLocation
         val hasFix = locationReader.hasRecentFix() && loc != null
+        val hasRoughFix = locationReader.hasAnyRecentFix() && loc != null
         return Sample(
-            sensorReader.lastAccel, sensorReader.lastGyro, hasFix,
+            sensorReader.lastAccel, sensorReader.lastGyro, hasFix, hasRoughFix,
             loc?.latitude ?: 0.0, loc?.longitude ?: 0.0, loc?.speed ?: 0f,
             // loc.bearing is Android's compass bearing (0=N/90=E, clockwise) —
             // needs the compass->math axis swap, not just Math.toRadians().
@@ -227,23 +256,27 @@ class MainActivity : AppCompatActivity() {
         if (!ticking) return
 
         val usingReplay = replayToggle.isChecked
-        if (usingReplay != wasReplaying) {
+        val demo = if (demoSelector.checkedRadioButtonId == R.id.demo2Radio) 2 else 1
+        if (usingReplay != wasReplaying || (usingReplay && demo != wasDemo)) {
             // Switching data source mid-flight would mix live-phone leveling
-            // with a replayed car's motion scale (or vice versa) — restart
-            // calibration/fusion/trajectory cleanly for the new source
-            // instead of producing a nonsensical blend of the two.
+            // with a replayed drive's motion scale (or vice versa), and
+            // switching demos mid-flight would splice two different real
+            // routes together — restart calibration/fusion/trajectory
+            // cleanly for the new source instead of producing a
+            // nonsensical blend.
             calibration = CalibrationManager()
             fusion.reset()
             mapMatcher.reset()
             roadMapView.clear()
             replayIndex = 0
             wasReplaying = usingReplay
+            wasDemo = demo
             calibrationProgress.visibility = View.VISIBLE
             calibrationProgress.progress = 0
             legendRow.visibility = View.GONE
         }
 
-        val sample = readSample(usingReplay)
+        val sample = readSample(usingReplay, demo)
 
         // Keep a real, live "you are here" marker moving from the very
         // first GPS fix — calibration (below) can take a while, sometimes
@@ -253,7 +286,15 @@ class MainActivity : AppCompatActivity() {
         // this fixes (the map sitting at Null Island looking exactly like
         // a tile-loading failure, and the recenter button silently doing
         // nothing because there was no marker yet to recenter on).
-        if (sample.hasFix) roadMapView.updateRoughLocation(sample.lat, sample.lon)
+        //
+        // hasRoughFix, not hasFix — a real bug found live: hasFix requires
+        // hasSpeed()/hasBearing(), which a lot of Android GPS chips leave
+        // unset while genuinely stationary (exactly the leveling step
+        // right below, which tells the user to hold the phone still), so
+        // the marker was invisible for the entire leveling phase despite
+        // the phone's location already being known. See
+        // LocationReader.hasAnyRecentFix's doc for the full reasoning.
+        if (sample.hasRoughFix) roadMapView.updateRoughLocation(sample.lat, sample.lon)
 
         if (devRecorder.isRecording) {
             if (usingReplay) {
@@ -360,7 +401,7 @@ class MainActivity : AppCompatActivity() {
         // show a real compass heading (0=N/90=E) to the user, not a plain
         // toDegrees() of the math-convention value.
         detailText.text = "speed: ${"%.0f".format(s.speed * 3.6f)} km/h  |  heading: ${Calibration.mathRadToCompassDeg(s.heading).roundToInt()}°" +
-            (if (usingReplay) "  |  [REPLAY]" else "") +
+            (if (usingReplay) "  |  [REPLAY demo $demo]" else "") +
             (if (demoBlackout) "  |  [SIMULATED BLACKOUT]" else "") +
             // Everything downstream inherits a bad calibration, so say so
             // rather than presenting a degraded fix as an equal one.

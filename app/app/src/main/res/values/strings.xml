@@ -4,6 +4,8 @@
     <string name="status_calibrating">Calibrating… hold phone still, then drive</string>
     <string name="simulate_blackout">Simulate GNSS blackout (demo)</string>
     <string name="replay_real_drive">Replay real recorded drive (demo)</string>
+    <string name="demo_1_label">Demo 1 — Jalandhar route A</string>
+    <string name="demo_2_label">Demo 2 — Jalandhar route B</string>
     <string name="status_gnss">GNSS tracking</string>
     <string name="status_blackout">GNSS blackout — INS only</string>
     <string name="status_blend">Reconnecting…</string>
