@@ -34,6 +34,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Optional account screen (sign up/sign in to the Supabase
+             project, see ../../../../SUPABASE.md) — launched explicitly
+             via AuthActivity.launch(), never on app startup. Not part of
+             the pixel-matched Stitch mockups; see AuthActivity.kt's and
+             activity_auth.xml's own comments. -->
+        <activity
+            android:name=".AuthActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <!-- Lets DevRecorder's saved CSVs be shared via the normal Android
              share sheet (e.g. straight to a laptop over Drive/email)
              without needing WRITE_EXTERNAL_STORAGE or adb — the file

@@ -110,4 +110,18 @@
          blackout toggle + reset + recording log) into its own real
          destination, matching the bottom nav's own "Simulation" tab. -->
     <string name="simulation_panel_title">Simulation &amp; testing</string>
+
+    <!-- AuthActivity — optional account screen, not part of the pixel-
+         matched Stitch mockups (see activity_auth.xml's own comment). -->
+    <string name="auth_title">Contribute your drives</string>
+    <string name="auth_subtitle">Sign in to appear on the fleet view and, if you opt in, help improve the model with your drives. Fully optional — the app works completely offline without an account.</string>
+    <string name="auth_email_hint">Email</string>
+    <string name="auth_password_hint">Password (min 6 characters)</string>
+    <string name="auth_consent_label">Contribute my drive data to help train the model</string>
+    <string name="auth_sign_in">Sign In</string>
+    <string name="auth_sign_up">Create Account</string>
+    <string name="auth_skip">Continue without an account</string>
+    <string name="auth_error_empty_fields">Enter both an email and a password</string>
+    <string name="auth_confirmation_sent">Check your email to confirm your account, then sign in.</string>
+    <string name="auth_signed_in">Signed in.</string>
 </resources>

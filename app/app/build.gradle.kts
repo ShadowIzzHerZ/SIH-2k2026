@@ -69,6 +69,19 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    // Optional account/data-contribution layer (SupabaseAuthClient.kt,
+    // AuthActivity.kt) — sign-up/sign-in and drive-session upload consent,
+    // entirely separate from and never called by the dead-reckoning
+    // pipeline itself, which stays fully offline. Plain OkHttp calling
+    // Supabase's REST endpoints directly (GoTrue for auth, PostgREST for
+    // the profiles/devices/drive_sessions tables — see ../../SUPABASE.md)
+    // rather than the full supabase-kt SDK, which pulls in Ktor + kotlinx-
+    // serialization for a Kotlin Multiplatform surface this single-platform
+    // Android app doesn't need — matches this module's existing preference
+    // for the smallest dependency that does the job (see the osmdroid
+    // comment below).
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // Real OpenStreetMap-tile map view — no API key, no Google Play
     // Services, same free-OSM-tiles philosophy as LocationReader.kt's
     // choice of plain LocationManager over FusedLocationProviderClient.
