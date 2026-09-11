@@ -76,11 +76,31 @@ class MainActivity : AppCompatActivity() {
 
     // ---- Live Map tab ----
     private lateinit var calibratingCard: View
+    // Same collapsed/expanded dropdown pattern as trackingCard below:
+    // calibrationSummaryRow is the always-visible one-line glance
+    // ("Calibrating… NN%"); tap it to reveal calibrationDetails (the ring,
+    // instructions, and the skip-calibration shortcut) — see
+    // toggleCalibrationDetails().
+    private lateinit var calibrationSummaryRow: View
+    private lateinit var calibrationSummaryText: TextView
+    private lateinit var calibrationExpandChevron: TextView
+    private lateinit var calibrationDetails: View
+    private lateinit var calibrationSkipButton: Button
+    private var calibrationExpanded = false
     private lateinit var detailText: TextView
     private lateinit var calibrationProgress: ProgressBar
     private lateinit var calibrationRingContainer: View
     private lateinit var calibrationPercentText: TextView
     private lateinit var trackingContent: View
+    // Single consolidated tracking GUI (trackingCard): trackingSummaryRow is
+    // the always-visible dropdown header (mode/speed/heading); tap it to
+    // reveal trackingDetails (legend/compass/controls) — see
+    // toggleTrackingDetails(). trackingExpanded tracks which state it's in.
+    private lateinit var trackingCard: View
+    private lateinit var trackingSummaryRow: View
+    private lateinit var trackingDetails: View
+    private lateinit var trackingExpandChevron: TextView
+    private var trackingExpanded = false
     private lateinit var modeIconChip: View
     private lateinit var modeIconText: TextView
     private lateinit var modeText: TextView
@@ -205,11 +225,26 @@ class MainActivity : AppCompatActivity() {
         subtitleText = findViewById(R.id.subtitleText)
 
         calibratingCard = findViewById(R.id.calibratingCard)
+        calibrationSummaryRow = findViewById(R.id.calibrationSummaryRow)
+        calibrationSummaryText = findViewById(R.id.calibrationSummaryText)
+        calibrationExpandChevron = findViewById(R.id.calibrationExpandChevron)
+        calibrationDetails = findViewById(R.id.calibrationDetails)
+        calibrationSkipButton = findViewById(R.id.calibrationSkipButton)
+        calibrationSummaryRow.setOnClickListener { toggleCalibrationDetails() }
+        calibrationSkipButton.setOnClickListener {
+            calibration.skipForTesting()
+            Toast.makeText(this, "Calibration skipped (testing) — not a real estimate", Toast.LENGTH_SHORT).show()
+        }
         detailText = findViewById(R.id.detailText)
         calibrationProgress = findViewById(R.id.calibrationProgress)
         calibrationRingContainer = findViewById(R.id.calibrationRingContainer)
         calibrationPercentText = findViewById(R.id.calibrationPercentText)
         trackingContent = findViewById(R.id.trackingContent)
+        trackingCard = findViewById(R.id.trackingCard)
+        trackingSummaryRow = findViewById(R.id.trackingSummaryRow)
+        trackingDetails = findViewById(R.id.trackingDetails)
+        trackingExpandChevron = findViewById(R.id.trackingExpandChevron)
+        trackingSummaryRow.setOnClickListener { toggleTrackingDetails() }
         modeIconChip = findViewById(R.id.modeIconChip)
         modeIconText = findViewById(R.id.modeIconText)
         modeText = findViewById(R.id.modeText)
@@ -363,11 +398,13 @@ class MainActivity : AppCompatActivity() {
         roadMapView.clear()
         previousFusionMode = null
         blackoutStartUptimeMs = null
-        if (legendRow.visibility == View.VISIBLE) {
-            // Calibration already happened — a filter reset shouldn't
-            // re-run it, just clear the trail and let the next tick's
-            // fusion.tick() re-anchor from the current position.
-        }
+        // Calibration already happened — a filter reset shouldn't re-run
+        // it, just clear the trail and let the next tick's fusion.tick()
+        // re-anchor from the current position. (This used to be gated on
+        // `legendRow.visibility == VISIBLE` as an "already calibrated"
+        // check, but that branch was always empty — legendRow no longer
+        // means that anyway now that it lives inside the collapsible
+        // trackingDetails section, see toggleTrackingDetails().)
         Toast.makeText(this, R.string.reset_filter_toast, Toast.LENGTH_SHORT).show()
         selectTab(Tab.LIVE_MAP)
     }
@@ -484,7 +521,15 @@ class MainActivity : AppCompatActivity() {
             trackingContent.visibility = View.GONE
             calibrationProgress.progress = 0
             calibrationPercentText.text = "0%"
-            legendRow.visibility = View.GONE
+            calibrationSummaryText.text = getString(R.string.calibrating_short)
+            // Collapse both dropdowns back to their default state so the
+            // next reveal starts fresh, same as a brand-new launch.
+            calibrationDetails.visibility = View.GONE
+            calibrationExpanded = false
+            calibrationExpandChevron.text = getString(R.string.ic_expand_more)
+            trackingDetails.visibility = View.GONE
+            trackingExpanded = false
+            trackingExpandChevron.text = getString(R.string.ic_expand_more)
             calibrationUiSwitched = false
             calibrationStartUptimeMs = null
             calibrationSlowNoticeShown = false
@@ -557,11 +602,14 @@ class MainActivity : AppCompatActivity() {
             calibrationUiSwitched = true
             // First tick past calibration — swap the calibrating card for
             // the real tracking content, once, rather than every tick.
+            // Fades in trackingCard itself now (the one consolidated GUI
+            // element), not legendRow — legendRow lives inside the
+            // collapsed-by-default trackingDetails dropdown now, so fading
+            // it in here would be invisible until the user expands it.
             calibratingCard.visibility = View.GONE
             trackingContent.visibility = View.VISIBLE
-            legendRow.alpha = 0f
-            legendRow.visibility = View.VISIBLE
-            legendRow.animate().alpha(1f).setDuration(300L).start()
+            trackingCard.alpha = 0f
+            trackingCard.animate().alpha(1f).setDuration(300L).start()
         }
 
         val calAccel = calibration.calibrate(sample.rawAccel)
@@ -595,6 +643,8 @@ class MainActivity : AppCompatActivity() {
         detailText.text = getString(R.string.status_calibrating) + "\n" + detail
         calibrationProgress.setProgress(calibration.progressPercent, true)
         calibrationPercentText.text = "${calibration.progressPercent}%"
+        calibrationSummaryText.text =
+            "${getString(R.string.calibrating_short)} ${calibration.progressPercent}%"
     }
 
     /** Fires once per calibration attempt if it's still running after
@@ -608,11 +658,40 @@ class MainActivity : AppCompatActivity() {
         } else {
             "Drive with a GPS fix so it can lock in your heading."
         }
+        // Anchored above bottomNav, not just LENGTH_INDEFINITE in the
+        // default bottom-of-screen spot — without an anchor the Snackbar
+        // sits on top of the bottom nav bar and swallows taps meant for
+        // it (found live: navigating tabs while this notice was showing
+        // silently did nothing).
         Snackbar.make(
             findViewById(android.R.id.content),
             "Calibration is taking longer than usual. $reason",
             Snackbar.LENGTH_INDEFINITE,
-        ).setAction("Dismiss") {}.show()
+        ).setAnchorView(findViewById(R.id.bottomNav)).setAction("Dismiss") {}.show()
+    }
+
+    /** Flips calibrationDetails (ring/instructions/skip-button) between
+     * shown and hidden — the calibration-time counterpart of
+     * toggleTrackingDetails() below, same collapsed-by-default pattern. */
+    private fun toggleCalibrationDetails() {
+        calibrationExpanded = !calibrationExpanded
+        calibrationDetails.visibility = if (calibrationExpanded) View.VISIBLE else View.GONE
+        calibrationExpandChevron.text = getString(
+            if (calibrationExpanded) R.string.ic_expand_less else R.string.ic_expand_more
+        )
+    }
+
+    /** Flips trackingDetails (legend/compass/controls) between shown and
+     * hidden — the "dropdown" the collapsed trackingSummaryRow expands
+     * into. Collapsed is the default/reset state (see tick()'s demo/replay
+     * reset branch and the post-calibration reveal below); this is the
+     * only place that ever opens or closes it. */
+    private fun toggleTrackingDetails() {
+        trackingExpanded = !trackingExpanded
+        trackingDetails.visibility = if (trackingExpanded) View.VISIBLE else View.GONE
+        trackingExpandChevron.text = getString(
+            if (trackingExpanded) R.string.ic_expand_less else R.string.ic_expand_more
+        )
     }
 
     /** Mode-status banner — icon chip + dot colored per the app's real
