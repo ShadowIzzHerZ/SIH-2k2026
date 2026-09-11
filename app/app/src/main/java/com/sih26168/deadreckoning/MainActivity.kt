@@ -825,7 +825,18 @@ class MainActivity : AppCompatActivity() {
         }
         previousFusionMode = mode
 
-        val iconChipBg = modeIconChip.background
+        // .mutate() is load-bearing, not defensive: @drawable/mode_icon_chip_bg
+        // is the same shared resource used by the bottom nav's selected-tab
+        // pills, the calibrating icon, and recordingLogChip (see
+        // activity_main.xml). Without mutating first, setTint() below
+        // doesn't just recolor this one chip — it rewrites that drawable's
+        // shared ConstantState, so every other view still holding an
+        // un-mutated instance of the same resource silently repaints too.
+        // Found live: switching to BLACKOUT turned the "Live Map" bottom-nav
+        // pill fully red, with its label text (also red) unreadable against
+        // its own red background — the pill was never meant to reflect the
+        // live fusion mode's color at all.
+        val iconChipBg = modeIconChip.background.mutate()
         val (icon, chipTint, titleRes, bodyRes) = when (mode) {
             FusionMode.GNSS_TRACKING -> IconTintText(getString(R.string.ic_gps_not_fixed), R.color.status_gnss, R.string.banner_gnss_title, R.string.banner_gnss_body)
             FusionMode.BLACKOUT -> IconTintText(getString(R.string.ic_gps_off), R.color.status_blackout, R.string.banner_blackout_title, R.string.banner_blackout_body)

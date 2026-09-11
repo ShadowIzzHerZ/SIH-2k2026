@@ -319,12 +319,28 @@
                     android:focusable="true"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:padding="10dp">
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="10dp">
 
+                    <!-- 14dp, not 22dp: even at 22dp this collapsed row
+                         (mode text + speed + heading all on one line) still
+                         ellipsized "GPS signal dropped" to "GPS signal
+                         dro…" — found live, on top of an earlier pass that
+                         already shrank this chip once from 30dp. Every
+                         fixed-width neighbor on this row (this chip's own
+                         margin, the speed/heading blocks' margins, the
+                         chevron and its margin) got trimmed a couple dp too
+                         — modeText's layout_weight="1" only ever gets
+                         whatever's left over after every fixed sibling on
+                         the row, so the real fix is reclaiming dp from
+                         those, not just resizing this one View. This chip
+                         renders as a solid color per mode anyway (see
+                         updateModeBanner) — it's really a status dot, not
+                         an icon — so shrinking it costs nothing legible. -->
                     <FrameLayout
                         android:id="@+id/modeIconChip"
-                        android:layout_width="30dp"
-                        android:layout_height="30dp"
+                        android:layout_width="14dp"
+                        android:layout_height="14dp"
                         android:background="@drawable/mode_icon_chip_bg">
 
                         <TextView
@@ -333,7 +349,7 @@
                             android:layout_height="match_parent"
                             android:text="@string/ic_near_me"
                             android:textColor="@color/on_primary_container"
-                            android:textSize="15sp"
+                            android:textSize="7sp"
                             style="@style/Text.Icon" />
                     </FrameLayout>
 
@@ -341,18 +357,19 @@
                         android:id="@+id/modeText"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
+                        android:layout_marginStart="4dp"
                         android:layout_weight="1"
                         android:ellipsize="end"
                         android:maxLines="1"
                         android:text="@string/status_calibrating"
+                        android:textSize="14sp"
                         style="@style/Text.HeadlineSm" />
 
                     <TextView
                         android:id="@+id/simulatedBadge"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
+                        android:layout_marginStart="4dp"
                         android:background="@drawable/pill_chip_bg"
                         android:paddingHorizontal="8dp"
                         android:paddingVertical="2dp"
@@ -365,7 +382,7 @@
                     <LinearLayout
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp"
+                        android:layout_marginStart="4dp"
                         android:gravity="center_horizontal"
                         android:orientation="vertical">
 
@@ -402,7 +419,7 @@
                     <LinearLayout
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="12dp"
+                        android:layout_marginStart="6dp"
                         android:gravity="center_horizontal"
                         android:orientation="vertical">
 
@@ -423,9 +440,9 @@
 
                     <TextView
                         android:id="@+id/trackingExpandChevron"
-                        android:layout_width="20dp"
-                        android:layout_height="20dp"
-                        android:layout_marginStart="6dp"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_marginStart="4dp"
                         android:text="@string/ic_expand_more"
                         android:textColor="@color/on_surface_muted"
                         android:textSize="18sp"
