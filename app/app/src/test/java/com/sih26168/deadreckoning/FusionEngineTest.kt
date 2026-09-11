@@ -195,4 +195,59 @@ class FusionEngineTest {
             angleDiff(engine.state.heading, expectedFinalHeading) < 0.1f,
         )
     }
+
+    /** Regression for a real bug found live: sitting still indoors with a
+     * rough network fix, Location.getBearing() is either flagged invalid
+     * (hasBearing()==false) or a stale/default value the provider never
+     * cleared — but GNSS_TRACKING used to snap `state.heading` straight to
+     * it every tick regardless. See FusionEngine.tick's minHeadingLockSpeedMps
+     * doc. */
+    @Test
+    fun `a low-speed or bearing-less fix does not snap heading to a bogus bearing`() {
+        val engine = FusionEngine(FakePredictor(deltaV = 0f, deltaTheta = 0f))
+
+        // Real, fast, bearing-valid fix — heading should lock straight to it.
+        val realHeading = 1.0f // rad
+        engine.tick(
+            calibratedAccel = floatArrayOf(0f, 0f, 0f),
+            calibratedGyro = floatArrayOf(0f, 0f, 0f),
+            available = true,
+            lat = 0.0, lon = 0.0, gnssSpeed = 10f, gnssHeadingRad = realHeading,
+            gnssHasBearing = true,
+        )
+        assertTrue(
+            "heading should have locked to the real fix's bearing, got ${engine.state.heading}",
+            angleDiff(engine.state.heading, realHeading) < 0.01f,
+        )
+
+        // Same real fix location/speed, but no valid bearing this tick (a
+        // bogus far-away heading stands in for whatever garbage the
+        // provider would hand back) — heading must hold, not snap.
+        val bogusHeading = 3.0f
+        engine.tick(
+            calibratedAccel = floatArrayOf(0f, 0f, 0f),
+            calibratedGyro = floatArrayOf(0f, 0f, 0f),
+            available = true,
+            lat = 0.0, lon = 0.0, gnssSpeed = 10f, gnssHeadingRad = bogusHeading,
+            gnssHasBearing = false,
+        )
+        assertTrue(
+            "a bearing-less fix snapped heading to $bogusHeading instead of holding ~$realHeading",
+            angleDiff(engine.state.heading, realHeading) < 0.01f,
+        )
+
+        // Same fix, this time bearing IS flagged valid but speed is too low
+        // for it to be meaningful — must still hold, not snap.
+        engine.tick(
+            calibratedAccel = floatArrayOf(0f, 0f, 0f),
+            calibratedGyro = floatArrayOf(0f, 0f, 0f),
+            available = true,
+            lat = 0.0, lon = 0.0, gnssSpeed = 0.2f, gnssHeadingRad = bogusHeading,
+            gnssHasBearing = true,
+        )
+        assertTrue(
+            "a near-stationary fix snapped heading to $bogusHeading instead of holding ~$realHeading",
+            angleDiff(engine.state.heading, realHeading) < 0.01f,
+        )
+    }
 }

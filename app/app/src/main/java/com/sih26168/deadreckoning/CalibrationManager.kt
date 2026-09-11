@@ -254,7 +254,22 @@ class CalibrationManager(
      */
     fun skipForTesting() {
         if (rLevel == null) {
-            rLevel = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
+            // A flat identity matrix here means "gravity is already along
+            // Z" — almost never true for a phone actually in someone's
+            // hand. calibrate() would then leave the real gravity
+            // component sitting in the calibrated accel, which the INS
+            // integrates twice (accel -> velocity -> position) into wild,
+            // fast-diverging drift the instant GPS drops — exactly the
+            // scribbled, radiating trails seen live on a real device.
+            // Whatever's already in levelBuf (even a handful of samples,
+            // short of the full stationary window addLevelSample waits
+            // for) gives a real best-effort gravity direction instead;
+            // only an empty buffer falls back to identity.
+            rLevel = if (levelBuf.isNotEmpty()) {
+                Calibration.levelingRotation(Calibration.estimateGravityVector(levelBuf))
+            } else {
+                floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
+            }
             levelConverged = false
         }
         if (!isReady) {

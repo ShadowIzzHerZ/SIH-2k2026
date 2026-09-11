@@ -135,7 +135,7 @@ class AuthActivity : AppCompatActivity() {
         // Best-effort: device registration/consent failing shouldn't strand
         // the user on this screen after a real, successful sign-in/sign-up.
         SupabaseAuthClient.registerDevice(session, deviceId, vehicleLabel = null)
-        SupabaseAuthClient.setDataContributionOptIn(session, consentCheckbox.isChecked)
+        SupabaseAuthClient.setDataContributionOptIn(this, session, consentCheckbox.isChecked)
         showStatus(getString(R.string.auth_signed_in))
     }
 

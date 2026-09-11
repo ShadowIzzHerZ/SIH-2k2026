@@ -42,20 +42,24 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
+        <!-- clipToOutline clips this FrameLayout's own drawing — including
+             the ImageView child below — to icon_circle_bg's oval outline,
+             so the app icon (a square adaptive-icon image) renders as a
+             circle instead of peeking past the chip's rounded corners. -->
         <FrameLayout
             android:id="@+id/headerIconCircle"
             android:layout_width="36dp"
             android:layout_height="36dp"
-            android:background="@drawable/icon_circle_bg">
+            android:background="@drawable/icon_circle_bg"
+            android:clipToOutline="true">
 
-            <TextView
+            <ImageView
                 android:id="@+id/headerIcon"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:text="@string/ic_near_me"
-                android:textColor="@color/on_primary_container"
-                android:textSize="18sp"
-                style="@style/Text.Icon" />
+                android:src="@mipmap/ic_launcher"
+                android:scaleType="centerCrop"
+                android:contentDescription="@string/app_name" />
         </FrameLayout>
 
         <LinearLayout
