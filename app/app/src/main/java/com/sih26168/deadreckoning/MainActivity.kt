@@ -641,6 +641,23 @@ class MainActivity : AppCompatActivity() {
                 )
                 devRecordStatus.text = "Recording… ${devRecorder.sampleCount} samples" +
                     (if (!sample.hasFix) "  [no GPS fix]" else "")
+                // Real bookend positions for the drive_sessions row this
+                // recording uploads on stop (see
+                // uploadRecordingSessionIfConsented()) — same
+                // start/end-GPS-fix methodology
+                // src/data/windowing.py's drift-% computation uses, read
+                // straight off each tick's real Sample rather than
+                // recomputed after the fact.
+                if (sample.hasFix) {
+                    if (recordingSessionStartLat == null) {
+                        recordingSessionStartLat = sample.lat
+                        recordingSessionStartLon = sample.lon
+                    }
+                    recordingSessionEndLat = sample.lat
+                    recordingSessionEndLon = sample.lon
+                } else {
+                    recordingSessionHadBlackout = true
+                }
             }
         }
         updateRecordingLogChip()

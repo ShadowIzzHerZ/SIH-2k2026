@@ -121,22 +121,23 @@
          FusionMode plus the map-matched overlay, so the trail colors
          never need explaining out loud during a demo. -->
     <style name="LegendItem">
-        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_weight">1</item>
         <item name="android:orientation">horizontal</item>
         <item name="android:gravity">center_vertical</item>
     </style>
 
     <style name="LegendLabel" parent="Text.LabelSm">
-        <!-- 0dp+weight, not wrap_content: ellipsize only actually clips
-             text when the view has a bounded width to clip against —
-             wrap_content just grows to fit the text instead, which is
-             what was overflowing "Map-matched" into a second line inside
-             its 1/4-width column on a real device. This fills whatever
-             space is left in its LegendItem row after the fixed-size dot. -->
-        <item name="android:layout_width">0dp</item>
-        <item name="android:layout_weight">1</item>
+        <!-- Plain wrap_content, not 0dp+weight: an equal-width column per
+             item left "Map-matched" (the longest label) truncated to
+             "Map-match…" even at full card width, since 1/4 of the row was
+             still narrower than the word — found live on a real device.
+             maxLines=1 already rules out the earlier "wraps to a second
+             line" failure mode, so plain wrap_content is safe here: each
+             label just sizes to its own real content width, and legendRow
+             (wrap_content + centered, see activity_main.xml) centers the
+             whole cluster as a group instead of stretching it edge to edge. -->
+        <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginStart">4dp</item>
         <item name="android:letterSpacing">0</item>

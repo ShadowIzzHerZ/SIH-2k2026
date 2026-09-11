@@ -462,10 +462,20 @@
                         android:layout_marginBottom="8dp"
                         style="@style/Text.BodyMd" />
 
+                    <!-- wrap_content + centered, not stretched edge-to-edge:
+                         an earlier equal-width-column version (each
+                         LegendItem 0dp+weight) squeezed "Map-matched" (the
+                         longest label) into 1/4 of the row and it still
+                         ellipsized — found live on a real device. Each item
+                         now sizes to its own real content (see LegendItem/
+                         LegendLabel in themes.xml), and this row centers the
+                         whole 4-item cluster as a group instead of pinning
+                         it to the left edge. -->
                     <LinearLayout
                         android:id="@+id/legendRow"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
                         android:layout_marginBottom="10dp"
                         android:orientation="horizontal">
 
@@ -496,6 +506,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="8dp"
                         android:ellipsize="end"
+                        android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/primary"
                         android:textSize="11.5sp"
