@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.view.View
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.RadioGroup
 import android.widget.TextView
@@ -22,7 +23,13 @@ import androidx.core.content.FileProvider
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.switchmaterial.SwitchMaterial
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import java.time.Instant
 
 /**
  * Live on-device demo of the whole pipeline this repo trains and
@@ -70,7 +77,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mapMatcher: MapMatcher
 
     // ---- Top bar ----
-    private lateinit var headerIcon: TextView
+    private lateinit var headerIcon: ImageView
     private lateinit var titleText: TextView
     private lateinit var subtitleText: TextView
 
@@ -137,6 +144,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var devShareButton: Button
     private lateinit var devRecorder: DevRecorder
     private lateinit var prefs: SharedPreferences
+
+    // drive_sessions upload (see SUPABASE.md) — tracked alongside
+    // devRecorder's own lifecycle (setupDevRecording()) rather than
+    // inside DevRecorder itself, since DevRecorder only knows about the
+    // CSV file; start/end position and whether a blackout happened are
+    // read off each tick's real Sample the same way devRecorder.logSample
+    // already is. Best-effort and silent: a failed/skipped upload must
+    // never block or interrupt the real, local, offline-first recording.
+    private var recordingSessionStartedAt: Instant? = null
+    private var recordingSessionStartLat: Double? = null
+    private var recordingSessionStartLon: Double? = null
+    private var recordingSessionEndLat: Double? = null
+    private var recordingSessionEndLon: Double? = null
+    private var recordingSessionHadBlackout = false
+    private val activityScope = CoroutineScope(Dispatchers.Main + Job())
 
     // ---- Bottom nav ----
     private lateinit var liveMapContent: View
@@ -218,6 +240,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Location-use disclosure comes before anything else — including
+        // before this Activity's own layout inflates — so there's no
+        // frame where MainActivity is visible without the user having
+        // seen it yet. Same check-and-redirect pattern AuthActivity uses
+        // for a stored session. See PrivacyConsent.kt.
+        if (!PrivacyConsent.hasConsented(this)) {
+            PrivacyConsentActivity.launch(this)
+            finish()
+            return
+        }
+
         setContentView(R.layout.activity_main)
 
         headerIcon = findViewById(R.id.headerIcon)
@@ -367,18 +401,19 @@ class MainActivity : AppCompatActivity() {
         navSensorsLabel.setTextColor(if (tab == Tab.SENSORS) activeColor else inactiveColor)
         navSimulationLabel.setTextColor(if (tab == Tab.SIMULATION) activeColor else inactiveColor)
 
-        // Same header view, different real copy per destination — matches
-        // dead_reckoning_navigation's "Offline Navigation" header on Live
-        // Map and sensor_calibration's "NAV-DR / Sensor Alignment" header
-        // on Sensors, without inflating two separate top bars for text
-        // that's the only thing actually different between them.
+        // Same header view, different real copy per destination — the
+        // "Zen" title is now the same across all three tabs, but the
+        // subtitle still swaps per destination (e.g. "Sensor Alignment"
+        // on Sensors), so this stays one shared top bar rather than
+        // inflating separate ones for text that's the only thing
+        // actually different between them.
         when (tab) {
             Tab.LIVE_MAP -> {
                 titleText.text = getString(R.string.offline_navigation_title)
                 subtitleText.text = getString(R.string.offline_navigation_subtitle)
             }
             Tab.SENSORS -> {
-                titleText.text = "NAV-DR"
+                titleText.text = getString(R.string.offline_navigation_title)
                 subtitleText.text = getString(R.string.sensors_panel_title).let { "Sensor Alignment" }
             }
             Tab.SIMULATION -> {
@@ -438,12 +473,19 @@ class MainActivity : AppCompatActivity() {
                 devShareButton.visibility = View.GONE
                 val file = devRecorder.start("openroute")
                 devRecordStatus.text = "Recording to ${file.name}…"
+                recordingSessionStartedAt = Instant.now()
+                recordingSessionStartLat = null
+                recordingSessionStartLon = null
+                recordingSessionEndLat = null
+                recordingSessionEndLon = null
+                recordingSessionHadBlackout = false
             } else {
                 val file = devRecorder.stop()
                 devRecordStatus.text = if (file != null) {
                     "Saved ${file.name} — ${devRecorder.sampleCount} samples"
                 } else ""
                 devShareButton.visibility = if (file != null) View.VISIBLE else View.GONE
+                uploadRecordingSessionIfConsented()
             }
         }
         devShareButton.setOnClickListener {
@@ -459,6 +501,43 @@ class MainActivity : AppCompatActivity() {
         devSkipCalibrationButton.setOnClickListener {
             calibration.skipForTesting()
             Toast.makeText(this, "Calibration skipped (testing) — not a real estimate", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Fires once a real (non-replay) recording stops. Silent no-op unless
+     * both conditions are real: a signed-in Supabase session on this
+     * device (SupabaseAuthClient.getStoredSession) AND that user's own
+     * cached data_contribution_opt_in (SupabaseAuthClient.getCachedConsent
+     * — a local mirror of the profiles row so this doesn't need a network
+     * round-trip just to check). Neither present is the common case
+     * (Continue-without-an-account is load-bearing) and isn't an error. */
+    private fun uploadRecordingSessionIfConsented() {
+        val startedAt = recordingSessionStartedAt ?: return
+        recordingSessionStartedAt = null
+        val session = SupabaseAuthClient.getStoredSession(this) ?: return
+        if (!SupabaseAuthClient.getCachedConsent(this)) return
+
+        val deviceId = DeviceIdentity.get(this)
+        val endedAt = Instant.now()
+        val startLat = recordingSessionStartLat
+        val startLon = recordingSessionStartLon
+        val endLat = recordingSessionEndLat
+        val endLon = recordingSessionEndLon
+        val hadBlackout = recordingSessionHadBlackout
+
+        activityScope.launch {
+            SupabaseAuthClient.recordDriveSession(
+                session = session,
+                deviceId = deviceId,
+                startedAt = startedAt,
+                endedAt = endedAt,
+                startLat = startLat,
+                startLon = startLon,
+                endLat = endLat,
+                endLon = endLon,
+                hadBlackout = hadBlackout,
+                contributeToTraining = true,
+            )
         }
     }
 
@@ -479,6 +558,12 @@ class MainActivity : AppCompatActivity() {
         val rawAccel: FloatArray, val rawGyro: FloatArray,
         val hasFix: Boolean, val hasRoughFix: Boolean,
         val lat: Double, val lon: Double, val speed: Float, val bearingRad: Float,
+        // Real Location.hasBearing() — false means bearingRad is a
+        // meaningless default/stale value, not a real course. Always true
+        // for replay rows: those bearings are real recorded ground truth,
+        // never the live provider's own guess. See FusionEngine.tick's
+        // minHeadingLockSpeedMps doc for the bug this exists to avoid.
+        val hasBearing: Boolean,
     )
 
     private fun readSample(usingReplay: Boolean, demo: Int): Sample {
@@ -486,7 +571,7 @@ class MainActivity : AppCompatActivity() {
             val replayData = replaySources[demo - 1]
             val row = replayData.rows[replayIndex]
             replayIndex = (replayIndex + 1) % replayData.rows.size
-            return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad)
+            return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad, true)
         }
         val loc = locationReader.lastLocation
         val hasFix = locationReader.hasRecentFix() && loc != null
@@ -495,6 +580,7 @@ class MainActivity : AppCompatActivity() {
             sensorReader.lastAccel, sensorReader.lastGyro, hasFix, hasRoughFix,
             loc?.latitude ?: 0.0, loc?.longitude ?: 0.0, loc?.speed ?: 0f,
             if (loc != null) Calibration.compassDegToMathRad(loc.bearing) else 0f,
+            loc?.hasBearing() == true,
         )
     }
 
@@ -586,7 +672,10 @@ class MainActivity : AppCompatActivity() {
         val available = sample.hasFix && !demoBlackout
 
         if (!calibration.isReady) {
-            if (sample.hasFix) {
+            // hasBearing() too, not just hasFix — see minHeadingLockSpeedMps's
+            // doc: without it a rough/stationary fix's stale or default
+            // bearing could get fed into yaw alignment as if it were real.
+            if (sample.hasFix && sample.hasBearing) {
                 calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
             }
             showCalibrating(
@@ -623,6 +712,7 @@ class MainActivity : AppCompatActivity() {
             lon = sample.lon,
             gnssSpeed = sample.speed,
             gnssHeadingRad = sample.bearingRad,
+            gnssHasBearing = sample.hasBearing,
         )
 
         val s = fusion.state
@@ -663,11 +753,21 @@ class MainActivity : AppCompatActivity() {
         // sits on top of the bottom nav bar and swallows taps meant for
         // it (found live: navigating tabs while this notice was showing
         // silently did nothing).
-        Snackbar.make(
+        val snackbar = Snackbar.make(
             findViewById(android.R.id.content),
             "Calibration is taking longer than usual. $reason",
             Snackbar.LENGTH_INDEFINITE,
-        ).setAnchorView(findViewById(R.id.bottomNav)).setAction("Dismiss") {}.show()
+        ).setAnchorView(findViewById(R.id.bottomNav)).setAction("Dismiss") {}
+        // Material's Snackbar text view caps itself at 2 lines by default
+        // (com.google.android.material.R.integer.mtrl_snackbar_action_text_color_alpha
+        // isn't it — it's a hardcoded maxLines=2 on the text view itself) —
+        // found live: this notice's actual message wraps to 3+ lines on a
+        // real phone width and was getting truncated with "…" mid-sentence.
+        // Raised rather than removed so a truly pathological message still
+        // can't grow without bound.
+        snackbar.view.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)
+            ?.maxLines = 5
+        snackbar.show()
     }
 
     /** Flips calibrationDetails (ring/instructions/skip-button) between
@@ -805,11 +905,26 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Reproduced live via adb logcat: onCreate's privacy-consent
+        // redirect (see PrivacyConsent.hasConsented's check above) calls
+        // finish() before setContentView() and before any of the fields
+        // below get assigned — so on a fresh install, the very first
+        // onDestroy() throws UninitializedPropertyAccessException on
+        // sensorReader instead of quietly doing nothing. sensorReader is
+        // the first of this group to be assigned in onCreate, so its
+        // isInitialized is a valid proxy for "did setup actually run" —
+        // guarding on it (rather than adding a separate flag) means this
+        // stays correct automatically if that assignment order ever
+        // changes, since it can't complete out of order with the rest.
+        if (!::sensorReader.isInitialized) return
         ticking = false
         tickHandler.removeCallbacksAndMessages(null)
         sensorReader.stop()
         locationReader.stop()
         model.close()
         devRecorder.stop()
+        // Same cleanup AuthActivity's own activityScope gets — otherwise a
+        // recording-upload coroutine outlives the Activity that started it.
+        activityScope.cancel()
     }
 }

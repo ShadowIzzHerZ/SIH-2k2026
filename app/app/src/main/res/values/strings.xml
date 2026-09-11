@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">SIH26168 Dead Reckoning</string>
+    <string name="app_name">Zen</string>
     <string name="status_calibrating">Calibrating… hold phone still, then drive</string>
     <string name="calibrating_short">Calibrating…</string>
     <string name="simulate_blackout">Simulate GNSS blackout (demo)</string>
@@ -77,7 +77,7 @@
 
     <!-- Live-map screen (Zen Civic, pixel-matched to the
          dead_reckoning_navigation mockup) -->
-    <string name="offline_navigation_title">Offline Navigation</string>
+    <string name="offline_navigation_title">Zen</string>
     <string name="offline_navigation_subtitle">Dead reckoning active · 10Hz</string>
     <string name="sensors_ready_pill">Motion sensors ready</string>
     <string name="banner_gnss_title">GPS tracking</string>

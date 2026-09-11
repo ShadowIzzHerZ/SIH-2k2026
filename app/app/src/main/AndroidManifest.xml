@@ -44,6 +44,18 @@
             android:exported="false"
             android:screenOrientation="portrait" />
 
+        <!-- One-time location-use disclosure, shown before MainActivity
+             ever requests the OS location permission — see
+             PrivacyConsent.kt and PrivacyConsentActivity.kt's own doc
+             comments. Launched explicitly from MainActivity.onCreate(),
+             not the app's LAUNCHER activity itself, so it stays a single
+             well-defined redirect point rather than manifest-level
+             indirection. -->
+        <activity
+            android:name=".PrivacyConsentActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
         <!-- Lets DevRecorder's saved CSVs be shared via the normal Android
              share sheet (e.g. straight to a laptop over Drive/email)
              without needing WRITE_EXTERNAL_STORAGE or adb — the file

@@ -79,6 +79,47 @@ data class FusionState(
  * of how quiet the instantaneous reading looks, while a phone actually at
  * rest (speed already near zero, however it got there) still gets ZUPT
  * exactly as before.
+ *
+ * That second version gated on the *live* integrated speed, which turned
+ * out to be a one-way door and a real bug of its own — found live via
+ * `adb logcat` reproducing a reported "speed jumps to ~37 km/h a second
+ * into a blackout": phone essentially stationary, GNSS logged at ~1 m/s
+ * the whole time, yet fusedSpeed climbed unbounded chunk after chunk, past
+ * 37 km/h and still rising past 130 km/h before being caught. Once the
+ * model's own out-of-distribution correction pushed v above zuptMaxSpeed
+ * even once, ZUPT stopped firing for the rest of that blackout — exactly
+ * when it was needed most — letting every later chunk's bias compound
+ * unchecked. Fixed by gating on blackoutEntrySpeed (the last real
+ * GNSS-confirmed speed, frozen once at the blackout transition) instead of
+ * the live v — see isQuiet's doc for why that breaks the feedback loop
+ * without reintroducing the 110 km/h reversed-course bug above.
+ *
+ * That fix alone wasn't sufficient, confirmed with the ZUPT gate itself
+ * instrumented live: for a real handheld/walking-pace recording, isQuiet's
+ * per-sample accel/gyro thresholds (quietAccelThresh/quietGyroThresh, both
+ * tuned against comma2k19's vehicle-mounted, low-noise IMU) matched ZERO
+ * of 50 samples in the runaway chunk — a handheld phone's natural jitter
+ * routinely exceeds thresholds tuned for a rigidly-mounted one, so ZUPT
+ * structurally cannot fire for exactly the "presenter holding the phone"
+ * scenario the demo blackout toggle is meant for. The logged raw data
+ * showed why that matters: avgRawAccelX ~3.37 m/s^2 sustained across the
+ * whole chunk (a real, constant bias — almost certainly leveling-
+ * calibration leakage from a not-quite-level hold, not zero-mean noise;
+ * genuine jitter would average back toward zero over 50 samples, a
+ * constant offset doesn't), with the model's own correction only
+ * partially canceling it (net avgForwardAccel ~+0.75 m/s^2) — small
+ * enough to look "reasonable" per-sample, large enough to add several
+ * m/s of speed every 5s chunk, indefinitely. Fixed with a second,
+ * independent safeguard that doesn't depend on any per-sample threshold
+ * at all: when blackoutEntrySpeed indicates a slow/near-stationary entry
+ * (below zuptMaxSpeed), cap that chunk's integration to a tight band
+ * around blackoutEntrySpeed (see lowSpeedVMargin) instead of the full
+ * vehicle-scale vClampMax — a phone that was at walking pace when GNSS
+ * was last available has no real way to reach vehicle speeds within one
+ * blackout without a genuine, large acceleration event, which this would
+ * still allow (the margin isn't zero); a genuinely fast blackoutEntrySpeed
+ * keeps the wide vClampMax exactly as before, so real highway
+ * acceleration/deceleration during a blackout is unaffected.
  */
 class FusionEngine(
     private val model: Predictor,
@@ -95,6 +136,28 @@ class FusionEngine(
     // brisk walk (the real "holding the phone" scenario this exists for)
     // and comfortably below any real vehicle cruising speed.
     private val zuptMaxSpeed: Float = 3.0f,
+    // Second, independent safeguard against the runaway-speed bug —
+    // see class doc's third ZUPT paragraph. Only applied when
+    // blackoutEntrySpeed < zuptMaxSpeed (same "slow/near-stationary
+    // entry" regime ZUPT targets); a genuinely fast entry keeps the full
+    // vClampMax range. 4 m/s (~14.4 km/h) on top of a walking-pace entry
+    // comfortably covers a real brisk-walk-to-jog range without
+    // resembling the reported bug's actual failure mode (tens of km/h
+    // within a couple chunks with the raw GNSS speed never leaving ~1 m/s).
+    private val lowSpeedVMargin: Float = 4.0f,
+    // Below this GNSS speed, Location.getBearing() is either flagged
+    // invalid (hasBearing()==false) or, worse, a stale/last-good value the
+    // provider never cleared — a real bug found live: sitting still
+    // indoors with a rough network fix, heading kept snapping to whatever
+    // compass-0 default or last-cached bearing the provider handed back,
+    // which then got trusted as the authoritative GNSS_TRACKING heading
+    // every tick. 1 m/s (~3.6 km/h) is comfortably below CalibrationManager's
+    // own minSpeedMps=2.0 gate for locking yaw in the first place — this is
+    // a looser "is this instant's bearing even meaningful" check, not a
+    // calibration-quality bar. Below it, tick() holds the last fused
+    // heading instead of snapping to a bogus one; x/y/speed still update
+    // from the real fix as normal.
+    private val minHeadingLockSpeedMps: Float = 1.0f,
     // Visual-only catch-up duration for a chunk transition — see
     // resolveChunk's doc for the real bug this fixes (a visible kink
     // every 5s wherever the real path curved within a chunk). Exposed as
@@ -114,6 +177,13 @@ class FusionEngine(
     private val rollingWindow = ArrayDeque<FloatArray>(windowSize)
     private var pending = 0             // new blackout samples since the last chunk resolution
     private var chunkAnchor = FusionState()
+    // The last real GNSS-confirmed speed before the current blackout began
+    // (frozen once at the blackout transition, see tick()) — isQuiet's own
+    // ZUPT gate reference. NOT the same as chunkAnchor.speed once a chunk
+    // has resolved: chunkAnchor.speed becomes the *integrated* result,
+    // which is exactly what can run away (see isQuiet's doc); this field
+    // never gets overwritten by anything but a real GNSS fix.
+    private var blackoutEntrySpeed = 0f
 
     private val blendSamples = maxOf(1, (blendSeconds / dt).toInt())
     private var blendRemaining = 0
@@ -173,6 +243,12 @@ class FusionEngine(
      * speed/course preferred — see fusion.py's run_fusion docstring for why
      * position-differencing is a known hazard, not a neutral fallback.
      * `available=false` also covers the manual demo blackout toggle.
+     *
+     * `gnssHasBearing` is the caller's `Location.hasBearing()` (always true
+     * for replay, which carries real recorded courses) — combined with
+     * `gnssSpeed` against [minHeadingLockSpeedMps] to decide whether this
+     * tick's bearing is actually trustworthy enough to lock heading to. See
+     * [minHeadingLockSpeedMps]'s doc for the real bug this guards against.
      */
     fun tick(
         calibratedAccel: FloatArray,
@@ -182,6 +258,11 @@ class FusionEngine(
         lon: Double,
         gnssSpeed: Float,
         gnssHeadingRad: Float,
+        // Defaults true so every existing call site/test that doesn't care
+        // about this gate (synthetic fixtures with no real Location object)
+        // keeps its prior behavior; MainActivity's real tick() passes the
+        // real Location.hasBearing() explicitly.
+        gnssHasBearing: Boolean = true,
     ) {
         if (rollingWindow.size >= windowSize) rollingWindow.removeFirst()
         rollingWindow.addLast(calibratedAccel + calibratedGyro)
@@ -220,13 +301,23 @@ class FusionEngine(
             // not live; see resolveChunk's doc for why this line has to
             // be unambiguous about which case it's actually handling.
             chunkAnchor = state.copy()
+            // Frozen once, here, for the whole blackout — see isQuiet's
+            // doc for the real runaway-speed bug this fixes (ZUPT gating
+            // on the live *integrated* v instead of this).
+            blackoutEntrySpeed = state.speed
             pending = 0
             chunkBlendRemaining = 0
         }
 
         if (effectiveAvailable) {
             val xy = toLocalXY(lat, lon)
-            val gnssState = FusionState(FusionMode.GNSS_TRACKING, xy[0], xy[1], gnssHeadingRad, gnssSpeed)
+            // Only lock heading to this fix's bearing when it's actually
+            // meaningful (see minHeadingLockSpeedMps's doc) — otherwise
+            // hold the last fused heading. Position/speed still update from
+            // the real fix either way; only the heading source is gated.
+            val headingValid = gnssHasBearing && gnssSpeed > minHeadingLockSpeedMps
+            val lockedHeading = if (headingValid) gnssHeadingRad else state.heading
+            val gnssState = FusionState(FusionMode.GNSS_TRACKING, xy[0], xy[1], lockedHeading, gnssSpeed)
 
             state = if (blendRemaining > 0) {
                 val w = 1f - blendRemaining / blendSamples.toFloat()
@@ -322,8 +413,17 @@ class FusionEngine(
         var th = chunkAnchor.heading
         var x = chunkAnchor.x
         var y = chunkAnchor.y
+        // Second, independent safeguard against the runaway-speed bug —
+        // see class doc's third ZUPT paragraph and lowSpeedVMargin's own
+        // doc. Computed once from blackoutEntrySpeed (frozen, real
+        // GNSS-confirmed), not from the live v — same non-self-referential
+        // reasoning as blackoutEntrySpeed itself, so this can't be defeated
+        // by the very runaway it exists to bound.
+        val vMaxThisChunk = if (blackoutEntrySpeed < zuptMaxSpeed) {
+            minOf(vClampMax, blackoutEntrySpeed + lowSpeedVMargin)
+        } else vClampMax
         for (i in startIdx until window.size) {
-            if (isQuiet(window[i], v)) {
+            if (isQuiet(window[i], blackoutEntrySpeed)) {
                 // ZUPT — raw sensors say the device is at rest right now;
                 // don't trust the network's correction for this instant
                 // (out-of-distribution for anything but real driving), just
@@ -332,7 +432,7 @@ class FusionEngine(
             } else {
                 val forwardAccel = window[i][0] + corrections[i][0]
                 val yawRate = window[i][5] + corrections[i][1]
-                v = (v + forwardAccel * dt).coerceIn(vClampMin, vClampMax)
+                v = (v + forwardAccel * dt).coerceIn(vClampMin, vMaxThisChunk)
                 th = wrapAngle(th + yawRate * dt)
             }
             x += v * cos(th.toDouble()).toFloat() * dt
@@ -364,11 +464,35 @@ class FusionEngine(
      * toward zero and the fused trail visibly reversed course — confirmed
      * against the raw recorded data (speed held 30-33 m/s, gz stayed under
      * 0.06 rad/s throughout; there was no real stop or sharp turn there).
-     * Gating on currentSpeed already being low fixes the ambiguity: a
+     * Gating on referenceSpeed already being low fixes the ambiguity: a
      * cruising vehicle's speed is not low, so it's exempt regardless of
-     * how quiet the instantaneous accel/gyro looks. */
-    private fun isQuiet(sample: FloatArray, currentSpeed: Float): Boolean {
-        if (currentSpeed >= zuptMaxSpeed) return false
+     * how quiet the instantaneous accel/gyro looks.
+     *
+     * referenceSpeed must be blackoutEntrySpeed (the last real
+     * GNSS-confirmed speed), NOT the live integrated v — a second real
+     * bug, found live via `adb logcat` while reproducing a reported "speed
+     * jumps to 37 km/h a second into a blackout" (real device, phone
+     * essentially stationary/walking-pace, GNSS reporting ~1 m/s the whole
+     * time — confirmed the logged gnssSpeed never left 0.7-1.1 m/s while
+     * fusedSpeed climbed unbounded, chunk after chunk, past 37 km/h and
+     * well past 130 km/h before being caught, still climbing). Gating on
+     * the live v instead of a frozen reference is a one-way door: the
+     * model's out-of-distribution correction (same domain-mismatch this
+     * whole ZUPT mechanism exists to catch — see class doc) only has to
+     * push v above zuptMaxSpeed ONCE, and ZUPT permanently stops firing
+     * for the rest of the blackout right when it's needed most, letting
+     * every subsequent chunk's bias integrate further unchecked — a
+     * positive-feedback runaway, not a one-off glitch. Freezing the
+     * reference at blackoutEntrySpeed instead breaks that loop: a phone
+     * that was genuinely slow when GNSS was last available stays
+     * ZUPT-eligible for the whole blackout regardless of how far the
+     * integration has since (wrongly) drifted, so a runaway gets caught
+     * and decayed on the very next quiet sample instead of never again.
+     * The genuinely-cruising-vehicle case this gate was originally added
+     * for is unaffected: that vehicle's speed was already high at the
+     * moment GNSS was last available, so blackoutEntrySpeed is high too. */
+    private fun isQuiet(sample: FloatArray, referenceSpeed: Float): Boolean {
+        if (referenceSpeed >= zuptMaxSpeed) return false
         val accelMag = sqrt((sample[0] * sample[0] + sample[1] * sample[1]).toDouble()).toFloat()
         val gyroMag = sqrt((sample[3] * sample[3] + sample[4] * sample[4] + sample[5] * sample[5]).toDouble()).toFloat()
         return accelMag < quietAccelThresh && gyroMag < quietGyroThresh
@@ -382,6 +506,7 @@ class FusionEngine(
         blendRemaining = 0
         chunkBlendRemaining = 0
         chunkAnchor = FusionState()
+        blackoutEntrySpeed = 0f
         wasAvailable = true
     }
 }

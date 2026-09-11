@@ -10,6 +10,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 /**
@@ -41,6 +42,10 @@ object SupabaseAuthClient {
     private const val KEY_ACCESS_TOKEN = "access_token"
     private const val KEY_REFRESH_TOKEN = "refresh_token"
     private const val KEY_USER_ID = "user_id"
+    // Local mirror of profiles.data_contribution_opt_in — see
+    // getCachedConsent's doc for why this exists instead of a network
+    // round-trip on every recording stop.
+    private const val KEY_CACHED_CONSENT = "cached_data_contribution_opt_in"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -70,6 +75,23 @@ object SupabaseAuthClient {
 
     fun clearStoredSession(context: Context) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+    }
+
+    /** Local mirror of profiles.data_contribution_opt_in, written whenever
+     * setDataContributionOptIn succeeds — read by MainActivity before every
+     * recording upload so that check doesn't need its own network
+     * round-trip (and, unlike a network call, fails closed: no cached
+     * "true" means no upload, never the reverse). Cleared alongside the
+     * rest of the session on sign-out so a fresh sign-in doesn't inherit a
+     * stale opt-in from a previous account on this device. */
+    fun getCachedConsent(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_CACHED_CONSENT, false)
+
+    private fun setCachedConsent(context: Context, optIn: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_CACHED_CONSENT, optIn)
+            .apply()
     }
 
     private fun storeSession(context: Context, session: Session) {
@@ -195,6 +217,7 @@ object SupabaseAuthClient {
      * used for retraining. Never called automatically; only ever in
      * response to a real user action in AuthActivity's UI. */
     suspend fun setDataContributionOptIn(
+        context: Context,
         session: Session,
         optIn: Boolean,
     ): Result<Unit> = withContext(Dispatchers.IO) {
@@ -217,7 +240,63 @@ object SupabaseAuthClient {
                     throw IOException(extractErrorMessage(responseBody, response.code))
                 }
             }
+            // Only mirrored locally once the server call actually
+            // succeeded — see getCachedConsent's doc for why this can't
+            // just optimistically cache whatever the UI checkbox said.
+            setCachedConsent(context, optIn)
         }
+    }
+
+    /** POST {url}/rest/v1/drive_sessions — one row per recorded trip, see
+     * SUPABASE.md's schema section. `contributeToTraining` is a per-session
+     * snapshot of the user's consent at upload time (matching the
+     * `contribute_to_training` column's own doc comment), not a live join
+     * back to `profiles`; the caller (MainActivity) already gated calling
+     * this at all on getCachedConsent(), so it's passed through as-is
+     * rather than re-checked here. `raw_data_ref`/`used_for_training` are
+     * left at their column defaults (null/false) — nothing yet uploads the
+     * actual raw IMU log this row would point at (see SUPABASE.md's
+     * "what's NOT built yet" #4). */
+    suspend fun recordDriveSession(
+        session: Session,
+        deviceId: String,
+        startedAt: Instant,
+        endedAt: Instant,
+        startLat: Double?,
+        startLon: Double?,
+        endLat: Double?,
+        endLon: Double?,
+        hadBlackout: Boolean,
+        contributeToTraining: Boolean,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject().apply {
+                put("device_id", deviceId)
+                put("started_at", startedAt.toString())
+                put("ended_at", endedAt.toString())
+                put("start_lat", startLat)
+                put("start_lon", startLon)
+                put("end_lat", endLat)
+                put("end_lon", endLon)
+                put("had_blackout", hadBlackout)
+                put("contribute_to_training", contributeToTraining)
+            }.toString().toRequestBody(jsonMediaType)
+
+            val request = Request.Builder()
+                .url("$SUPABASE_URL/rest/v1/drive_sessions")
+                .addHeader("apikey", SUPABASE_ANON_KEY)
+                .addHeader("Authorization", "Bearer ${session.accessToken}")
+                .addHeader("Prefer", "return=minimal")
+                .post(body)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val responseBody = response.body?.string().orEmpty()
+                    throw IOException(extractErrorMessage(responseBody, response.code))
+                }
+            }
+        }.onFailure { Log.e(TAG, "recordDriveSession failed", it) }
     }
 
     private fun extractErrorMessage(responseBody: String, httpCode: Int): String =
