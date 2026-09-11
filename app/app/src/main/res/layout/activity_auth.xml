@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Optional account screen — sign up / sign in to a Supabase-backed
+     account, purely for (1) a real answer to "what if 1000+ people join
+     the app" and (2) opting into drive-session data contribution for
+     future model retraining (see ../../../../../../SUPABASE.md). Not part
+     of the pixel-matched Stitch mockups (there is no mockup for this —
+     it's a genuinely new, separate feature, not something faked into an
+     existing screen), so this uses the same color palette
+     (colors.xml) but its own simple, undecorated layout rather than
+     pretending to be a matched design. "Continue without an account" is
+     load-bearing: the dead-reckoning pipeline must stay fully usable with
+     zero network/account dependency. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/canvas"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/auth_title"
+            android:textColor="@color/on_surface"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="24dp"
+            android:text="@string/auth_subtitle"
+            android:textColor="@color/on_surface_variant"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/emailField"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:autofillHints="emailAddress"
+            android:hint="@string/auth_email_hint"
+            android:inputType="textEmailAddress"
+            android:padding="12dp"
+            android:background="@drawable/auth_field_background" />
+
+        <EditText
+            android:id="@+id/passwordField"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:autofillHints="password"
+            android:hint="@string/auth_password_hint"
+            android:inputType="textPassword"
+            android:padding="12dp"
+            android:background="@drawable/auth_field_background" />
+
+        <CheckBox
+            android:id="@+id/consentCheckbox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/auth_consent_label"
+            android:textColor="@color/on_surface_variant"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="@color/primary"
+            android:textSize="13sp"
+            android:visibility="gone"
+            tools:visibility="visible"
+            tools:text="Status message" />
+
+        <ProgressBar
+            android:id="@+id/authProgress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:layout_gravity="center_horizontal"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/signInButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:backgroundTint="@color/primary"
+            android:text="@string/auth_sign_in" />
+
+        <Button
+            android:id="@+id/signUpButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@android:color/transparent"
+            android:textColor="@color/primary"
+            android:text="@string/auth_sign_up" />
+
+        <TextView
+            android:id="@+id/skipButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="24dp"
+            android:padding="8dp"
+            android:text="@string/auth_skip"
+            android:textColor="@color/on_surface_variant"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+</ScrollView>
