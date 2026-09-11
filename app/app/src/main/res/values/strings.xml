@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">SIH26168 Dead Reckoning</string>
     <string name="status_calibrating">Calibrating… hold phone still, then drive</string>
+    <string name="calibrating_short">Calibrating…</string>
     <string name="simulate_blackout">Simulate GNSS blackout (demo)</string>
     <string name="replay_real_drive">Replay real recorded drive (demo)</string>
     <string name="demo_1_label">Demo 1 — Jalandhar, Sept 9 · 19:08 (24 min)</string>
@@ -71,6 +72,8 @@
     <string name="ic_history_toggle_off">&#xf17d;</string>
     <string name="ic_rotate_right">&#xe41a;</string>
     <string name="ic_autorenew">&#xe863;</string>
+    <string name="ic_expand_more">&#xe5cf;</string>
+    <string name="ic_expand_less">&#xe5ce;</string>
 
     <!-- Live-map screen (Zen Civic, pixel-matched to the
          dead_reckoning_navigation mockup) -->
@@ -124,4 +127,32 @@
     <string name="auth_error_empty_fields">Enter both an email and a password</string>
     <string name="auth_confirmation_sent">Check your email to confirm your account, then sign in.</string>
     <string name="auth_signed_in">Signed in.</string>
+
+    <!-- PrivacyConsentActivity — shown once, before MainActivity ever
+         requests the OS location permission, not folded into the
+         existing location_needed screen (which is about the permission
+         being denied, not about disclosure before ever asking). Every
+         claim here is checkable against what the app's code actually
+         does, not boilerplate legal copy: point 1 is why this screen
+         exists before the permission dialog at all; point 2/3 describe
+         CalibrationManager's real yaw-alignment use of GPS and the real
+         "Simulate GNSS blackout" toggle already in the Simulation tab;
+         point 4 is true because recording (DevRecorder) defaults off and
+         only ever writes to this device's own app-private storage unless
+         the user explicitly signs in AND opts in (see SUPABASE.md); point
+         5 points at the real OS permission settings, the actual
+         mechanism, not a fabricated in-app toggle. -->
+    <string name="privacy_title">Privacy &amp; Security</string>
+    <string name="privacy_subtitle">Before this app can track your position, here\'s exactly how it uses your location.</string>
+    <string name="privacy_point_1_title">Your consent comes first</string>
+    <string name="privacy_point_1_body">This app will not request location access until you agree here. Nothing runs behind that request.</string>
+    <string name="privacy_point_2_title">GPS sets your starting point</string>
+    <string name="privacy_point_2_body">Your phone\'s motion sensors do the actual tracking. GPS is used to fix an initial position and to align that tracking to true heading.</string>
+    <string name="privacy_point_3_title">You can watch it run GPS-free</string>
+    <string name="privacy_point_3_body">Once tracking has a reference point, the Simulation tab\'s \"Simulate GNSS blackout\" makes the app ignore incoming GPS so you can see motion-sensor-only tracking work on its own — a demo of the dead-reckoning math, not a control over your phone\'s GPS radio.</string>
+    <string name="privacy_point_4_title">Nothing leaves your phone by default</string>
+    <string name="privacy_point_4_body">Location data stays in this app\'s private storage. It\'s only ever sent anywhere if you separately sign in and opt in to contributing drive data.</string>
+    <string name="privacy_point_5_title">Revoke it whenever you want</string>
+    <string name="privacy_point_5_body">Location access is a normal Android permission — turn it off anytime in this app\'s system Settings, and the app will ask again next time it needs it.</string>
+    <string name="privacy_agree_button">I understand — continue</string>
 </resources>
