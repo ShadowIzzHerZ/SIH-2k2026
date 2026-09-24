@@ -38,3 +38,11 @@ results/train_history_prev.json
 results/*_prev.json
 
 .DS_Store
+
+# Keynote decks kept locally for the hackathon pitch — not source, not
+# meant for the public repo history.
+*.key
+
+# Stray nested duplicate directory (same name as repo root) that showed up
+# in the working tree — not an intentional part of the project.
+/SIH26168-ML/
