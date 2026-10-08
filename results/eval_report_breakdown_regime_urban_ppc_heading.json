@@ -1,0 +1,29 @@
+{
+  "iovnbd_test_only": {
+    "n_windows": 18460,
+    "mean_drift_pct": 61.53314913631874,
+    "median_drift_pct": 66.28447723388672,
+    "p90_drift_pct": 78.2622314453125,
+    "worst_drift_pct": 905.7393798828125,
+    "target_pct": 10.0,
+    "pass_rate_pct": 3.7594799566630552
+  },
+  "comma2k19_test_only": {
+    "n_windows": 585,
+    "mean_drift_pct": 26.1733281427469,
+    "median_drift_pct": 15.480693817138672,
+    "p90_drift_pct": 52.064539337158216,
+    "worst_drift_pct": 874.0255126953125,
+    "target_pct": 10.0,
+    "pass_rate_pct": 27.863247863247864
+  },
+  "ppc_test_only": {
+    "n_windows": 1653,
+    "mean_drift_pct": 47.303915034981834,
+    "median_drift_pct": 14.825896263122559,
+    "p90_drift_pct": 103.6544448852539,
+    "worst_drift_pct": 1666.6201171875,
+    "target_pct": 10.0,
+    "pass_rate_pct": 38.052026618269814
+  }
+}

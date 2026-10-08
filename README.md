@@ -29,11 +29,15 @@ a phone's IMU has the least ambiguous signal to work with — and is
 transparently weaker on the harder case: low-speed, frequent-turn urban
 driving, where per-window drift diagnostics ([src/diagnose_drift.py](src/diagnose_drift.py),
 [results/drift_diagnostics.csv](results/drift_diagnostics.csv)) show broad,
-spread-out underfitting rather than one fixable bug. Four different fixes
+spread-out underfitting rather than one fixable bug. Five different fixes
 were tried against the IO-VNBD number specifically (a bigger architecture,
-mixing in comma2k19 as training data, a real LR-scheduler bug fix, and
-properly-normalized engineered features) — all landed in the same 60-65%
-band or worse. Rather than paper over that with a cherry-picked number, the
+mixing in comma2k19 as training data, a real LR-scheduler bug fix,
+properly-normalized engineered features, and mixing in the Google
+Smartphone Decimeter Challenge dataset) — the first four landed in the same
+60-65% band; the fifth (decimeter) landed worse still, at 74.13%, while
+being the single best result in the project on its *own* test set (6.86%
+mean / 2.77% median — see Status). Rather than paper over that with a
+cherry-picked number, the
 plan going in to the demo is to lead with what's genuinely earned (the
 comma2k19 result) and be upfront that urban low-speed driving is the known
 hard case — see the Status section below for the full, unfiltered trail of
@@ -199,6 +203,10 @@ close to the deadline.
   - Remaining gap, explicitly not claimed as solved: this is a *soft* penalty (halves transition probability, not a hard ban) — a strongly-evidenced backward observation can still occasionally win. No test asserts the matcher enforces one-way directionality under GPS noise *pressuring* it the wrong way (only that the edge itself doesn't exist), since that would need a synthetic case with a parallel wrong-way road nearby to be meaningful.
 - [ ] Own campus recordings (see `data/own_recordings/`) — not yet collected; could help close the gap given IO-VNBD's mounting/session variety is a real source of error
 - [x] **Android app built and verified live on a real device** (see [app/](app/)) — native Kotlin port of the calibration/integration/mode-switching pipeline *and* a real map-matcher, running the exported ONNX model on-device via ONNX Runtime Mobile. Builds a real, signed debug APK (`./gradlew assembleDebug`, ~24MB, arm64 only). Found and fixed 2 real bugs through live-device testing (dark-mode text visibility; the exported ONNX model's fixed input shape crashing on a short final chunk). A "Replay real recorded drive" mode replays the exact comma2k19 segment that measured 2.9% drift offline, live on-device — verified: calibration completes, GNSS tracking renders the real road, blackout triggers a genuine model correction (not just extrapolation), reconnect blends smoothly, and the map-matched overlay visibly stays on the road while the raw estimate drifts off it during blackout — no crashes across 40+ minutes of continuous runtime. Real (non-replay) live driving not yet tested. See `app/README.md` for the full picture.
+- [x] **Tried mixing in the Google Smartphone Decimeter Challenge dataset** (2023 edition, Kaggle — real phone GNSS+IMU with survey-grade ground truth, `DECIMETER/sdc2023/sdc2023/train`, see [src/data/decimeter_loader.py](src/data/decimeter_loader.py)) as a fifth attempt at the IO-VNBD number, alongside IO-VNBD in training (`--decimeter_dir`: 45 drives / 111 phone-segments → 154,477 train windows — split at the *drive* level, not the segment level, so two phones riding the same drive can't leak across train/val/test the way a segment-level split would). Trained to early-stop (epoch 19, best val drift at epoch 11: 24.40%). Result on the same held-out-test methodology as every number above ([results/eval_report_decimeter.json](results/eval_report_decimeter.json) / [results/eval_report_breakdown_decimeter.json](results/eval_report_breakdown_decimeter.json)):
+  - **Decimeter-only test drift: 6.86% mean / 2.77% median, 84.30% pass rate** — genuinely the strongest number in this project, clear of the PS's <10% target on *both* mean and median, better than comma2k19's highway result below. Makes sense given the data: real phone GNSS+IMU, high-grade ground truth, mostly steady US highway/suburban driving — an even easier scenario for dead reckoning than comma2k19's already-easy highway cruise.
+  - **IO-VNBD-only test drift: 74.13% mean / 74.73% median, 1.35% pass rate** — worse than the 62.33% baseline, and worse than every one of the four previously-tried fixes (all of which landed in the 60-65% band or worse). Mixing in decimeter did **not** help IO-VNBD; it measurably hurt it.
+  - **Not promoted to production** — `checkpoints/best.pt` unchanged; kept as `checkpoints/best_decimeter.pt` (reference only, same treatment as `best_engineered.pt`). Consistent with, not contradicting, every earlier IO-VNBD finding: a fifth real, differently-flavored dataset made the easy case (steady, high-speed driving) even better and the hard case (low-speed, frequent-turn urban) worse — decimeter's driving profile skews even further toward the "easy" end of the spectrum than comma2k19 did, so this tracks with, and reinforces, the underfitting-on-hard-scenarios diagnosis above rather than contradicting it.
 
 ## Running
 

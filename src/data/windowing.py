@@ -432,12 +432,24 @@ def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_r
 
 
 def load_combined_dataset_splits(comma2k19_dir: str | None = None, own_recordings_dir: str | None = None,
-                                  seed: int = 0, **iovnbd_kwargs):
+                                  decimeter_dir: str | None = None, ppc_dir: str | None = None,
+                                  pvs_dir: str | None = None, seed: int = 0, **iovnbd_kwargs):
     """load_dataset_splits(**iovnbd_kwargs), optionally with comma2k19
     windows mixed into the same train/val/test splits — split at the
     *segment* level (same leakage-avoidance reasoning as IO-VNBD's
     file-level split above), so no comma2k19 segment's windows cross a
     split boundary either.
+
+    pvs_dir (e.g. "data/PVS/PVS-Dataset", see src/data/pvs_loader.py)
+    mixes in real mixed-speed Brazilian road driving the same additive,
+    segment-level-split way ppc_dir does — another real dataset aimed at
+    IO-VNBD's urban/low-speed weakness, not a highway-flavored addition.
+
+    ppc_dir (e.g. "data/PPC/PPC-Dataset", see src/data/ppc_loader.py)
+    mixes in real urban-Japan driving the same additive, segment-level-
+    split way comma2k19_dir does — added specifically to help IO-VNBD's
+    urban/low-speed drift number (see diagnose_drift.py), not a
+    highway-flavored addition like comma2k19/decimeter.
 
     comma2k19_dir=None (or no parquet files found there) behaves exactly
     like load_dataset_splits — this is an additive, opt-in extension, not
@@ -448,6 +460,16 @@ def load_combined_dataset_splits(comma2k19_dir: str | None = None, own_recording
     caller can check whether mixing comma2k19 into training measurably
     helped/hurt *IO-VNBD* test drift specifically, not just report a
     combined number that could hide either direction.
+
+    decimeter_dir (e.g. "DECIMETER/sdc2023/sdc2023/train", see
+    src/data/decimeter_loader.py) mixes in the Google Smartphone Decimeter
+    Challenge dataset the same additive way comma2k19_dir does, with one
+    difference: split at the *drive* level (a drive_id groups 1-2 phones
+    that rode together and recorded almost the same GPS track), not the
+    segment level — splitting two phones from the same drive into different
+    train/val/test buckets would leak near-identical trajectories across
+    the split, the same category of mistake the file-/segment-level splits
+    above already exist to avoid.
 
     own_recordings_dir (e.g. "data/own_recordings", see DevRecorder /
     data/own_recordings/README.md) mixes real phone recordings in too, but
@@ -461,6 +483,12 @@ def load_combined_dataset_splits(comma2k19_dir: str | None = None, own_recording
     """
     combined = load_dataset_splits(seed=seed, **iovnbd_kwargs)
     out = combined
+    # Always available (not just when comma2k19_dir mixes something in) —
+    # it's just the untouched IO-VNBD test split, unaffected by whatever
+    # else gets mixed into out["test"] below. Needed so any mix (decimeter
+    # alone, comma2k19 alone, or both) can still report an isolated
+    # IO-VNBD-only number for a fair before/after comparison.
+    out["iovnbd_test_only"] = combined["test"]
 
     sample_rate_hz = iovnbd_kwargs["sample_rate_hz"]
     window_size = iovnbd_kwargs["window_size"]
@@ -514,6 +542,160 @@ def load_combined_dataset_splits(comma2k19_dir: str | None = None, own_recording
             out["iovnbd_test_only"] = combined["test"]
             out["comma2k19_test_only"] = IOVNBDWindowDataset(comma_windows_by_split["test"],
                                                               extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+
+    if decimeter_dir:
+        dec_root = Path(decimeter_dir)
+        if not dec_root.exists():
+            print(f"[combined dataset] decimeter_dir {decimeter_dir} does not exist — skipping")
+        else:
+            from .decimeter_loader import load_all_segments as load_decimeter_segments
+
+            train_split = iovnbd_kwargs["train_split"]
+            val_split = iovnbd_kwargs["val_split"]
+
+            dec_seqs = load_decimeter_segments(str(dec_root), target_hz=sample_rate_hz)
+            if not dec_seqs:
+                print(f"[combined dataset] no usable decimeter segments under {decimeter_dir} — skipping")
+            else:
+                # Split at the *drive* level (path.parent.name — see this
+                # function's docstring) rather than shuffling segments
+                # directly, so two phones riding the same drive never end up
+                # split across train/val/test.
+                drive_ids = np.array(sorted({seq.path.parent.name for seq in dec_seqs}))
+                rng2 = np.random.default_rng(seed)
+                rng2.shuffle(drive_ids)
+                n_drives = len(drive_ids)
+                n_train_d = int(n_drives * train_split)
+                n_val_d = int(n_drives * val_split)
+                drive_split = {
+                    "train": set(drive_ids[:n_train_d]),
+                    "val": set(drive_ids[n_train_d:n_train_d + n_val_d]),
+                    "test": set(drive_ids[n_train_d + n_val_d:]),
+                }
+
+                dec_windows_by_split: dict[str, list[Window]] = {"train": [], "val": [], "test": []}
+                dec_segments_by_split = {"train": 0, "val": 0, "test": 0}
+                for seq in dec_seqs:
+                    split = next((s for s, ids in drive_split.items() if seq.path.parent.name in ids), None)
+                    if split is None:
+                        continue
+                    try:
+                        calibrate_sequence(seq)
+                        dec_windows_by_split[split].extend(build_windows(seq, window_size, window_stride, dt))
+                        dec_segments_by_split[split] += 1
+                    except Exception as e:
+                        print(f"[skip] decimeter segment {seq.path}: {e}")
+                for split, windows in dec_windows_by_split.items():
+                    print(f"decimeter {split}: {dec_segments_by_split[split]} segments "
+                          f"({len(drive_split[split])} drives) -> {len(windows)} windows")
+
+                # Reuse whatever extra_features/norm stats are already set up
+                # (IO-VNBD train stats, possibly with comma2k19 already mixed
+                # in above) — same reasoning as the comma2k19 block: a second,
+                # independently-fit normalization would make datasets'
+                # channels not directly comparable to the network.
+                extra_features = out["train"].extra_features
+                norm_mean, norm_std = out["train"].norm_mean, out["train"].norm_std
+
+                for split in ("train", "val", "test"):
+                    out[split] = IOVNBDWindowDataset(list(out[split].windows) + dec_windows_by_split[split],
+                                                      extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+                out["decimeter_test_only"] = IOVNBDWindowDataset(dec_windows_by_split["test"],
+                                                                   extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+
+    if ppc_dir:
+        ppc_root = Path(ppc_dir)
+        if not ppc_root.exists():
+            print(f"[combined dataset] ppc_dir {ppc_dir} does not exist — skipping")
+        else:
+            from .ppc_loader import load_all_segments as load_ppc_segments
+
+            train_split = iovnbd_kwargs["train_split"]
+            val_split = iovnbd_kwargs["val_split"]
+
+            ppc_seqs = load_ppc_segments(str(ppc_root), target_hz=sample_rate_hz)
+            if not ppc_seqs:
+                print(f"[combined dataset] no usable PPC runs under {ppc_dir} — skipping")
+            else:
+                # Segment-level split (each run is its own independent session,
+                # not multiple phones sharing one drive like decimeter) — same
+                # reasoning/shape as the comma2k19 block above. Only 6 segments
+                # total, so split counts will be small (plausibly 0 in one
+                # bucket) — accepted, same as comma2k19 would behave at this N.
+                rng3 = np.random.default_rng(seed)
+                idxs = np.arange(len(ppc_seqs))
+                rng3.shuffle(idxs)
+                n = len(idxs)
+                n_train = int(n * train_split)
+                n_val = int(n * val_split)
+                split_idxs = {"train": idxs[:n_train], "val": idxs[n_train:n_train + n_val], "test": idxs[n_train + n_val:]}
+
+                ppc_windows_by_split: dict[str, list[Window]] = {}
+                for split, ii in split_idxs.items():
+                    windows: list[Window] = []
+                    for i in ii:
+                        seq = ppc_seqs[i]
+                        try:
+                            calibrate_sequence(seq)
+                            windows.extend(build_windows(seq, window_size, window_stride, dt))
+                        except Exception as e:
+                            print(f"[skip] PPC run {seq.path}: {e}")
+                    ppc_windows_by_split[split] = windows
+                    print(f"ppc {split}: {len(ii)} runs -> {len(windows)} windows")
+
+                extra_features = out["train"].extra_features
+                norm_mean, norm_std = out["train"].norm_mean, out["train"].norm_std
+                for split in ("train", "val", "test"):
+                    out[split] = IOVNBDWindowDataset(list(out[split].windows) + ppc_windows_by_split[split],
+                                                      extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+                out["ppc_test_only"] = IOVNBDWindowDataset(ppc_windows_by_split["test"],
+                                                             extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+
+    if pvs_dir:
+        pvs_root = Path(pvs_dir)
+        if not pvs_root.exists():
+            print(f"[combined dataset] pvs_dir {pvs_dir} does not exist — skipping")
+        else:
+            from .pvs_loader import load_all_segments as load_pvs_segments
+
+            train_split = iovnbd_kwargs["train_split"]
+            val_split = iovnbd_kwargs["val_split"]
+
+            pvs_seqs = load_pvs_segments(str(pvs_root), target_hz=sample_rate_hz)
+            if not pvs_seqs:
+                print(f"[combined dataset] no usable PVS folders under {pvs_dir} — skipping")
+            else:
+                # Segment-level split — same shape as comma2k19/ppc above
+                # (each "PVS <n>" folder is its own independent drive, no
+                # multi-phone-per-drive grouping concern like decimeter).
+                rng4 = np.random.default_rng(seed)
+                idxs = np.arange(len(pvs_seqs))
+                rng4.shuffle(idxs)
+                n = len(idxs)
+                n_train = int(n * train_split)
+                n_val = int(n * val_split)
+                split_idxs = {"train": idxs[:n_train], "val": idxs[n_train:n_train + n_val], "test": idxs[n_train + n_val:]}
+
+                pvs_windows_by_split: dict[str, list[Window]] = {}
+                for split, ii in split_idxs.items():
+                    windows: list[Window] = []
+                    for i in ii:
+                        seq = pvs_seqs[i]
+                        try:
+                            calibrate_sequence(seq)
+                            windows.extend(build_windows(seq, window_size, window_stride, dt))
+                        except Exception as e:
+                            print(f"[skip] PVS folder {seq.path}: {e}")
+                    pvs_windows_by_split[split] = windows
+                    print(f"pvs {split}: {len(ii)} folders -> {len(windows)} windows")
+
+                extra_features = out["train"].extra_features
+                norm_mean, norm_std = out["train"].norm_mean, out["train"].norm_std
+                for split in ("train", "val", "test"):
+                    out[split] = IOVNBDWindowDataset(list(out[split].windows) + pvs_windows_by_split[split],
+                                                      extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
+                out["pvs_test_only"] = IOVNBDWindowDataset(pvs_windows_by_split["test"],
+                                                             extra_features=extra_features, norm_mean=norm_mean, norm_std=norm_std)
 
     if own_recordings_dir:
         own_paths = sorted(glob.glob(f"{own_recordings_dir}/*.csv"))

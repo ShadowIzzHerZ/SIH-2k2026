@@ -120,6 +120,35 @@ data class FusionState(
  * still allow (the margin isn't zero); a genuinely fast blackoutEntrySpeed
  * keeps the wide vClampMax exactly as before, so real highway
  * acceleration/deceleration during a blackout is unaffected.
+ *
+ * That third fix still wasn't enough for a real device sitting genuinely
+ * parked — reported live during real testing: "the line keeps moving even
+ * when we stop moving." Root cause: the lowSpeedVMargin band above (4
+ * m/s) exists specifically so a real slow-walk-to-jog transition isn't
+ * falsely suppressed, but that same headroom is exactly what a phone at
+ * true rest creeps into whenever isQuiet fails to fire on its actual
+ * noisy sensor data — per the previous paragraph's own live-logged case,
+ * quietAccelThresh/quietGyroThresh (tuned for a rigidly-mounted vehicle
+ * IMU) routinely don't match real handheld/resting jitter. The result: v
+ * climbs the coerceIn(vClampMin, vMaxThisChunk) ceiling every sample
+ * isQuiet misses, then holds right there — a sustained ~4 m/s (14.4
+ * km/h) walking-pace drift for the rest of the blackout, not a one-off
+ * glitch. FusionEngineTest's existing "stationary device" regression
+ * never caught this because it feeds *exactly* zero accel/gyro, which
+ * trivially passes isQuiet — not representative of the real sensor noise
+ * that motivated isQuiet's threshold check in the first place.
+ *
+ * Fixed with a fourth, still-independent rule targeting specifically the
+ * regime the other three don't cover: when blackoutEntrySpeed itself is
+ * below zuptForceRestSpeed (genuinely *parked*, not merely "slow" — well
+ * below a real walking pace), every sample in the chunk is treated as
+ * ZUPT-eligible unconditionally, ignoring the accel/gyro thresholds
+ * entirely. This doesn't touch the slow-walk-to-jog case the margin
+ * exists for (blackoutEntrySpeed there is a real walking pace, well
+ * above zuptForceRestSpeed) or the cruising-vehicle case (already exempt
+ * via zuptMaxSpeed) — it only forces the decay a device that was already
+ * at a dead stop should obviously get, regardless of how its particular
+ * noise happens to compare to a threshold tuned for a different mounting.
  */
 class FusionEngine(
     private val model: Predictor,
@@ -145,6 +174,15 @@ class FusionEngine(
     // resembling the reported bug's actual failure mode (tens of km/h
     // within a couple chunks with the raw GNSS speed never leaving ~1 m/s).
     private val lowSpeedVMargin: Float = 4.0f,
+    // Fourth, independent ZUPT rule — see class doc's fourth paragraph.
+    // Below this blackoutEntrySpeed, every sample is forced ZUPT-eligible
+    // regardless of accel/gyro (isQuiet is skipped entirely), because the
+    // device was genuinely parked, not just "slow". 0.5 m/s (~1.8 km/h)
+    // sits comfortably below any real walking pace (so it never fires for
+    // the slow-walk-to-jog case lowSpeedVMargin exists for) and
+    // comfortably above realistic GNSS-speed noise while actually
+    // stationary.
+    private val zuptForceRestSpeed: Float = 0.5f,
     // Below this GNSS speed, Location.getBearing() is either flagged
     // invalid (hasBearing()==false) or, worse, a stale/last-good value the
     // provider never cleared — a real bug found live: sitting still
@@ -423,11 +461,14 @@ class FusionEngine(
             minOf(vClampMax, blackoutEntrySpeed + lowSpeedVMargin)
         } else vClampMax
         for (i in startIdx until window.size) {
-            if (isQuiet(window[i], blackoutEntrySpeed)) {
-                // ZUPT — raw sensors say the device is at rest right now;
-                // don't trust the network's correction for this instant
-                // (out-of-distribution for anything but real driving), just
-                // decay any stale speed and hold heading. See class doc.
+            if (blackoutEntrySpeed < zuptForceRestSpeed || isQuiet(window[i], blackoutEntrySpeed)) {
+                // ZUPT — either the raw sensors say the device is at rest
+                // right now, or (the fourth rule — see class doc) it was
+                // already genuinely parked before this blackout even
+                // started, in which case its own noise profile shouldn't
+                // get a vote. Don't trust the network's correction for
+                // this instant (out-of-distribution for anything but real
+                // driving), just decay any stale speed and hold heading.
                 v *= 0.7f
             } else {
                 val forwardAccel = window[i][0] + corrections[i][0]

@@ -13,6 +13,8 @@ Run:
     python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
     # with comma2k19 mixed in (matches how it was trained, if --comma2k19_dir was used):
     python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt --comma2k19_dir data/comma2k19_demo/data
+    # with decimeter mixed in (matches how it was trained, if --decimeter_dir was used):
+    python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best_decimeter.pt --decimeter_dir DECIMETER/sdc2023/sdc2023/train --run_name decimeter
 """
 from __future__ import annotations
 
@@ -61,6 +63,21 @@ def main():
              "the combined number — pass the same value used for src.train's --comma2k19_dir.",
     )
     parser.add_argument(
+        "--decimeter_dir", default=None,
+        help="Also break out decimeter-only test drift separately — pass the same value "
+             "used for src.train's --decimeter_dir, e.g. DECIMETER/sdc2023/sdc2023/train.",
+    )
+    parser.add_argument(
+        "--ppc_dir", default=None,
+        help="Also break out PPC-Dataset-only test drift separately — pass the same value "
+             "used for src.train's --ppc_dir, e.g. data/PPC/PPC-Dataset.",
+    )
+    parser.add_argument(
+        "--pvs_dir", default=None,
+        help="Also break out PVS-Dataset-only test drift separately — pass the same value "
+             "used for src.train's --pvs_dir, e.g. data/PVS/PVS-Dataset.",
+    )
+    parser.add_argument(
         "--extra_features", action="store_true",
         help="Must match whatever the checkpoint was trained with — see src.train's "
              "--extra_features. Rebuilds the same 12-channel normalized input.",
@@ -82,6 +99,9 @@ def main():
 
     splits = load_combined_dataset_splits(
         comma2k19_dir=args.comma2k19_dir,
+        decimeter_dir=args.decimeter_dir,
+        ppc_dir=args.ppc_dir,
+        pvs_dir=args.pvs_dir,
         data_root=cfg["data"]["root"],
         variant=cfg["data"]["variant"],
         column_map=cfg["data"]["column_map"],
@@ -123,13 +143,20 @@ def main():
         print(f"\n⚠️  mean drift {report['mean_drift_pct']:.2f}% is OVER the {target}% PS target — "
               f"needs more training/tuning before demo day.")
 
-    if "iovnbd_test_only" in splits and "comma2k19_test_only" in splits:
-        iov = eval_drift(model, splits["iovnbd_test_only"], dt, device, batch_size, target_pct=target)
-        comma = eval_drift(model, splits["comma2k19_test_only"], dt, device, batch_size, target_pct=target)
-        breakdown = {"iovnbd_test_only": iov, "comma2k19_test_only": comma}
+    # iovnbd_test_only is always present once anything else is mixed in (see
+    # load_combined_dataset_splits); comma2k19_test_only / decimeter_test_only
+    # only show up if the matching --*_dir was actually passed to this run.
+    # Checked independently (not all-or-nothing) so e.g. a decimeter-only
+    # mix still gets its own honest per-dataset breakdown without needing
+    # comma2k19 in the same run.
+    per_dataset = {}
+    for key in ("iovnbd_test_only", "comma2k19_test_only", "decimeter_test_only", "ppc_test_only", "pvs_test_only"):
+        if key in splits:
+            per_dataset[key] = eval_drift(model, splits[key], dt, device, batch_size, target_pct=target)
+    if per_dataset:
         print("\n--- breakdown by dataset (same checkpoint) ---")
-        print(json.dumps(breakdown, indent=2))
-        json.dump(breakdown, open(f"results/eval_report_breakdown{suffix}.json", "w"), indent=2)
+        print(json.dumps(per_dataset, indent=2))
+        json.dump(per_dataset, open(f"results/eval_report_breakdown{suffix}.json", "w"), indent=2)
 
 
 if __name__ == "__main__":

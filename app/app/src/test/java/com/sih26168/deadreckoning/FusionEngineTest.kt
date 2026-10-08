@@ -86,6 +86,47 @@ class FusionEngineTest {
     }
 
     @Test
+    fun `blackout with a genuinely parked device and real noisy sensor data does not creep`() {
+        // Regression for a real bug reported live during real-device
+        // testing: "the line keeps moving even when we stop moving." The
+        // first "stationary device" test above uses *exactly* zero
+        // accel/gyro, which trivially passes isQuiet's threshold — not
+        // representative of a real device's actual sensor noise. This test
+        // reproduces the real failure shape instead: accel/gyro that FAILS
+        // isQuiet's threshold (quietAccelThresh=0.35, quietGyroThresh=0.05
+        // by default), plus a small constant network correction, on a
+        // device that was genuinely parked (entry speed 0) before the
+        // blackout — exactly the case FusionEngine's fourth ZUPT rule
+        // (zuptForceRestSpeed) exists for. Without that rule, v climbs the
+        // lowSpeedVMargin ceiling (4 m/s) and holds there for the whole
+        // blackout — a real, sustained ~100m creep over 25s, not a small
+        // rounding error.
+        val engine = FusionEngine(FakePredictor(deltaV = 0.75f, deltaTheta = 0f))
+        warmUpGnssTracking(engine, speed = 0f)
+
+        repeat(windowSize * 5) { // 5 chunk resolutions, 25s of simulated blackout
+            engine.tick(
+                // Horizontal accel magnitude ~3.37 m/s^2 — comfortably
+                // above quietAccelThresh, the exact real-device magnitude
+                // logged chasing this bug live (see FusionEngine's ZUPT
+                // class doc, fourth paragraph).
+                calibratedAccel = floatArrayOf(3.37f, 0f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = false,
+                lat = 0.0, lon = 0.0, gnssSpeed = 0f, gnssHeadingRad = 0f,
+            )
+        }
+
+        val dist = distanceFromOrigin(engine)
+        assertTrue(
+            "device was genuinely parked the whole blackout but drifted ${dist}m from where it started " +
+                "(x=${engine.state.x}, y=${engine.state.y}) — the fourth ZUPT rule should have held position " +
+                "regardless of the noisy accel reading",
+            dist < 5.0,
+        )
+    }
+
+    @Test
     fun `blackout with genuine motion still integrates corrections normally`() {
         // Same shape of fake network, but this time the raw samples look
         // like real driving (clearly non-quiet accel/gyro) — ZUPT must NOT

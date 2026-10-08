@@ -105,6 +105,119 @@ def resolve_columns(df: pd.DataFrame, column_map: dict[str, str | None] | None =
     return resolved
 
 
+def _kmh_header_unit_factor(speed: np.ndarray, lat: np.ndarray | None, lon: np.ndarray | None,
+                            time_s: np.ndarray) -> float:
+    """Multiplier that turns a column headed "GPS SPEED (Kmh)" into m/s —
+    decided from the file's own data, not from the header.
+
+    Real bug found this session, after months of it sitting in plain sight:
+    IO-VNBD's phone files label this column "Kmh", but the values are
+    metres per second. Checked on every file where the comparison is
+    possible (108 of 144): integrating the column as m/s lands within 6% of
+    the GPS lat/lon path length for the median file (p10-p90: 0.94-1.06),
+    93% of files sit within 15% of exactly 1.00, and only 2% look like
+    genuine km/h (ratio near 3.6). The old rule (divide by 3.6 whenever the
+    header says Kmh) therefore made every IO-VNBD speed label 3.6x too
+    small: the physics integrator started each window at a third of the
+    true speed, speed_loss pushed the network toward a deflated target
+    while drift_loss pushed it toward the real (undeflated) position track,
+    and docs/understanding.md's "IO-VNBD is urban, low-speed" framing was
+    partly an artifact of speeds that were 3.6x too low (its real median
+    speed is ~16 m/s, not ~4).
+
+    Compares the path length of the GPS track with the speed column's own
+    integral treated as m/s: a ratio near 1 means m/s, near 3.6 means
+    genuine km/h. Falls back to m/s (what 93% of the evidence supports,
+    not the header's claim) when the file has too little usable GPS to
+    decide."""
+    default = 1.0
+    if lat is None or lon is None or time_s is None or len(speed) < 50:
+        return default
+    ok = np.isfinite(lat) & np.isfinite(lon) & np.isfinite(speed)
+    if ok.sum() < 50:
+        return default
+    duration = float(time_s[-1] - time_s[0])
+    if not duration > 30.0:
+        return default
+    xy = latlon_to_local_xy(lat[ok], lon[ok])
+    path_m = float(np.linalg.norm(np.diff(xy, axis=0), axis=1).sum())
+    integral_as_ms = float(np.sum(speed[ok]) * duration / len(speed))
+    if path_m < 50.0 or integral_as_ms < 50.0:
+        return default
+    ratio = path_m / integral_as_ms
+    # nearest of the two candidate units, compared in log space
+    return 1.0 if abs(np.log(ratio)) <= abs(np.log(ratio / 3.6)) else 1.0 / 3.6
+
+
+def _fill_held_samples(time_s: np.ndarray, arrays: list[np.ndarray],
+                       circular_deg: bool = False) -> list[np.ndarray]:
+    """Turn a held-then-jump (stair-step) GPS signal into a continuous one by
+    linearly interpolating between the rows where a new value actually
+    arrived.
+
+    Real problem found this session: IO-VNBD's phone files log GPS at the
+    10Hz sensor rate, but the GPS itself updates far less often, and the
+    last fix is simply repeated on every row in between. Measured over 136
+    files, in 96% of them more than a fifth of the gaps between new
+    positions exceed 3 s, and the typical worst-case gap is about 9 s. The
+    position label was therefore a staircase: flat for seconds, then a jump.
+    Two consequences, both fixed by this function:
+      - a 5 s window's end-point "truth" was often seconds stale, so the
+        drift metric was scored against a position the car had already left
+        (windows that caught a jump showed ~1.8x the distance the speed
+        label said; windows that did not were flat and got thrown out by
+        build_windows as "parked"); and
+      - build_windows' note that ~47% of windows are "essentially
+        stationary ... bimodal, nothing in between" was describing this
+        artifact (the speed label shows those windows moving at ~7 m/s),
+        not idling cars.
+
+    Rows where a value is NaN (real GPS blackout stretches in own recordings)
+    are left NaN: interpolation only happens inside each contiguous run of
+    valid rows, never across a gap, so build_windows' skip-windows-with-NaN
+    logic still sees real blackouts as blackouts.
+
+    arrays share one change mask (a row counts as "new" if ANY of them
+    changed), which is what you want for lat+lon that arrive together. A
+    column that changes on every row comes back unchanged. circular_deg
+    interpolates compass degrees through unit vectors so 358 -> 3 does not
+    swing through 180. Interpolating between arrival times lags the true
+    motion by the phone's GPS latency (a fraction of a second); that is a
+    far smaller error than seconds of staleness."""
+    arrays = [np.asarray(a, dtype=np.float64) for a in arrays]
+    outs = [a.copy() for a in arrays]
+    finite = np.all([np.isfinite(a) for a in arrays], axis=0)
+    idx = np.flatnonzero(finite)
+    if len(idx) < 3:
+        return outs
+    breaks = np.flatnonzero(np.diff(idx) > 1)
+    starts = np.r_[idx[0], idx[breaks + 1]]
+    ends = np.r_[idx[breaks], idx[-1]]
+    for s, e in zip(starts, ends):
+        if e - s < 2:
+            continue
+        seg_t = time_s[s:e + 1]
+        changed = np.zeros(e - s + 1, dtype=bool)
+        changed[0] = True
+        for a in arrays:
+            changed[1:] |= a[s + 1:e + 1] != a[s:e]
+        if changed.all() or changed.sum() < 2:
+            continue
+        t_c = seg_t[changed]
+        keep = np.r_[True, np.diff(t_c) > 0]  # np.interp needs strictly increasing x
+        t_c = t_c[keep]
+        for out, a in zip(outs, arrays):
+            vals = a[s:e + 1][changed][keep]
+            if circular_deg:
+                r = np.radians(vals)
+                c = np.interp(seg_t, t_c, np.cos(r))
+                sn = np.interp(seg_t, t_c, np.sin(r))
+                out[s:e + 1] = np.degrees(np.arctan2(sn, c)) % 360.0
+            else:
+                out[s:e + 1] = np.interp(seg_t, t_c, vals)
+    return outs
+
+
 def load_sequence(path: Path, column_map: dict[str, str | None] | None = None) -> ImuSequence:
     # IO-VNBD's CSVs aren't consistently UTF-8 (some contain stray bytes from
     # degree/superscript symbols in free-text fields) — latin-1 never raises
@@ -139,9 +252,23 @@ def load_sequence(path: Path, column_map: dict[str, str | None] | None = None) -
     accel = np.stack([col("accel_x"), col("accel_y"), col("accel_z")], axis=1)
     gyro = np.stack([col("gyro_x"), col("gyro_y"), col("gyro_z")], axis=1)
 
+    lat = col("lat")
+    lon = col("lon")
     speed_gt = col("speed_gt")
+    heading_gt = col("heading_gt")
     if speed_gt is not None and cols["speed_gt"] and "kmh" in cols["speed_gt"].lower().replace("/", ""):
-        speed_gt = speed_gt / 3.6  # -> m/s
+        speed_gt = speed_gt * _kmh_header_unit_factor(speed_gt, lat, lon, time)
+
+    # Held GPS samples -> continuous track (see _fill_held_samples). Position
+    # fixes arrive together, so lat/lon share one change mask; speed and
+    # heading are detected independently (a column that really does change
+    # every row is left untouched).
+    if lat is not None and lon is not None:
+        lat, lon = _fill_held_samples(time, [lat, lon])
+    if speed_gt is not None:
+        (speed_gt,) = _fill_held_samples(time, [speed_gt])
+    if heading_gt is not None:
+        (heading_gt,) = _fill_held_samples(time, [heading_gt], circular_deg=True)
 
     return ImuSequence(
         path=path,
@@ -149,9 +276,9 @@ def load_sequence(path: Path, column_map: dict[str, str | None] | None = None) -
         accel=accel,
         gyro=gyro,
         speed_gt=speed_gt,
-        lat=col("lat"),
-        lon=col("lon"),
-        heading_gt=col("heading_gt"),
+        lat=lat,
+        lon=lon,
+        heading_gt=heading_gt,
     )
 
 
