@@ -1,0 +1,20 @@
+{
+  "iovnbd_test_only": {
+    "n_windows": 18460,
+    "mean_drift_pct": 74.13431308146966,
+    "median_drift_pct": 74.73097610473633,
+    "p90_drift_pct": 85.88133621215822,
+    "worst_drift_pct": 1065.8741455078125,
+    "target_pct": 10.0,
+    "pass_rate_pct": 1.3542795232936078
+  },
+  "decimeter_test_only": {
+    "n_windows": 30169,
+    "mean_drift_pct": 6.858637615679472,
+    "median_drift_pct": 2.772219657897949,
+    "p90_drift_pct": 15.166554069519046,
+    "worst_drift_pct": 724.8480834960938,
+    "target_pct": 10.0,
+    "pass_rate_pct": 84.30176671417681
+  }
+}

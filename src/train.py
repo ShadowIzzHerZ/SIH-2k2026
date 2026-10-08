@@ -68,6 +68,18 @@ def forward_pass(model, batch, dt: float, device):
     return speed_pred, pos_pred, speed_gt, pos_gt
 
 
+def _heading_from_pos(pos: torch.Tensor) -> torch.Tensor:
+    """Direction of travel (rad, 0=+x/east — same convention as
+    integrate_heading) implied by each consecutive step of a position
+    trajectory. Works on both pos_pred and pos_gt: for pos_pred specifically,
+    this recovers heading_pred exactly wherever speed_pred > 0 (dead_reckon_
+    position's own vx=speed*cos(heading)/vy=speed*sin(heading) construction
+    guarantees atan2(vy,vx)=heading), so no separate heading_pred plumbing
+    through forward_pass/its 5 other callers is needed."""
+    d = pos[:, 1:, :] - pos[:, :-1, :]
+    return torch.atan2(d[..., 1], d[..., 0])
+
+
 def compute_loss(speed_pred, pos_pred, speed_gt, pos_gt, weights: dict):
     speed_loss = nn.functional.mse_loss(speed_pred, speed_gt)
     # drift loss: normalize final position error by distance travelled so it
@@ -75,8 +87,41 @@ def compute_loss(speed_pred, pos_pred, speed_gt, pos_gt, weights: dict):
     # swamped by long high-speed windows.
     drift_pct = drift_metric(pos_pred, pos_gt)
     drift_loss = drift_pct.mean()
+    metrics = {"speed_loss": speed_loss.item(), "drift_pct": drift_pct.mean().item()}
     total = weights["speed"] * speed_loss + weights["drift"] * drift_loss
-    return total, {"speed_loss": speed_loss.item(), "drift_pct": drift_pct.mean().item()}
+
+    # Real gap found and fixed this session: configs/default.yaml has
+    # declared loss_weights.heading=0.5 since before this file's current
+    # form, but nothing ever read it — drift_loss (end-to-end position
+    # error) was the only signal ever telling the network its *heading*
+    # predictions specifically were wrong, an indirect, compounding-prone
+    # route to what should be a direct one. Ground truth here is the real
+    # direction of travel between consecutive true GPS positions (pos_gt
+    # always comes from real lat/lon — see windowing.py — unlike heading_gt,
+    # which many IO-VNBD files don't have at all), masked to steps with
+    # enough real movement to trust: a near-zero step's implied direction is
+    # dominated by GPS noise, not signal, the same low-speed hazard
+    # fusion.py's docstring already flags and diagnose_label_noise.py
+    # measured directly this session (heading disagreement ~4x worse below
+    # 3 m/s than at 6-10 m/s) — supervising heading off a noisy label in
+    # exactly the regime that needs it most would fight the fix, not help it.
+    heading_weight = weights.get("heading", 0.0)
+    if heading_weight > 0:
+        min_step_m = weights.get("heading_min_step_m", 0.15)
+        step_dist = torch.linalg.norm(pos_gt[:, 1:, :] - pos_gt[:, :-1, :], dim=-1)
+        valid = step_dist >= min_step_m
+        if valid.any():
+            heading_pred = _heading_from_pos(pos_pred)
+            heading_gt = _heading_from_pos(pos_gt)
+            diff = heading_pred - heading_gt
+            circular_err = torch.atan2(torch.sin(diff), torch.cos(diff))  # wrap to (-pi, pi]
+            heading_loss = (circular_err[valid] ** 2).mean()
+        else:
+            heading_loss = torch.zeros((), device=pos_pred.device, dtype=pos_pred.dtype)
+        total = total + heading_weight * heading_loss
+        metrics["heading_loss"] = heading_loss.item()
+
+    return total, metrics
 
 
 def main():
@@ -95,6 +140,33 @@ def main():
         help="Mix comma2k19 windows (see src/data/comma2k19_loader.py) into train/val/test "
              "alongside IO-VNBD, e.g. --comma2k19_dir data/comma2k19_demo/data. Opt-in — "
              "omitted (the default) trains on IO-VNBD only, unchanged from before.",
+    )
+    parser.add_argument(
+        "--decimeter_dir", default=None,
+        help="Mix Google Smartphone Decimeter Challenge windows (see "
+             "src/data/decimeter_loader.py) into train/val/test alongside "
+             "IO-VNBD (and comma2k19, if given), e.g. --decimeter_dir "
+             "DECIMETER/sdc2023/sdc2023/train. Opt-in — omitted (the "
+             "default) leaves training unchanged.",
+    )
+    parser.add_argument(
+        "--ppc_dir", default=None,
+        help="Mix PPC-Dataset windows (see src/data/ppc_loader.py) into "
+             "train/val/test alongside IO-VNBD (and comma2k19/decimeter, if "
+             "given), e.g. --ppc_dir data/PPC/PPC-Dataset. Real urban-Japan "
+             "driving, added specifically to help IO-VNBD's urban/low-speed "
+             "drift number (see diagnose_drift.py) — not highway-flavored "
+             "like comma2k19/decimeter. Opt-in — omitted (the default) "
+             "leaves training unchanged.",
+    )
+    parser.add_argument(
+        "--pvs_dir", default=None,
+        help="Mix PVS-Dataset windows (see src/data/pvs_loader.py) into "
+             "train/val/test alongside IO-VNBD (and whatever else is given), "
+             "e.g. --pvs_dir data/PVS/PVS-Dataset. Real mixed-speed Brazilian "
+             "road driving, added for the same reason as --ppc_dir — helping "
+             "the urban/low-speed number, not highway-flavored. Opt-in — "
+             "omitted (the default) leaves training unchanged.",
     )
     parser.add_argument(
         "--own_recordings_dir", default=None,
@@ -116,6 +188,17 @@ def main():
              "model.input_channels to 12 regardless of the config value.",
     )
     parser.add_argument(
+        "--heading_weight", type=float, default=None,
+        help="Override configs/default.yaml's loss_weights.heading (0.5) for this run — "
+             "see compute_loss's doc for what this term does. 0.5 turned out, empirically, "
+             "to hurt both the full model and the urban-regime model on a real run (both "
+             "landed worse than their own no-heading-loss baselines) — it was never tuned "
+             "before this session since the weight was previously declared but dead code "
+             "(see compute_loss's doc), so 0.5 has no empirical basis. Pass a smaller value "
+             "(e.g. 0.05) to test a lighter touch, or 0.0 to disable it entirely without "
+             "editing the config. Omitted (the default) uses whatever the config says.",
+    )
+    parser.add_argument(
         "--run_name", default=None,
         help="Save/load under checkpoints/best_<run_name>.pt and "
              "results/train_history_<run_name>.json instead of the plain best.pt / "
@@ -124,17 +207,53 @@ def main():
              "real best.pt with a checkpoint of an incompatible shape. Omitted (the "
              "default) behaves exactly as before.",
     )
+    parser.add_argument(
+        "--speed_regime", choices=["urban", "highway"], default=None,
+        help="Train a regime-specific model instead of one shared model across both — "
+             "see diagnose_drift.py's confirmed finding that mixing highway-flavored data "
+             "(comma2k19, decimeter) measurably hurts IO-VNBD's low-speed drift number, "
+             "evidence of a real shared-capacity tradeoff in one small model, not a bug. "
+             "'urban' keeps train/val windows with mean speed_gt below --urban_max_speed_mps; "
+             "'highway' keeps windows at or above it. The test split is left untouched (not "
+             "filtered) so this checkpoint's eval_report stays directly comparable against "
+             "the existing full-test numbers already in docs/understanding.md. Omitted (the "
+             "default) trains on every window, unchanged from before.",
+    )
+    parser.add_argument(
+        "--urban_max_speed_mps", type=float, default=6.0,
+        help="Threshold for --speed_regime, in m/s (a window's OWN mean speed_gt, not a "
+             "per-sample cutoff). Only read when --speed_regime is set.",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42,
+        help="Real gap found and fixed this session: nothing here ever seeded torch's own "
+             "RNG (model weight init, dropout, DataLoader shuffling) — only the data *split* "
+             "was seeded (load_combined_dataset_splits' own separate seed=0). Every run, even "
+             "with identical data/config, took a different stochastic path, so before/after "
+             "comparisons across runs (this session included several) carry an unknown amount "
+             "of pure random-init noise on top of whatever real effect was being measured. "
+             "Fixed value now (was previously unset/nondeterministic) so two runs with the "
+             "same flags are actually comparable. Change only if you deliberately want a "
+             "different draw (e.g. to sanity-check how much a result varies by seed alone).",
+    )
     args = parser.parse_args()
+    torch.manual_seed(args.seed)
     if args.extra_features:
         print("--extra_features: using 12-channel input (6 raw + 6 engineered), "
               "z-score normalized from train-split stats")
 
     cfg = yaml.safe_load(open(args.config))
+    if args.heading_weight is not None:
+        cfg["train"]["loss_weights"]["heading"] = args.heading_weight
+        print(f"--heading_weight: overriding loss_weights.heading -> {args.heading_weight}")
     device = pick_device(cfg["train"]["device"])
     print(f"device: {device}")
 
     splits = load_combined_dataset_splits(
         comma2k19_dir=args.comma2k19_dir,
+        decimeter_dir=args.decimeter_dir,
+        ppc_dir=args.ppc_dir,
+        pvs_dir=args.pvs_dir,
         own_recordings_dir=args.own_recordings_dir,
         data_root=cfg["data"]["root"],
         variant=cfg["data"]["variant"],
@@ -147,6 +266,23 @@ def main():
         file_prefix=cfg["data"].get("file_prefix", ""),
         extra_features=args.extra_features,
     )
+
+    if args.speed_regime:
+        def keep(w):
+            mean_speed = float(w.speed_gt.mean())
+            return (mean_speed < args.urban_max_speed_mps) if args.speed_regime == "urban" \
+                else (mean_speed >= args.urban_max_speed_mps)
+
+        # train/val only — test stays the full, untouched split (see the
+        # arg's own doc) so this checkpoint's eval_report is directly
+        # comparable against every other checkpoint's numbers, not scored
+        # against an easier/harder subset of its own choosing.
+        for split_name in ("train", "val"):
+            before = len(splits[split_name].windows)
+            splits[split_name].windows = [w for w in splits[split_name].windows if keep(w)]
+            after = len(splits[split_name].windows)
+            print(f"[speed_regime={args.speed_regime}] {split_name}: {before} -> {after} windows "
+                  f"(threshold {args.urban_max_speed_mps} m/s)")
 
     train_loader = DataLoader(splits["train"], batch_size=cfg["train"]["batch_size"], shuffle=True)
     val_loader = DataLoader(splits["val"], batch_size=cfg["train"]["batch_size"], shuffle=False)
@@ -205,13 +341,18 @@ def main():
         # what it started from, instead of resetting to inf and overwriting
         # best.pt with something worse the moment val drift dips even once.
         model.eval()
-        baseline = {"speed_loss": 0.0, "drift_pct": 0.0}
+        # Not hardcoded to {"speed_loss", "drift_pct"} — compute_loss can
+        # return extra keys (e.g. "heading_loss", only when loss_weights.
+        # heading > 0, see its own doc) that a fixed-key dict would KeyError
+        # on the first accumulation. .get(k, 0.0) makes this robust to
+        # whatever metrics compute_loss actually returns.
+        baseline: dict[str, float] = {}
         with torch.no_grad():
             for batch in val_loader:
                 speed_pred, pos_pred, speed_gt, pos_gt = forward_pass(model, batch, dt, device)
                 _, metrics = compute_loss(speed_pred, pos_pred, speed_gt, pos_gt, cfg["train"]["loss_weights"])
                 for k, v in metrics.items():
-                    baseline[k] += v
+                    baseline[k] = baseline.get(k, 0.0) + v
         for k in baseline:
             baseline[k] /= max(1, len(val_loader))
         print(f"resumed weights baseline val drift: {baseline['drift_pct']:.2f}%")
@@ -266,7 +407,10 @@ def main():
         epoch = epoch_offset + i
         model.train()
         t0 = time.time()
-        train_metrics = {"speed_loss": 0.0, "drift_pct": 0.0}
+        # Not hardcoded — see baseline's identical doc above (compute_loss
+        # can return extra keys like "heading_loss" that a fixed-key dict
+        # would KeyError on).
+        train_metrics: dict[str, float] = {}
         for batch in train_loader:
             opt.zero_grad()
             speed_pred, pos_pred, speed_gt, pos_gt = forward_pass(model, batch, dt, device)
@@ -275,18 +419,18 @@ def main():
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
             for k, v in metrics.items():
-                train_metrics[k] += v
+                train_metrics[k] = train_metrics.get(k, 0.0) + v
         for k in train_metrics:
             train_metrics[k] /= max(1, len(train_loader))
 
         model.eval()
-        val_metrics = {"speed_loss": 0.0, "drift_pct": 0.0}
+        val_metrics: dict[str, float] = {}
         with torch.no_grad():
             for batch in val_loader:
                 speed_pred, pos_pred, speed_gt, pos_gt = forward_pass(model, batch, dt, device)
                 _, metrics = compute_loss(speed_pred, pos_pred, speed_gt, pos_gt, cfg["train"]["loss_weights"])
                 for k, v in metrics.items():
-                    val_metrics[k] += v
+                    val_metrics[k] = val_metrics.get(k, 0.0) + v
         for k in val_metrics:
             val_metrics[k] /= max(1, len(val_loader))
 

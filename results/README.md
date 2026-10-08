@@ -33,6 +33,9 @@ a citation.
 | [eval_report_engineered.json](eval_report_engineered.json) | A variant with 6 extra engineered input channels (accel/gyro magnitude, jerk, roughness) | 62.75% mean (worse than baseline) | `checkpoints/best_engineered.pt`'s eval — evidence for reverting the extra-features experiment |
 | [eval_report_breakdown_engineered.json](eval_report_breakdown_engineered.json) | Same variant, split by dataset | IO-VNBD 64.28% (worse) · comma2k19 14.48%/5.42% (better) | Shows *why* it was reverted despite helping comma2k19 — IO-VNBD is the harder, binding case |
 | [train_history_engineered.json](train_history_engineered.json) | Its training curve | — | — |
+| [eval_report_decimeter.json](eval_report_decimeter.json) | A variant trained with the Google Smartphone Decimeter Challenge dataset mixed in (combined IO-VNBD+decimeter test set) | 32.40% mean / 7.91% median | `checkpoints/best_decimeter.pt`'s eval |
+| [eval_report_breakdown_decimeter.json](eval_report_breakdown_decimeter.json) | Same variant, split by dataset | IO-VNBD 74.13%/74.73% (worse than every other variant here) · decimeter **6.86%/2.77%** (best result in the project) | Shows the same pattern as `_engineered` above, more extreme in both directions — decimeter is the single best per-dataset result here, but IO-VNBD gets worse, not better |
+| [train_history_decimeter.json](train_history_decimeter.json) | Its training curve (early-stopped epoch 19, best at epoch 11) | — | — |
 
 ## GNSS↔INS fusion demo reports (`src/simulate_blackout.py`)
 

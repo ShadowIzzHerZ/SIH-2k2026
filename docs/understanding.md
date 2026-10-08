@@ -208,10 +208,13 @@ looks impressive, we're picking the one that measurably works."*
 
 **Files:** `src/train.py`, `src/evaluate.py`, dataset loaders for
 **IO-VNBD** (the PS's own official dataset — 40hrs/1,300km vehicle +
-58hrs/4,400km smartphone data, UK/Nigeria/France) and **comma2k19** (a
+58hrs/4,400km smartphone data, UK/Nigeria/France), **comma2k19** (a
 second, independent, real-world dataset — US highway driving, different
 device, different country — used to check the model isn't just
-memorizing IO-VNBD's quirks).
+memorizing IO-VNBD's quirks), and **the Google Smartphone Decimeter
+Challenge** (`src/data/decimeter_loader.py` — a third independent
+real-phone dataset, real GNSS+IMU with survey-grade ground truth, US
+highway/suburban driving).
 
 **Actual measured numbers, on real held-out data, checkpoint
 `checkpoints/best.pt`:**
@@ -227,22 +230,56 @@ the PS's <10% target on highway-style driving** — the case where a
 phone's IMU actually has an unambiguous signal to work with (steady
 speed, few turns). It's **openly weaker on low-speed, frequent-turn
 urban driving** — the harder case. We didn't just accept that number; we
-diagnosed it properly (`src/diagnose_drift.py`) and tried four different
+diagnosed it properly (`src/diagnose_drift.py`) and tried five different
 real fixes: a bigger architecture, mixing in comma2k19 as extra training
 data, fixing a real learning-rate-schedule bug we found along the way,
-and properly-normalized extra engineered features. **All four landed in
-roughly the same 60-65% band or worse.** The diagnostic shows this is
-**broad, spread-out underfitting on a genuinely harder scenario**, not
-one fixable bug or a few bad outlier windows (removing the worst 5% of
+properly-normalized extra engineered features, and — most recently —
+mixing in the Google Smartphone Decimeter Challenge dataset (2023
+edition). **The first four landed in roughly the same 60-65% band; the
+fifth landed worse still.** The diagnostic shows this is **broad,
+spread-out underfitting on a genuinely harder scenario**, not one
+fixable bug or a few bad outlier windows (removing the worst 5% of
 windows barely moves the mean; no single factor — distance, yaw rate,
 speed — correlates strongly with per-window error).
 
+**The fifth attempt (decimeter), in more detail — because the result is
+worth understanding, not just citing:** decimeter is a third independent
+real-phone dataset (real GNSS+IMU, survey-grade ground truth), mixed
+into training alongside IO-VNBD the same way comma2k19 was, then
+evaluated with the identical held-out methodology as every number above
+(`results/eval_report_decimeter.json` /
+`results/eval_report_breakdown_decimeter.json`):
+
+| Dataset | Mean drift | Median drift | Pass rate (<10%) |
+|---|---|---|---|
+| decimeter (its own test set) | **6.86%** | **2.77%** | 84.30% |
+| IO-VNBD (same checkpoint) | 74.13% | 74.73% | 1.35% |
+
+Two things worth sitting with here. First, decimeter-only is **the single
+best result anywhere in this project** — clear of the PS's <10% target on
+both mean and median, better than comma2k19's own strong number. Second,
+despite that, IO-VNBD got **worse**, not better — 74.13% vs. the 62.33%
+baseline, worse than any of the other four fixes. That's not a
+contradiction, it's the same underfitting diagnosis restated with better
+evidence: decimeter's driving (steady US highway/suburban) sits even
+further toward the "easy" end of the difficulty spectrum than comma2k19
+did, so training on more of that flavor of data pulls the shared network
+capacity further toward the easy case and away from IO-VNBD's harder
+low-speed/turning regime — a real trade-off in a small shared model, not
+a bug. `checkpoints/best.pt` (the shipped checkpoint) is unchanged;
+this run is kept as `checkpoints/best_decimeter.pt`, reference only.
+
 **Say it like this:** *"On highway-style driving, we're right at the PS's
-target — 8.94% median drift. On slow, stop-and-go urban driving, we're
-honestly weaker, around 60%. We didn't hide that — we spent real time
-diagnosing why, tried four different fixes, and confirmed it's genuine
-underfitting on a harder scenario, not a bug we're too lazy to fix. We'd
-rather show you a real, defensible number than an inflated one."*
+target — 8.94% median drift, and we found an even easier real-world
+dataset (Google's own Smartphone Decimeter Challenge) where we hit 2.77%
+median — genuinely excellent. On slow, stop-and-go urban driving, we're
+honestly weaker, around 60-75% depending on exactly what else we trained
+alongside it. We didn't hide that — we spent real time diagnosing why,
+tried five different fixes including throwing more and better data at it,
+and every one of them tells the same story: this is genuine underfitting
+on a harder scenario, not a bug we're too lazy to fix or a data problem
+we just hadn't solved yet. We'd rather show you a real, defensible number
+than an inflated one."*
 
 *(If pushed on "why not just fix it": low-speed urban IMU signal is
 fundamentally noisier and more ambiguous — accelerometer/gyro signal-to-

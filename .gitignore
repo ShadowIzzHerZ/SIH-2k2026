@@ -11,6 +11,14 @@ data/IO-VNBD/
 # src/data/comma2k19_loader.py's module docstring)
 data/comma2k19_demo/
 
+# PPC-Dataset (~155MB, urban Japan driving, GitHub taroz/PPC-Dataset via
+# OneDrive) and PVS (~900MB, Kaggle jefmenegazzo/pvs-passive-vehicular-
+# sensors-datasets) — both real urban/low-speed candidate datasets pulled
+# in to address the IO-VNBD urban-drift gap, kept local like every other
+# raw dataset above.
+data/PPC/
+data/PVS/
+
 # Training logs (real ones, run to run, are large/noisy — keep out of history)
 logs/*.log
 
@@ -46,3 +54,12 @@ results/*_prev.json
 # Stray nested duplicate directory (same name as repo root) that showed up
 # in the working tree — not an intentional part of the project.
 /SIH26168-ML/
+
+# Google Smartphone Decimeter Challenge download (zip is ~3.5GB, plus a nested
+# venv and the unzipped data) — local only, like every other raw dataset above
+DECIMETER/
+
+# Marker files written by the background training wrapper scripts, and the
+# automatic backup train.py makes of the previous best checkpoint when resuming
+logs/*.DONE
+checkpoints/*_prev.pt

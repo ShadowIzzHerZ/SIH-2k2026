@@ -1,0 +1,9 @@
+{
+  "n_windows": 20698,
+  "mean_drift_pct": 58.578304237705986,
+  "median_drift_pct": 64.63440322875977,
+  "p90_drift_pct": 78.32577667236328,
+  "worst_drift_pct": 1516.7781982421875,
+  "target_pct": 10.0,
+  "pass_rate_pct": 8.208522562566431
+}

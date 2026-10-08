@@ -60,7 +60,17 @@ train:
   weight_decay: 1.0e-5
   loss_weights:
     speed: 1.0
-    heading: 0.5
+    # Off by default — real result, not a guess: this weight sat declared-
+    # but-unused (dead code, see src/train.py's compute_loss doc) until
+    # this session wired it up, and 0.5 turned out to have no empirical
+    # basis at all. Tested for real: 0.5 made both the full model and the
+    # urban-regime model measurably worse than their own no-heading-loss
+    # baselines; a lighter 0.05 still landed worse on comma2k19 and PPC
+    # test sets (roughly flat on IO-VNBD). Two real attempts, both
+    # neutral-to-negative — left at 0 rather than silently reintroducing a
+    # twice-disproven default. Override with --heading_weight to
+    # experiment further (see its own --help text for the numbers).
+    heading: 0.0
     drift: 2.0               # end-to-end position-drift term — this is what the SIH benchmark actually grades
   early_stop_patience: 8
   device: "auto"              # auto -> mps (Apple Silicon) > cuda > cpu

@@ -1,0 +1,156 @@
+1
+00:00:00,500 --> 00:00:06,006
+We're Team Zen, and this is our Smart India Hackathon 2026 entry.
+
+2
+00:00:06,006 --> 00:00:09,225
+Problem statement SIH26168, from ISRO:
+
+3
+00:00:09,225 --> 00:00:15,070
+AI and machine learning based dead reckoning for seamless navigation.
+
+4
+00:00:15,769 --> 00:00:21,890
+A trekker from Kerala once spent four days lost in a Karnataka forest, with no signal to guide her out.
+
+5
+00:00:22,189 --> 00:00:24,350
+The same gap hits ordinary roads.
+
+6
+00:00:24,350 --> 00:00:28,868
+An ambulance drops into an underground ramp and the blue dot freezes.
+
+7
+00:00:28,868 --> 00:00:34,499
+A delivery rider enters a lane boxed in by tall buildings and the app loses the alley.
+
+8
+00:00:34,799 --> 00:00:41,049
+Most vehicles in India have no inertial backup, so when GPS drops, navigation just stops.
+
+9
+00:00:41,750 --> 00:00:42,342
+Our idea:
+
+10
+00:00:42,342 --> 00:00:46,291
+use the accelerometer and gyroscope every phone already has.
+
+11
+00:00:46,291 --> 00:00:51,820
+Adding up their readings drifts within seconds, because tiny sensor errors compound.
+
+12
+00:00:52,120 --> 00:00:54,637
+So we don't ask a network to guess position.
+
+13
+00:00:54,637 --> 00:01:04,019
+A small network learns only how wrong the sensors are, exact physics does the rest, and the whole chain trains on the drift percentage the problem statement grades.
+
+14
+00:01:04,719 --> 00:01:06,236
+Here's the whole system.
+
+15
+00:01:06,236 --> 00:01:13,250
+Offline, we train in PyTorch and export an ONNX model into the Android app, which runs everything on the phone.
+
+16
+00:01:13,549 --> 00:01:21,000
+We train on the public IO-VNBD and comma2k19 datasets, plus our own drives from Jalandhar.
+
+17
+00:01:21,299 --> 00:01:27,679
+On the phone, ten times a second, sensor readings go through calibration and into the fusion engine.
+
+18
+00:01:27,979 --> 00:01:30,158
+While GPS is good, we trust it.
+
+19
+00:01:30,158 --> 00:01:34,798
+When it drops, blackout mode runs the model in five second chunks.
+
+20
+00:01:34,798 --> 00:01:40,139
+When GPS returns, we blend back over two seconds, so the marker never jumps.
+
+21
+00:01:40,439 --> 00:01:46,799
+A map matcher then snaps the estimate onto the real road graph, because a car can't drive through a building.
+
+22
+00:01:47,500 --> 00:01:52,306
+On a real recorded highway drive, we cut GPS for thirty seconds.
+
+23
+00:01:52,306 --> 00:01:59,665
+The red trail is the model alone, and it ends with 2.9 percent drift, under the 10 percent target.
+
+24
+00:01:59,665 --> 00:02:02,820
+When GPS returns, the jump is zero metres.
+
+25
+00:02:03,519 --> 00:02:04,774
+Now the honest part.
+
+26
+00:02:04,774 --> 00:02:10,669
+Our urban results were stuck near 62 percent drift, and five different fixes didn't move them.
+
+27
+00:02:10,969 --> 00:02:12,726
+So we checked the data.
+
+28
+00:02:12,726 --> 00:02:22,733
+In IO-VNBD the speed column says kilometres per hour but is really metres per second, so every speed label was 3.6 times too small.
+
+29
+00:02:22,733 --> 00:02:25,560
+The GPS labels were also stair steps.
+
+30
+00:02:25,860 --> 00:02:35,050
+After fixing both and retraining, urban drift on the same test set fell from 77 percent mean to 19, with a median of 11.2.
+
+31
+00:02:35,350 --> 00:02:38,453
+On highway driving the median is 5.8 percent.
+
+32
+00:02:38,453 --> 00:02:41,487
+Urban stop and go is still the hardest case.
+
+33
+00:02:41,487 --> 00:02:46,660
+Next, we ship the retrained model in the app and re-validate it end to end.
+
+34
+00:02:47,360 --> 00:02:48,712
+It's feasible today:
+
+35
+00:02:48,712 --> 00:02:56,150
+standard phone sensors, fully on-device at ten hertz, testable with or without GPS, and no new infrastructure.
+
+36
+00:02:56,450 --> 00:03:01,793
+Navigation keeps working in tunnels, parking and dense streets with no sudden jump.
+
+37
+00:03:01,793 --> 00:03:07,330
+That helps ambulances, fleets and delivery riders, and it scales to robots and drones.
+
+38
+00:03:08,030 --> 00:03:11,319
+We build on published research, with references on screen.
+
+39
+00:03:11,319 --> 00:03:12,680
+Thank you from Team Zen.
+
