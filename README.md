@@ -13,35 +13,69 @@ fixed along the way.
 
 ## Results
 
-The model, dead-reckoning drift-%, evaluated on two independent real datasets
-it was trained on (checkpoint: `checkpoints/best.pt`, see [Status](#status)
-for the full evidence trail behind these numbers):
+Dead-reckoning drift %, scored on held-out 5-second windows from the retrained
+model (`checkpoints/best_cleanlabels.pt`, trained on IO-VNBD only, seed 42, no
+regime split, no extra data):
 
 | Dataset | Scenario | Mean drift | Median drift | Pass rate (<10%) |
 |---|---|---|---|---|
-| [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) | Highway cruise (steady speed, few turns) | **16.49%** | **8.94%** | 54.53% |
-| [IO-VNBD](https://github.com/onyekpeu/IO-VNBD) | Urban stop-and-go (low speed, frequent turns) | 62.33% | 67.56% | 3.71% |
+| [IO-VNBD](https://github.com/onyekpeu/IO-VNBD) (corrected labels) | Mixed real driving, median window about 11 m/s, 23% of windows under 6 m/s | **19.44%** | **11.20%** | **46.2%** |
+| [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) (never trained on) | Highway cruise | **10.47%** | **5.83%** | **71.1%** |
 
-**The honest read**: this is a real, working physics+learned-residual dead-
-reckoning system that meets or nearly meets the PS's own <10%-drift target
-on the scenario it's actually good at — steady, higher-speed driving, where
-a phone's IMU has the least ambiguous signal to work with — and is
-transparently weaker on the harder case: low-speed, frequent-turn urban
-driving, where per-window drift diagnostics ([src/diagnose_drift.py](src/diagnose_drift.py),
-[results/drift_diagnostics.csv](results/drift_diagnostics.csv)) show broad,
-spread-out underfitting rather than one fixable bug. Five different fixes
-were tried against the IO-VNBD number specifically (a bigger architecture,
-mixing in comma2k19 as training data, a real LR-scheduler bug fix,
-properly-normalized engineered features, and mixing in the Google
-Smartphone Decimeter Challenge dataset) — the first four landed in the same
-60-65% band; the fifth (decimeter) landed worse still, at 74.13%, while
-being the single best result in the project on its *own* test set (6.86%
-mean / 2.77% median — see Status). Rather than paper over that with a
-cherry-picked number, the
-plan going in to the demo is to lead with what's genuinely earned (the
-comma2k19 result) and be upfront that urban low-speed driving is the known
-hard case — see the Status section below for the full, unfiltered trail of
-what was tried and what actually happened.
+Source: [results/eval_report_breakdown_cleanlabels.json](results/eval_report_breakdown_cleanlabels.json).
+For comparison, the previous checkpoint (`checkpoints/best.pt`) scored 62.33%
+mean / 67.56% median / 3.71% pass on IO-VNBD, and 16.49% / 8.94% / 54.53% on
+comma2k19 (which it had been trained on).
+
+**What changed.** Nothing about the model. The IO-VNBD ground truth was
+wrong, in two ways that were verified on the raw files:
+
+1. The speed column headed `GPS SPEED (Kmh)` is metres per second in 93% of the
+   files. The loader divided by 3.6 because of the header, so every speed
+   label was 3.6 times too small.
+2. The phone records GPS at 10 Hz but the fix updates far less often, and the
+   last one is repeated on every row in between. In 96% of files more than a
+   fifth of the gaps between new positions exceed 3 seconds. The position
+   label was a staircase, so window end points were often seconds out of date,
+   and over 40% of the windows that should exist were discarded as "parked"
+   when the speed label shows them moving at about 7 m/s.
+
+Both are fixed in [src/data/io_vnbd_loader.py](src/data/io_vnbd_loader.py). After
+the fix, the path length of the position label divided by the distance the
+speed label implies is 1.00 (middle half 0.94 to 1.04), down from 6.57, and
+the training set grows from 71,842 to 125,967 windows. The long diagnosis of
+"underfitting on urban, low-speed driving" below, and the five fixes tried
+against it, were measuring a broken label. Those entries are kept as a record
+and are marked as superseded.
+
+**Read this with the following limits in mind:**
+
+- The test windows changed (33,552 now, 18,460 before), so the before and after
+  rows are not scored on identical windows.
+- The track is rebuilt by interpolating between GPS arrivals, which lags true
+  motion by the phone's GPS latency, a fraction of a second.
+- These are isolated 5-second windows. The continuous 30 to 45 second blackout
+  numbers further down were measured with the old model and have not been
+  re-measured.
+- `checkpoints/best.pt` and the ONNX model bundled in the Android app are still
+  the old ones. The new checkpoint has not been exported or shipped yet.
+- Median 11.2% is close to the 10% target, but 46% of windows pass, so more
+  than half still do not.
+
+Smaller results from the same investigation, all measured on the old labels
+unless stated:
+
+- Splitting into a highway-only model took comma2k19 from 16.49% to 9.58% mean.
+- A real urban dataset, [PPC](https://github.com/taroz/PPC-Dataset) (urban Japan
+  with RTK reference positions), reached 10.0% median on its own test set.
+- A second one, PVS (Brazil, rough and unpaved roads), scores poorly on its own
+  test set even after fixing its gyro units (degrees per second, not radians),
+  and is left out of the recommended mix.
+- A heading-loss term was wired in (it had been declared in the config but never
+  used). At weights 0.5 and 0.05 it was neutral to negative, so it is off by
+  default. `--heading_weight` overrides it.
+- Training now sets a random seed (`--seed`, default 42). Before this, nothing
+  seeded the model, so run-to-run comparisons carried unmeasured noise.
 
 ## Approach
 
@@ -164,6 +198,14 @@ not done here to avoid destabilizing the already-verified live app this
 close to the deadline.
 
 ## Status
+
+> **Superseded numbers.** Every IO-VNBD drift figure in this log (62%, 67%, 74%,
+> and the "underfitting on urban driving" diagnosis) was measured against the
+> mis-scaled, staircase-shaped labels described under [Results](#results). They
+> are kept unedited as a record of what was tried. Treat the IO-VNBD conclusions
+> as void until re-run on the corrected loader, and the comma2k19 and decimeter
+> figures as valid for the model that produced them.
+
 
 - [x] Project scaffolded, dataset pulled
 - [x] Physics integrator + network architecture implemented, verified against synthetic ground truth (see smoke test)
