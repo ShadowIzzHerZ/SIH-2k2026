@@ -60,17 +60,21 @@ train:
   weight_decay: 1.0e-5
   loss_weights:
     speed: 1.0
-    # Off by default — real result, not a guess: this weight sat declared-
-    # but-unused (dead code, see src/train.py's compute_loss doc) until
-    # this session wired it up, and 0.5 turned out to have no empirical
-    # basis at all. Tested for real: 0.5 made both the full model and the
-    # urban-regime model measurably worse than their own no-heading-loss
-    # baselines; a lighter 0.05 still landed worse on comma2k19 and PPC
-    # test sets (roughly flat on IO-VNBD). Two real attempts, both
-    # neutral-to-negative — left at 0 rather than silently reintroducing a
-    # twice-disproven default. Override with --heading_weight to
-    # experiment further (see its own --help text for the numbers).
-    heading: 0.0
+    # Heading terms are ON. History: the per-step term (`heading`) was first
+    # wired up at 0.5 and 0.05, looked neutral-to-negative on per-window
+    # drift, and was left at 0. That comparison was blind to the failure
+    # that matters: with heading loss off, the shipped-candidate checkpoint
+    # (cleanlabels) learned ~2 rad/s yaw "corrections" in the last few
+    # samples of each window, invisible to a loss that only reads the final
+    # position, and spun in circles when chunks were chained (30 s blackout
+    # drift ~90-100% on all 64 comma2k19 segments). 0.5 and 0.05 were also
+    # tiny next to a loss in % (drift weight 2 x ~15 = 30), so they could
+    # barely move anything. Weights below are in rad^2 on the same scale.
+    # Checkpoints are now selected on window drift + chained 30 s drift
+    # (src/chain_eval.py), so a heading-loss weight that hurts is caught.
+    heading: 10.0
+    heading_end: 20.0       # final-heading term; see train.compute_loss. Weights are in rad^2 against a % drift loss, so they look large on purpose.
+    chain: 1.0              # cumulative chained drift term, only used with --chain_train_chunks (see train.chain_loss)
     drift: 2.0               # end-to-end position-drift term — this is what the SIH benchmark actually grades
   early_stop_patience: 8
   device: "auto"              # auto -> mps (Apple Silicon) > cuda > cpu

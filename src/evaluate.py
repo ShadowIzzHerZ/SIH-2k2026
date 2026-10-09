@@ -26,6 +26,7 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
+from src.chain_eval import chained_drift
 from src.data.windowing import load_combined_dataset_splits
 from src.models.bias_correction_net import BiasCorrectionNet
 from src.train import forward_pass, pick_device
@@ -134,6 +135,16 @@ def main():
 
     report = eval_drift(model, splits["test"], dt, device, batch_size, target_pct=target)
 
+    # Chained 30 s blackout (what the live app does) next to the per-window
+    # number — see src/chain_eval.py for why the per-window one alone is not
+    # enough. Test split, same checkpoint.
+    chain_report = {}
+    window_size = cfg["data"]["window_size"]
+    chain_all = chained_drift(model, splits["test"], device, dt, window_size=window_size, n_chunks=6, max_chains=None)
+    if chain_all:
+        report["chained_30s"] = chain_all
+        chain_report["all"] = chain_all
+
     print(json.dumps(report, indent=2))
     json.dump(report, open(f"results/eval_report{suffix}.json", "w"), indent=2)
 
@@ -153,6 +164,9 @@ def main():
     for key in ("iovnbd_test_only", "comma2k19_test_only", "decimeter_test_only", "ppc_test_only", "pvs_test_only"):
         if key in splits:
             per_dataset[key] = eval_drift(model, splits[key], dt, device, batch_size, target_pct=target)
+            ch = chained_drift(model, splits[key], device, dt, window_size=window_size, n_chunks=6, max_chains=None)
+            if ch:
+                per_dataset[key]["chained_30s"] = ch
     if per_dataset:
         print("\n--- breakdown by dataset (same checkpoint) ---")
         print(json.dumps(per_dataset, indent=2))

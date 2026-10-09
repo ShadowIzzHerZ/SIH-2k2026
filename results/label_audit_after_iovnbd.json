@@ -1,0 +1,12 @@
+{
+  "IO-VNBD": {
+    "n_seq": 86,
+    "hours": 30.056,
+    "speed_ratio_median": 0.9954438745966835,
+    "held_pct_median": 1.203369434416366,
+    "head_err_deg_median": 2.7926007488324274,
+    "yaw_err_deg_10s_median": 5.179807328638871,
+    "yaw_corr_median": 0.847504390496622,
+    "n_speed_ratio_outside_0.8_1.25": 0
+  }
+}

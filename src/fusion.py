@@ -145,6 +145,8 @@ def run_fusion(
     v_clamp_max: float = 50.0,
     gnss_speed: np.ndarray | None = None,    # (N,) m/s — GPS-chip-reported speed (Doppler), NOT derived here
     gnss_heading: np.ndarray | None = None,  # (N,) rad — GPS-chip-reported course-over-ground, same convention as gnss_xy
+    model_highway: BiasCorrectionNet | None = None,  # optional second ("duo") model, see below
+    switch_mps: float = 6.0,
 ) -> FusionResult:
     """Run the GNSS<->INS state machine over one continuous IMU/GNSS stream.
 
@@ -184,12 +186,21 @@ def run_fusion(
     any real INS, not specific to this model — stops that runaway without
     touching the network or requiring GT anywhere it isn't already used.
     """
+    # Duo models: `model` is the urban / low-speed model; if model_highway is
+    # given, each blackout chunk is run by it instead whenever the fused
+    # speed at the chunk's anchor is >= switch_mps (6 m/s, the same cut
+    # src.train --speed_regime used to split the training data). Decided once
+    # per 5 s chunk from the INS's own state, so it needs no extra sensor and
+    # cannot flip-flop mid-chunk.
     n = len(accel)
     assert gyro.shape[0] == n and gnss_xy.shape[0] == n and gnss_available.shape[0] == n, (
         "accel/gyro/gnss_xy/gnss_available must all be the same length"
     )
     model = model.to(device)
     model.eval()
+    if model_highway is not None:
+        model_highway = model_highway.to(device)
+        model_highway.eval()
 
     position = np.zeros((n, 2), dtype=np.float64)
     heading = np.zeros(n, dtype=np.float64)
@@ -301,7 +312,9 @@ def run_fusion(
                 x = torch.from_numpy(
                     np.concatenate([chunk_accel, chunk_gyro], axis=1).astype(np.float32)
                 ).unsqueeze(0).to(device)  # (1, chunk_len, 6)
-                corrections = model(x)[0].detach().cpu().numpy()  # (chunk_len, 2)
+                anchor_speed = speed[t - 1] if t > 0 else 0.0
+                active = model_highway if (model_highway is not None and anchor_speed >= switch_mps) else model
+                corrections = active(x)[0].detach().cpu().numpy()  # (chunk_len, 2)
 
                 forward_accel_seq = chunk_accel[:, 0] + corrections[:, 0]
                 yaw_rate_seq = chunk_gyro[:, 2] + corrections[:, 1]

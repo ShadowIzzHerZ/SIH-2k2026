@@ -1,0 +1,17 @@
+{
+  "n_windows": 34137,
+  "mean_drift_pct": 22.199599998996373,
+  "median_drift_pct": 12.10083293914795,
+  "p90_drift_pct": 55.62052536010743,
+  "worst_drift_pct": 610.8375244140625,
+  "target_pct": 10.0,
+  "pass_rate_pct": 44.265752702346425,
+  "chained_30s": {
+    "n_chains": 16190,
+    "chain_seconds": 30.0,
+    "mean_drift_pct": 49.32282894301499,
+    "median_drift_pct": 42.9179744720459,
+    "p90_drift_pct": 91.2071632385254,
+    "pass_rate_pct": 6.182828906732551
+  }
+}

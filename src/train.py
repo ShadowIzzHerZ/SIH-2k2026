@@ -25,6 +25,7 @@ import torch.nn as nn
 import yaml
 from torch.utils.data import DataLoader
 
+from src.chain_eval import ChainTrainDataset, build_chains, chained_drift
 from src.data.windowing import load_combined_dataset_splits
 from src.models.bias_correction_net import BiasCorrectionNet
 from src.models.strapdown_ins import dead_reckon_position, drift_metric, integrate_heading, integrate_speed
@@ -121,7 +122,81 @@ def compute_loss(speed_pred, pos_pred, speed_gt, pos_gt, weights: dict):
         total = total + heading_weight * heading_loss
         metrics["heading_loss"] = heading_loss.item()
 
+    # Final-heading term. The per-step term above covers every step, but the
+    # failure that matters for the live app is the heading a window ENDS on:
+    # fusion.py / FusionEngine.kt start each 5 s blackout chunk from the
+    # previous chunk's final heading. The cleanlabels checkpoint (heading
+    # loss off) put ~2 rad/s of yaw "correction" into the last 10 samples of
+    # a window: the per-window drift number barely noticed (it only reads the
+    # final POSITION), but chained over 30 s the estimate spun in circles
+    # (~90-100% drift on all 64 comma2k19 segments vs 17% median for the old
+    # checkpoint). Direction of travel over the last `heading_end_steps`
+    # steps, predicted vs real, wrapped to (-pi, pi]; masked to windows that
+    # really moved over that span (same noise argument as above).
+    end_weight = weights.get("heading_end", 0.0)
+    if end_weight > 0:
+        k = int(weights.get("heading_end_steps", 10))
+        d_pred = pos_pred[:, -1, :] - pos_pred[:, -1 - k, :]
+        d_gt = pos_gt[:, -1, :] - pos_gt[:, -1 - k, :]
+        valid = torch.linalg.norm(d_gt, dim=-1) >= weights.get("heading_end_min_m", 1.0)
+        if valid.any():
+            diff = torch.atan2(d_pred[..., 1], d_pred[..., 0]) - torch.atan2(d_gt[..., 1], d_gt[..., 0])
+            end_loss = (torch.atan2(torch.sin(diff), torch.cos(diff))[valid] ** 2).mean()
+        else:
+            end_loss = torch.zeros((), device=pos_pred.device, dtype=pos_pred.dtype)
+        total = total + end_weight * end_loss
+        metrics["heading_end_loss"] = end_loss.item()
+
     return total, metrics
+
+
+def chain_loss(model, batch, dt: float, device, weights: dict):
+    """Chained-chunk training loss over K back-to-back windows.
+
+    The live fusion engine starts every 5 s blackout chunk from the PREVIOUS
+    chunk's own final speed/heading/position, but single-window training
+    always starts from the truth, so nothing ever taught the network to
+    recover from its own end-state error (the cleanlabels yaw blow-up and the
+    ~35-43% chained drift of chainfix both come from that). Here chunk 0
+    starts from the true state, chunk j>0 from chunk j-1's predicted
+    end state WITH gradients, so an early heading error is punished by every
+    later chunk it throws off. Per chunk: the usual compute_loss (speed +
+    in-chunk drift + heading terms), plus `chain` x the cumulative drift %
+    (error of the summed chunk displacements vs the summed true ones over the
+    distance travelled so far, the same definition chain_eval.chained_drift
+    and the PS metric use), averaged over chunks."""
+    imu = batch["imu"].to(device)            # (B, K, T, C)
+    raw = batch["imu_raw"].to(device)
+    speed_gt = batch["speed_gt"].to(device)  # (B, K, T)
+    pos_gt = batch["pos_gt"].to(device)      # (B, K, T, 2)
+    v = batch["v0"].to(device)
+    th = batch["theta0"].to(device)
+    B, K = imu.shape[0], imu.shape[1]
+    p_cum = torch.zeros(B, 2, device=device)
+    gt_cum = torch.zeros(B, 2, device=device)
+    dist = torch.zeros(B, device=device)
+    chain_w = weights.get("chain", 1.0)
+    total, metrics = 0.0, {}
+    last_chain_drift = None
+    for j in range(K):
+        c = model(imu[:, j])
+        acc = raw[:, j, :, 0] + c[..., 0]
+        yaw = raw[:, j, :, 5] + c[..., 1]
+        speed = integrate_speed(acc, dt, v0=v)
+        heading = integrate_heading(yaw, dt, theta0=th)
+        pos = dead_reckon_position(speed, heading, dt)
+        loss_j, m = compute_loss(speed, pos, speed_gt[:, j], pos_gt[:, j], weights)
+        p_cum = p_cum + pos[:, -1]
+        gt_cum = gt_cum + pos_gt[:, j, -1]
+        dist = dist + torch.linalg.norm(pos_gt[:, j, 1:] - pos_gt[:, j, :-1], dim=-1).sum(dim=1)
+        cd = 100.0 * torch.linalg.norm(p_cum - gt_cum, dim=-1) / dist.clamp(min=1e-6)
+        total = total + loss_j + chain_w * cd.mean()
+        for k, val in m.items():
+            metrics[k] = metrics.get(k, 0.0) + val / K
+        v, th = speed[:, -1], heading[:, -1]
+        last_chain_drift = cd
+    metrics["chain_drift_pct"] = last_chain_drift.mean().item()   # cumulative over all K chunks
+    return total / K, metrics
 
 
 def main():
@@ -199,6 +274,28 @@ def main():
              "editing the config. Omitted (the default) uses whatever the config says.",
     )
     parser.add_argument(
+        "--heading_end_weight", type=float, default=None,
+        help="Override configs/default.yaml's loss_weights.heading_end for this run (the "
+             "final-heading term in compute_loss; 0 disables it).",
+    )
+    parser.add_argument(
+        "--chain_train_chunks", type=int, default=0,
+        help="Train on K back-to-back 5 s windows per sample (see chain_loss) instead of one, "
+             "carrying the model's own end state from chunk to chunk. 0 = off (the old "
+             "single-window objective). 3 is the setting used for the chaintrain run.",
+    )
+    parser.add_argument(
+        "--chain_train_max", type=int, default=40000,
+        help="Cap on training chains per epoch when --chain_train_chunks is on (seeded random subset).",
+    )
+    parser.add_argument(
+        "--chain_chunks", type=int, default=6,
+        help="Chained-blackout validation length in 5 s chunks (6 = a 30 s blackout, the "
+             "regime fusion.py/the app actually runs; see src/chain_eval.py). Checkpoint "
+             "selection uses val window drift + this chained median drift. 0 disables it "
+             "and selects on window drift only, as before.",
+    )
+    parser.add_argument(
         "--run_name", default=None,
         help="Save/load under checkpoints/best_<run_name>.pt and "
              "results/train_history_<run_name>.json instead of the plain best.pt / "
@@ -246,6 +343,9 @@ def main():
     if args.heading_weight is not None:
         cfg["train"]["loss_weights"]["heading"] = args.heading_weight
         print(f"--heading_weight: overriding loss_weights.heading -> {args.heading_weight}")
+    if args.heading_end_weight is not None:
+        cfg["train"]["loss_weights"]["heading_end"] = args.heading_end_weight
+        print(f"--heading_end_weight: overriding loss_weights.heading_end -> {args.heading_end_weight}")
     device = pick_device(cfg["train"]["device"])
     print(f"device: {device}")
 
@@ -267,6 +367,17 @@ def main():
         extra_features=args.extra_features,
     )
 
+    # Chained validation must score the FULL val set (a regime filter keeps
+    # only some windows, which fragments chains), restricted to chains whose
+    # own mean speed is in this model's regime.
+    import copy
+    val_full = copy.copy(splits["val"])
+    chain_speed_range = None
+    if args.speed_regime == "urban":
+        chain_speed_range = (0.0, args.urban_max_speed_mps)
+    elif args.speed_regime == "highway":
+        chain_speed_range = (args.urban_max_speed_mps, float("inf"))
+
     if args.speed_regime:
         def keep(w):
             mean_speed = float(w.speed_gt.mean())
@@ -285,6 +396,13 @@ def main():
                   f"(threshold {args.urban_max_speed_mps} m/s)")
 
     train_loader = DataLoader(splits["train"], batch_size=cfg["train"]["batch_size"], shuffle=True)
+    if args.chain_train_chunks > 0:
+        train_chains = build_chains(splits["train"], cfg["data"]["window_size"], args.chain_train_chunks,
+                                    chain_stride_chunks=2, max_chains=args.chain_train_max, seed=args.seed)
+        print(f"chained-chunk training: {len(train_chains)} chains x {args.chain_train_chunks} chunks "
+              f"({args.chain_train_chunks * 5} s each)")
+        train_loader = DataLoader(ChainTrainDataset(splits["train"], train_chains),
+                                  batch_size=max(8, cfg["train"]["batch_size"] // args.chain_train_chunks), shuffle=True)
     val_loader = DataLoader(splits["val"], batch_size=cfg["train"]["batch_size"], shuffle=False)
 
     input_channels = 12 if args.extra_features else cfg["model"]["input_channels"]
@@ -306,6 +424,21 @@ def main():
     best_name = f"best{suffix}.pt"
     history_path = results_dir / f"train_history{suffix}.json"
     dt = 1.0 / cfg["data"]["sample_rate_hz"]
+
+    def chain_metrics(m):
+        if args.chain_chunks <= 0:
+            return {}
+        m.eval()
+        r = chained_drift(m, val_full, device, dt, window_size=cfg["data"]["window_size"],
+                          n_chunks=args.chain_chunks, speed_range=chain_speed_range)
+        return {"chain_median": r["median_drift_pct"], "chain_mean": r["mean_drift_pct"],
+                "chain_pass": r["pass_rate_pct"], "chain_n": r["n_chains"]} if r else {}
+
+    def selection_score(window_drift, chain):
+        # window drift alone is blind to chained heading failures (see
+        # chain_eval.py); add the chained median so a checkpoint can't win
+        # on one while failing the other.
+        return window_drift + chain.get("chain_median", 0.0)
 
     epoch_offset = 0
     if args.resume:
@@ -355,7 +488,11 @@ def main():
                     baseline[k] = baseline.get(k, 0.0) + v
         for k in baseline:
             baseline[k] /= max(1, len(val_loader))
-        print(f"resumed weights baseline val drift: {baseline['drift_pct']:.2f}%")
+        base_chain = chain_metrics(model)
+        baseline.update(base_chain)
+        print(f"resumed weights baseline val drift: {baseline['drift_pct']:.2f}%"
+              + (f" | chained {args.chain_chunks * 5}s median {base_chain['chain_median']:.2f}% "
+                 f"(n={base_chain['chain_n']})" if base_chain else ""))
     else:
         prev_history = []
         baseline = None
@@ -399,6 +536,7 @@ def main():
     # this run only overwrites best.pt when it actually beats what it
     # started from.
     best_val_drift = baseline["drift_pct"] if baseline is not None else float("inf")
+    best_score = selection_score(baseline["drift_pct"], baseline) if baseline is not None else float("inf")
     patience = cfg["train"]["early_stop_patience"]
     bad_epochs = 0
     history = []
@@ -413,8 +551,11 @@ def main():
         train_metrics: dict[str, float] = {}
         for batch in train_loader:
             opt.zero_grad()
-            speed_pred, pos_pred, speed_gt, pos_gt = forward_pass(model, batch, dt, device)
-            loss, metrics = compute_loss(speed_pred, pos_pred, speed_gt, pos_gt, cfg["train"]["loss_weights"])
+            if args.chain_train_chunks > 0:
+                loss, metrics = chain_loss(model, batch, dt, device, cfg["train"]["loss_weights"])
+            else:
+                speed_pred, pos_pred, speed_gt, pos_gt = forward_pass(model, batch, dt, device)
+                loss, metrics = compute_loss(speed_pred, pos_pred, speed_gt, pos_gt, cfg["train"]["loss_weights"])
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             opt.step()
@@ -434,22 +575,32 @@ def main():
         for k in val_metrics:
             val_metrics[k] /= max(1, len(val_loader))
 
+        val_chain = chain_metrics(model)
+        val_metrics.update(val_chain)
+        score = selection_score(val_metrics["drift_pct"], val_chain)
         dt_epoch = time.time() - t0
+        extra = ""
+        if "heading_end_loss" in val_metrics:
+            extra += f" | end-heading loss {val_metrics['heading_end_loss']:.3f}"
+        if val_chain:
+            extra += f" | chained {args.chain_chunks * 5}s median {val_chain['chain_median']:.2f}% pass {val_chain['chain_pass']:.0f}%"
         print(f"epoch {epoch:03d} | train drift {train_metrics['drift_pct']:.2f}% "
-              f"| val drift {val_metrics['drift_pct']:.2f}% | lr {scheduler.get_last_lr()[0]:.2e} | {dt_epoch:.1f}s")
-        history.append({"epoch": epoch, "train": train_metrics, "val": val_metrics})
+              f"| val drift {val_metrics['drift_pct']:.2f}%{extra} | score {score:.2f} "
+              f"| lr {scheduler.get_last_lr()[0]:.2e} | {dt_epoch:.1f}s")
+        history.append({"epoch": epoch, "train": train_metrics, "val": val_metrics, "score": score})
         json.dump(prev_history + history, open(history_path, "w"), indent=2)
         scheduler.step()
 
-        if val_metrics["drift_pct"] < best_val_drift:
+        if score < best_score:
+            best_score = score
             best_val_drift = val_metrics["drift_pct"]
             bad_epochs = 0
             torch.save(model.state_dict(), ckpt_dir / best_name)
-            print(f"  -> new best val drift {best_val_drift:.2f}%, saved checkpoints/{best_name}")
+            print(f"  -> new best score {best_score:.2f} (val drift {best_val_drift:.2f}%), saved checkpoints/{best_name}")
         else:
             bad_epochs += 1
             if bad_epochs >= patience:
-                print(f"early stopping at epoch {epoch} (no val improvement for {patience} epochs)")
+                print(f"early stopping at epoch {epoch} (no score improvement for {patience} epochs)")
                 break
 
     print(f"best val drift this run: {best_val_drift:.2f}% -> checkpoints/{best_name} "
