@@ -10,7 +10,7 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY:-change-me-generate-with-openssl-rand-hex-32}
+      - SECRET_KEY=${SECRET_KEY:?set SECRET_KEY in .env}
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@timescaledb:5432/sih_db
       - IMU_SAMPLING_RATE_HZ=10.0
