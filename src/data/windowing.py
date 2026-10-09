@@ -40,6 +40,7 @@ from .io_vnbd_loader import (
     derive_speed_from_gps,
     latlon_to_local_xy,
     load_sequence,
+    recover_yaw_axis,
 )
 from ..calibration import calibrate, estimate_gravity_vector, estimate_yaw_misalignment, leveling_rotation
 
@@ -55,6 +56,11 @@ class Window:
     lat0: float               # true starting lat/lon — lets a predicted local-xy trajectory be
     lon0: float               # converted back to real coordinates for map-matching against OSM
     dt: float
+    # Where this window came from, so chain_eval.py can stitch back-to-back
+    # windows of one recording into a continuous blackout. Defaults keep
+    # every other Window(...) caller working unchanged.
+    src: str = ""            # source recording (str of seq.path)
+    start: int = -1          # sample index of the window's first sample in that recording
 
 
 def resample_uniform(seq: ImuSequence, target_hz: float) -> ImuSequence:
@@ -230,7 +236,8 @@ def build_windows(seq: ImuSequence, window_size: int, stride: int, dt: float,
         lon0 = float(seq.lon[start]) if seq.lon is not None else float("nan")
 
         windows.append(Window(accel=w_accel, gyro=w_gyro, speed_gt=w_speed, pos_gt=w_pos,
-                               v0=v0, theta0=theta0, lat0=lat0, lon0=lon0, dt=dt))
+                               v0=v0, theta0=theta0, lat0=lat0, lon0=lon0, dt=dt,
+                               src=str(seq.path), start=start))
     return windows
 
 
@@ -409,6 +416,7 @@ def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_r
             try:
                 seq = load_sequence(Path(p), column_map)
                 seq = resample_uniform(seq, sample_rate_hz)
+                seq = recover_yaw_axis(seq)   # IO-VNBD's gyro "Yaw" column is not yaw; see its docstring
                 seq = calibrate_sequence(seq)
                 windows.extend(build_windows(seq, window_size, window_stride, dt))
             except Exception as e:

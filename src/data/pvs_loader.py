@@ -100,7 +100,12 @@ def load_folder(csv_path: Path, target_hz: float = 10.0, min_duration_s: float =
     # heading column at all, unlike every other loader in this project.
     xy = latlon_to_local_xy(lat, lon)
     d = np.diff(xy, axis=0)
-    step_heading = np.degrees(np.arctan2(d[:, 1], d[:, 0])) % 360.0  # (n-1,)
+    # compass bearing (0=N, 90=E, clockwise) of each step, the convention every
+    # other loader's heading_gt uses and compass_deg_to_xy_unit expects.
+    # (This used the raw math angle atan2(dy, dx) before: 0=E, counter-
+    # clockwise, a direction-dependent error that the label audit measured as a
+    # 125 degree median heading error vs the real direction of travel.)
+    step_heading = np.degrees(np.arctan2(d[:, 0], d[:, 1])) % 360.0  # (n-1,)
     # one heading value per *interval* between fixes -- assign it to the
     # earlier endpoint, repeat the last for the final fix so lengths match.
     heading_gt = np.concatenate([step_heading, step_heading[-1:]]) if len(step_heading) else np.zeros(1)

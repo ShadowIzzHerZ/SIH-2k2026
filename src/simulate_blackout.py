@@ -32,7 +32,7 @@ import numpy as np
 import torch
 import yaml
 
-from src.data.io_vnbd_loader import ImuSequence, compass_deg_to_xy_unit, latlon_to_local_xy, load_sequence
+from src.data.io_vnbd_loader import ImuSequence, compass_deg_to_xy_unit, latlon_to_local_xy, load_sequence, recover_yaw_axis
 from src.data.windowing import calibrate_sequence, resample_uniform
 from src.fusion import FusionMode, blackout_drift_pct, reconnect_jump_m, run_fusion
 from src.models.bias_correction_net import BiasCorrectionNet
@@ -98,7 +98,7 @@ def pick_demo_file(data_root: str, variant: str, file_prefix: str, column_map: d
         tried_files += 1
         try:
             seq = load_sequence(Path(p), column_map)
-            seq = resample_uniform(seq, sample_rate_hz)
+            seq = recover_yaw_axis(resample_uniform(seq, sample_rate_hz))
         except Exception:
             continue
         bo_start = _find_clean_span(seq, sample_rate_hz, lead_in_s, blackout_duration_s, tail_s,
@@ -143,6 +143,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--checkpoint", default="checkpoints/best.pt")
+    parser.add_argument("--checkpoint_highway", default=None,
+                         help="Optional second ('duo') checkpoint for steady/high-speed driving. "
+                              "--checkpoint is then the urban/low-speed model; each 5 s chunk uses "
+                              "the highway one when the fused speed is >= --switch_mps. See fusion.run_fusion.")
+    parser.add_argument("--switch_mps", type=float, default=6.0)
     parser.add_argument("--dataset", choices=["iovnbd", "comma2k19"], default="iovnbd",
                          help="iovnbd: the harder low-speed/urban case (~62%% test drift baseline). "
                               "comma2k19: steady highway driving, the case this model is genuinely "
@@ -166,7 +171,7 @@ def main():
     if args.file:
         path = Path(args.file)
         seq = load_sequence(path, cfg["data"]["column_map"])
-        seq = resample_uniform(seq, sample_rate_hz)
+        seq = recover_yaw_axis(resample_uniform(seq, sample_rate_hz))
         if seq.lat is None or seq.lon is None:
             raise ValueError(f"{path}: no lat/lon — can't simulate a GNSS blackout without a position ground truth")
         seq = calibrate_sequence(seq)
@@ -226,10 +231,21 @@ def main():
     model.load_state_dict(torch.load(args.checkpoint, map_location="cpu"))
     model.eval()
 
+    model_hi = None
+    if args.checkpoint_highway:
+        model_hi = BiasCorrectionNet(
+            input_channels=cfg["model"]["input_channels"], cnn_channels=cfg["model"]["cnn_channels"],
+            cnn_kernel_size=cfg["model"]["cnn_kernel_size"], gru_hidden=cfg["model"]["gru_hidden"],
+            gru_layers=cfg["model"]["gru_layers"], dropout=cfg["model"]["dropout"],
+            output_dim=cfg["model"]["output_dim"],
+        )
+        model_hi.load_state_dict(torch.load(args.checkpoint_highway, map_location="cpu"))
+
     result = run_fusion(
         seq.accel, seq.gyro, xy, gnss_available, dt, model,
         window_size=cfg["data"]["window_size"], device=device, blend_seconds=args.blend_seconds,
         gnss_speed=gnss_speed, gnss_heading=gnss_heading,
+        model_highway=model_hi, switch_mps=args.switch_mps,
     )
 
     drift = blackout_drift_pct(result, xy, gnss_available)

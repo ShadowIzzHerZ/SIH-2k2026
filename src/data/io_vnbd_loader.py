@@ -314,3 +314,68 @@ def derive_speed_from_gps(lat: np.ndarray, lon: np.ndarray, time: np.ndarray) ->
     v = d / dt
     v = np.concatenate([[v[0]], v])
     return np.nan_to_num(v, nan=0.0)
+
+
+def recover_yaw_axis(seq: ImuSequence, horizon_s: float = 10.0, min_r: float = 0.6,
+                     min_moving_windows: int = 400, min_speed_mps: float = 3.0) -> ImuSequence:
+    """Rebuild a usable vehicle-yaw rate from IO-VNBD's phone gyro.
+
+    Real input bug found by the label audit (src/audit_labels.py): the column
+    the loader reads as yaw rate ("GYROSCOPE Yaw (rad/s)") has ~zero
+    correlation with how the GPS heading actually changes (median -0.01 over
+    10 s horizons across 29 files), while the accelerometer says the phone
+    lies flat. The phone's gyro axes are evidently not in the accelerometer's
+    frame in these logs, and the vertical rotation is smeared across all
+    three gyro channels in a per-file way. Gravity-based leveling therefore
+    cannot recover it, and the model has been trained on a garbage yaw signal
+    for most IO-VNBD files: that, not "urban driving is hard", is a large
+    part of the 40-60% urban drift.
+
+    Fix: per file, least-squares fit  heading change over `horizon_s`
+    ~ integrated-gyro change over the same span @ w  (moving > min_speed_mps),
+    using the GPS course as the independent reference. The fitted 3-vector w
+    maps the raw gyro onto the true vertical axis:
+        gz_new = gyro @ w          (true yaw rate, fitted scale included)
+        gx_new, gy_new = components of gyro along the two unit vectors
+                         orthogonal to w (remaining roll/pitch rates)
+    Files where the fit is poor (correlation R < min_r) have no recoverable
+    yaw axis and raise ValueError, so callers' existing try/except skips them
+    (and reports it) instead of training on / scoring against noise.
+
+    This is a per-file 3-parameter calibration against GPS, the same role the
+    app's live yaw alignment plays at the start of a trip (CalibrationManager
+    uses GPS heading while moving). It is applied identically to train, val
+    and test files. The deployed app reads a real Android gyro whose frame
+    matches its accelerometer, so this is a dataset-specific repair, not
+    something the app needs.
+    """
+    if seq.heading_gt is None or seq.speed_gt is None:
+        raise ValueError(f"{seq.path}: no heading_gt/speed_gt to recover the yaw axis from")
+    dt = float(np.median(np.diff(seq.time)))
+    H = max(2, int(round(horizon_s / dt)))
+    if seq.n < 3 * H:
+        raise ValueError(f"{seq.path}: too short ({seq.n * dt:.0f}s) to recover the yaw axis")
+    unit = compass_deg_to_xy_unit(seq.heading_gt)
+    heading = np.unwrap(np.arctan2(unit[:, 1], unit[:, 0]))
+    dh = heading[H:] - heading[:-H]
+    cum = np.cumsum(seq.gyro.astype(np.float64), axis=0) * dt
+    dG = cum[H:] - cum[:-H]
+    mean_speed = np.convolve(np.asarray(seq.speed_gt, dtype=np.float64), np.ones(H) / H, mode="valid")[: len(dh)]
+    ok = (mean_speed > min_speed_mps) & np.isfinite(dh) & np.isfinite(dG).all(axis=1)
+    if ok.sum() < min_moving_windows:
+        raise ValueError(f"{seq.path}: only {int(ok.sum())} moving {horizon_s:.0f}s spans, not enough to recover the yaw axis")
+    w, *_ = np.linalg.lstsq(dG[ok], dh[ok], rcond=None)
+    r = float(np.corrcoef(dG[ok] @ w, dh[ok])[0, 1])
+    if not np.isfinite(r) or r < min_r:
+        raise ValueError(f"{seq.path}: gyro yaw axis not recoverable (fit R={r:.2f} < {min_r})")
+    wn = float(np.linalg.norm(w))
+    z = w / wn
+    a = np.array([1.0, 0.0, 0.0]) if abs(z[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    x = a - (a @ z) * z
+    x /= np.linalg.norm(x)
+    y = np.cross(z, x)
+    g = seq.gyro.astype(np.float64)
+    seq.gyro[:, 0] = (g @ x).astype(seq.gyro.dtype)
+    seq.gyro[:, 1] = (g @ y).astype(seq.gyro.dtype)
+    seq.gyro[:, 2] = (g @ w).astype(seq.gyro.dtype)
+    return seq
