@@ -706,6 +706,7 @@ class MainActivity : AppCompatActivity() {
             if (sample.hasFix && sample.hasBearing) {
                 calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
             }
+            calibration.tickYawWait()
             showCalibrating(
                 getString(
                     if (usingReplay) R.string.calib_yaw_replay else R.string.calib_yaw_live
@@ -727,6 +728,12 @@ class MainActivity : AppCompatActivity() {
             trackingContent.visibility = View.VISIBLE
             trackingCard.alpha = 0f
             trackingCard.animate().alpha(1f).setDuration(300L).start()
+        }
+
+        // Yaw timed out to a best-effort estimate: keep offering it real
+        // moving samples so it can still lock in properly mid-trip.
+        if (!calibration.yawLocked && sample.hasFix && sample.hasBearing) {
+            calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
         }
 
         val calAccel = calibration.calibrate(sample.rawAccel)
