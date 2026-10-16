@@ -29,6 +29,18 @@ android {
         ndk {
             abiFilters += "arm64-v8a"
         }
+
+        // Where ModelUpdater looks for manifest.json and model files: the
+        // public "models" bucket in the project's Supabase Storage (see
+        // scripts/publish_model.py). Override for local testing with
+        // ./gradlew assembleDebug -PmodelBaseUrl=http://10.0.2.2:8765/
+        val modelBaseUrl = (project.findProperty("modelBaseUrl") as String?)
+            ?: "https://iekkwudnpvijroqvknwq.supabase.co/storage/v1/object/public/models/"
+        buildConfigField("String", "MODEL_BASE_URL", "\"$modelBaseUrl\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
@@ -92,6 +104,9 @@ dependencies {
     // dependency; only BiasCorrectionModel does (Predictor exists so tests
     // can swap in a fake instead).
     testImplementation("junit:junit:4.13.2")
+    // Android's own org.json is a stub on the plain JVM; this is the real
+    // implementation, so ModelUpdateTest can parse manifests.
+    testImplementation("org.json:json:20240303")
 }
 
 // Keeps the app's bundled model in sync with the real training artifact
