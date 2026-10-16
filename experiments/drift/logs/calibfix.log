@@ -1,0 +1,16 @@
+/home/claude/SIH-2k2026/experiments/drift/lib.py:231: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  tot += float(loss)
+[calibfix] ep 0 single loss 60.69 | val 5s med 13.05 30s med 52.18 | score 65.23 | 91s
+[calibfix] ep 1 single loss 57.06 | val 5s med 11.63 30s med 40.66 | score 52.29 | 99s
+[calibfix] ep 2 single loss 55.98 | val 5s med 12.25 30s med 43.34 | score 55.59 | 94s
+[calibfix] ep 3 single loss 54.84 | val 5s med 11.35 30s med 36.62 | score 47.97 | 89s
+[calibfix] ep 4 single loss 54.05 | val 5s med 11.68 30s med 40.89 | score 52.57 | 84s
+[calibfix] ep 5 single loss 53.27 | val 5s med 11.30 30s med 38.02 | score 49.32 | 85s
+[calibfix] ep 6 chain loss 109.91 | val 5s med 12.06 30s med 31.13 | score 43.19 | 161s
+[calibfix] ep 7 chain loss 105.69 | val 5s med 12.90 30s med 37.54 | score 50.45 | 157s
+[calibfix] ep 8 chain loss 103.62 | val 5s med 11.92 30s med 32.98 | score 44.90 | 153s
+[calibfix] ep 9 chain loss 100.83 | val 5s med 12.79 30s med 32.34 | score 45.14 | 164s
+[calibfix] ep 10 chain loss 99.85 | val 5s med 12.15 30s med 28.18 | score 40.33 | 168s
+[calibfix] ep 11 chain loss 98.19 | val 5s med 11.72 30s med 28.05 | score 39.77 | 186s
+RESULT calibfix: io_5s   6.5 | io_30s  15.3 | io_60s  22.7 | io_30s_slow  38.6 | io_30s_fast  13.8 | comma_5s   2.4 | comma_30s  11.9  (27 min)

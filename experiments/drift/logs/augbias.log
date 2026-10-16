@@ -1,0 +1,16 @@
+/home/claude/SIH-2k2026/experiments/drift/lib.py:231: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  tot += float(loss)
+[augbias] ep 0 single loss 61.13 | val 5s med 12.44 30s med 43.39 | score 55.83 | 1604s
+[augbias] ep 1 single loss 57.96 | val 5s med 11.50 30s med 42.08 | score 53.58 | 96s
+[augbias] ep 2 single loss 56.63 | val 5s med 11.28 30s med 36.13 | score 47.41 | 102s
+[augbias] ep 3 single loss 55.72 | val 5s med 14.87 30s med 55.87 | score 70.74 | 100s
+[augbias] ep 4 single loss 54.79 | val 5s med 11.19 30s med 33.35 | score 44.54 | 101s
+[augbias] ep 5 single loss 53.96 | val 5s med 11.96 30s med 39.94 | score 51.90 | 102s
+[augbias] ep 6 chain loss 109.21 | val 5s med 11.07 30s med 29.08 | score 40.15 | 179s
+[augbias] ep 7 chain loss 106.70 | val 5s med 11.48 30s med 33.13 | score 44.61 | 176s
+[augbias] ep 8 chain loss 104.03 | val 5s med 11.75 30s med 27.84 | score 39.59 | 180s
+[augbias] ep 9 chain loss 102.09 | val 5s med 11.70 30s med 29.91 | score 41.61 | 170s
+[augbias] ep 10 chain loss 99.99 | val 5s med 11.94 30s med 27.90 | score 39.84 | 179s
+[augbias] ep 11 chain loss 98.19 | val 5s med 11.95 30s med 26.76 | score 38.71 | 176s
+RESULT augbias: io_5s   6.5 | io_30s  14.9 | io_60s  21.6 | io_30s_slow  38.8 | io_30s_fast  13.3 | comma_5s   2.5 | comma_30s  11.8  (54 min)

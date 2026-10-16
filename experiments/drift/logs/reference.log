@@ -1,0 +1,7 @@
+[orig] windows: train 39940, val 5295, test_iovnbd 8608, test_comma 477, test 9085 (3s)
+physics_orig: io_5s  10.4 | io_30s  27.6 | io_60s  41.0 | io_30s_slow 273.0 | io_30s_fast  23.5 | comma_5s   7.2 | comma_30s  30.6 (12s)
+v3chain_orig: io_5s   7.1 | io_30s  13.6 | io_60s  18.6 | io_30s_slow  45.8 | io_30s_fast  12.0 | comma_5s   2.7 | comma_30s   9.8
+[fwdfix] windows: train 39940, val 5295, test_iovnbd 8608, test_comma 477, test 9085 (3s)
+forward-axis fit: median r(longitudinal accel vs GPS dv/dt) = 0.51
+physics_fwdfix: io_5s   7.9 | io_30s  18.2 | io_60s  26.0 | io_30s_slow  63.5 | io_30s_fast  16.1 | comma_5s   2.5 | comma_30s  12.4 (12s)
+v3chain_fwdfix: io_5s   6.8 | io_30s  14.8 | io_60s  19.7 | io_30s_slow  64.1 | io_30s_fast  12.8 | comma_5s   2.8 | comma_30s  11.5
