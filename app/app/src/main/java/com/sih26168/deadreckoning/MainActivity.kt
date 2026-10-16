@@ -61,10 +61,13 @@ class MainActivity : AppCompatActivity() {
     // (see ReplayDataSource's own doc comment: the same clip that measured
     // 2.9% drift over a real 30s continuous blackout). Kept in its own
     // clearly-labeled slot rather than dropped, since it's real recorded
-    // data too, just not ours. Loaded upfront so switching sources
-    // mid-session (tick()) is instant, no asset I/O on the hot path. Asset
-    // filenames and demoNRadio ids below are paired 1:1 by list position.
-    private lateinit var replaySources: List<ReplayDataSource>
+    // data too, just not ours. Parsed on a background thread right after
+    // startup (about 12 MB of JSON, which used to block onCreate long
+    // enough to trigger an ANR), so switching sources mid-session (tick())
+    // is still instant. If replay is picked before its file is parsed, the
+    // lazy just finishes that one parse on the spot. Asset filenames and
+    // demoNRadio ids below are paired 1:1 by list position.
+    private lateinit var replaySources: List<Lazy<ReplayDataSource>>
     private val demoRadioIds = intArrayOf(
         R.id.demo1Radio, R.id.demo2Radio, R.id.demo3Radio,
         R.id.demo4Radio, R.id.demo5Radio, R.id.demo6Radio, R.id.demo7Radio,
@@ -341,14 +344,15 @@ class MainActivity : AppCompatActivity() {
         sensorReader = SensorReader(this)
         locationReader = LocationReader(this)
         replaySources = listOf(
-            ReplayDataSource(this, "replay_demo1.json"),
-            ReplayDataSource(this, "replay_demo2.json"),
-            ReplayDataSource(this, "replay_demo_1305.json"),
-            ReplayDataSource(this, "replay_demo_1332.json"),
-            ReplayDataSource(this, "replay_demo_2117.json"),
-            ReplayDataSource(this, "replay_demo_2142.json"),
-            ReplayDataSource(this, "replay_drive.json"),
-        )
+            "replay_demo1.json",
+            "replay_demo2.json",
+            "replay_demo_1305.json",
+            "replay_demo_1332.json",
+            "replay_demo_2117.json",
+            "replay_demo_2142.json",
+            "replay_drive.json",
+        ).map { name -> lazy { ReplayDataSource(applicationContext, name) } }
+        Thread({ replaySources.forEach { it.value } }, "replay-prefetch").start()
         model = BiasCorrectionModel(this)
         // Fetches a newer model if one is published; it takes effect on the
         // next app start. See ModelUpdater.
@@ -579,7 +583,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun readSample(usingReplay: Boolean, demo: Int): Sample {
         if (usingReplay) {
-            val replayData = replaySources[demo - 1]
+            val replayData = replaySources[demo - 1].value
             val row = replayData.rows[replayIndex]
             replayIndex = (replayIndex + 1) % replayData.rows.size
             return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad, true)
