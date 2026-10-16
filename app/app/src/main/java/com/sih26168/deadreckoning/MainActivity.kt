@@ -342,6 +342,9 @@ class MainActivity : AppCompatActivity() {
             ReplayDataSource(this, "replay_drive.json"),
         )
         model = BiasCorrectionModel(this)
+        // Fetches a newer model if one is published; it takes effect on the
+        // next app start. See ModelUpdater.
+        activityScope.launch { ModelUpdater.checkForUpdate(applicationContext) }
         fusion = FusionEngine(model)
         mapMatcher = MapMatcher(RoadGraph(this))
         devRecorder = DevRecorder(this)

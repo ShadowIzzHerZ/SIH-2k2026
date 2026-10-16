@@ -90,7 +90,32 @@ python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
 The app module's `syncModel` Gradle task copies `checkpoints/dead_reckoning_model.onnx`
 into `assets/` at build time — it is never hand-copied/duplicated, so the
 app always bundles whatever the training pipeline last exported. Re-run
-`src/export_onnx.py` and rebuild if the checkpoint changes.
+`src/export_onnx.py` and rebuild if the checkpoint changes. When you do,
+bump `ModelUpdater.BUNDLED_MODEL_VERSION`.
+
+## Model updates without a new APK
+
+On every start the app checks `manifest.json` in the public `models`
+bucket of the project's Supabase Storage (`ModelUpdater.kt`). If it lists
+a higher version than the model running now, the app downloads it, checks
+the size and SHA-256, opens it with ONNX Runtime, requires exactly a
+(1, 50, 6) input and (1, 50, 2) output, and runs one test window. Only
+then is it saved, and it is used from the next app start. If the saved
+model is ever missing, corrupted or fails to load, the app deletes it and
+uses the model bundled in the APK, so an update can't break the app. A
+version that failed to load is not downloaded again; publish a higher one.
+
+To publish, with a Supabase secret key in your environment (never in the
+repo or the app):
+```bash
+export SUPABASE_SECRET_KEY=...
+python scripts/publish_model.py path/to/model.onnx --version 3 --dry-run   # checks only
+python scripts/publish_model.py path/to/model.onnx --version 3
+```
+To roll back, publish the older model again under a higher version. For
+local testing, build with `-PmodelBaseUrl=http://10.0.2.2:8765/` and serve
+`manifest.json` plus the model from the dev machine; debug builds allow
+plain HTTP to that address only.
 
 ## Building
 
