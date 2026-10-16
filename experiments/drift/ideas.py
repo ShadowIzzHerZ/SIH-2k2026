@@ -222,6 +222,12 @@ EXPERIMENTS = {
         "calib": "fwdfix",
         "model": zero_init_model,
     },
+    "aug_chain6": {
+        "desc": "calibfix + bias augmentation + 30 s (6-chunk) chained fine-tune",
+        "calib": "fwdfix",
+        "train_ds": lambda model, sp: AugDataset(sp["train"]),
+        "train_kw": {"chunks": 6, "max_chains": 6000},
+    },
     "chain6": {
         "desc": "calibfix + chained fine-tune over 6 chunks (30 s) instead of 3",
         "calib": "fwdfix",
@@ -241,4 +247,113 @@ EXPERIMENTS = {
         "chain_loss_fn": anchor_chain_loss,
         "chain_fn": lambda model, sp: (lambda m, ds, dev, dt, **k: lib.chained_drift_x(m, ds, dev, dt, step_fn=anchor_step(m), **k)),
     },
+}
+
+
+# ------------------------------------------------ idea: speed from turning (centripetal observer)
+def centripetal_step_fn(w_thr=0.08, gain=0.05, k=10, vmax=40.0):
+    """In a turn the car's lateral accel is v * yaw_rate, so v = a_lat / yaw_rate
+    is a direct speed measurement that does not drift. Whenever the (1 s
+    smoothed) yaw rate is above w_thr, nudge the integrated speed toward it
+    with a small per-sample gain (a 1-state complementary filter)."""
+    def step(raw, c, v, th, imu):
+        acc = raw[..., 0] + c[..., 0]
+        w = raw[..., 5] + c[..., 1]
+        def trail(x):
+            pad = torch.cat([x[:, :1].expand(-1, k - 1), x], 1)
+            return pad.unfold(1, k, 1).mean(-1)
+        ay, ws = trail(raw[..., 1]), trail(w)
+        vobs = (ay / ws.where(ws.abs() > 1e-3, torch.full_like(ws, 1e-3))).clamp(0.0, vmax)
+        use = (ws.abs() > w_thr) & (ay * ws > 0)
+        vs, vv = [], v
+        for i in range(acc.shape[1]):
+            vv = (vv + acc[:, i] * lib.DT).clamp(0.0, 50.0)
+            vv = torch.where(use[:, i], (1 - gain) * vv + gain * vobs[:, i], vv)
+            vs.append(vv)
+        speed = torch.stack(vs, 1)
+        heading = th.unsqueeze(1) + torch.cumsum(w * lib.DT, 1)
+        return speed, heading
+    return step
+
+
+def centripetal_chain_fn(**kw):
+    sf = centripetal_step_fn(**kw)
+
+    def chain_fn(model, ds, device, dt, **k):
+        return lib.chained_drift_x(model, ds, device, dt, step_fn=sf, **k)
+    return chain_fn
+
+
+# ------------------------------------------------ idea: tell the network the current speed
+class SpeedAwareNet(torch.nn.Module):
+    """Same net with a 7th input channel: the speed the integrator starts the
+    chunk from (true v0 for a single window, the model's own estimate when
+    chained). Vibration, engine and turning signatures mean different things
+    at 5 m/s and 25 m/s; the base net has to guess the speed from 5 s of IMU."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = lib.new_model(input_channels=7)
+        self.cur_v0 = torch.zeros(1)
+
+    def forward(self, x):
+        v = self.cur_v0.reshape(-1, 1, 1).expand(x.shape[0], x.shape[1], 1) / 10.0
+        return self.net(torch.cat([x, v.to(x.dtype)], -1))
+
+
+def speedaware_forward(model, batch, dt, device):
+    from src.train import forward_pass
+    model.cur_v0 = batch["v0"]
+    return forward_pass(model, batch, dt, device)
+
+
+def speedaware_loss(model, splits):
+    from src.train import compute_loss
+
+    def fn(b):
+        return compute_loss(*speedaware_forward(model, b, lib.DT, "cpu"), lib.LOSS_WEIGHTS)
+    return fn
+
+
+def speedaware_chain_loss(model, splits):
+    from src.train import compute_loss
+
+    def fn(b):
+        imu, raw, sgt, pgt = b["imu"], b["imu_raw"], b["speed_gt"], b["pos_gt"]
+        v, th = b["v0"], b["theta0"]
+        B, K = imu.shape[:2]
+        p_cum, gt_cum, dist = torch.zeros(B, 2), torch.zeros(B, 2), torch.zeros(B)
+        total = 0.0
+        for j in range(K):
+            model.cur_v0 = v
+            c = model(imu[:, j])
+            speed = torch.clamp(v.unsqueeze(1) + torch.cumsum((raw[:, j, :, 0] + c[..., 0]) * lib.DT, 1), min=0.0)
+            heading = integrate_heading(raw[:, j, :, 5] + c[..., 1], lib.DT, theta0=th)
+            pos = dead_reckon_position(speed, heading, lib.DT)
+            lj, _ = compute_loss(speed, pos, sgt[:, j], pgt[:, j], lib.LOSS_WEIGHTS)
+            p_cum = p_cum + pos[:, -1]
+            gt_cum = gt_cum + pgt[:, j, -1]
+            dist = dist + torch.linalg.norm(pgt[:, j, 1:] - pgt[:, j, :-1], dim=-1).sum(1)
+            total = total + lj + (100.0 * torch.linalg.norm(p_cum - gt_cum, dim=-1) / dist.clamp(min=1e-6)).mean()
+            v, th = speed[:, -1], heading[:, -1]
+        return total / K, {}
+    return fn
+
+
+EXPERIMENTS["speedaware"] = {
+    "desc": "calibfix + bias augmentation + current speed fed to the network as an input",
+    "calib": "fwdfix",
+    "model": SpeedAwareNet,
+    "train_ds": lambda model, sp: AugDataset(sp["train"]),
+    "fwd": speedaware_forward,
+    "loss_fn": speedaware_loss,
+    "chain_loss_fn": speedaware_chain_loss,
+    "chain_fn": lambda model, sp: lib.chained_drift_x,
+}
+
+
+EXPERIMENTS["augbias_long"] = {
+    "desc": "augbias with double the training budget (12 single-window + 12 chained epochs)",
+    "calib": "fwdfix",
+    "train_ds": lambda model, sp: AugDataset(sp["train"]),
 }

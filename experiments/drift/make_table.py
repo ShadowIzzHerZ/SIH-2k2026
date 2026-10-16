@@ -5,7 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 ORDER = ["ref_physics_orig", "ref_physics_fwdfix", "phys_zupt", "phys_bias_gyro", "phys_bias_gyro_120s",
          "phys_bias_accel", "phys_bias_both", "ref_v3chain_orig", "baseline", "calibfix", "augbias", "anchor",
-         "chain6", "zeroinit", "calibfix+zupt", "calibfix_s7", "augbias_s7"]
+         "chain6", "zeroinit", "calibfix+zupt", "calibfix_s7", "augbias_s7", "aug_chain6", "augbias_long", "speedaware",
+         "speedaware_s7", "duo_speedaware", "duo_speedaware_s7"]
 COLS = [("io_5s", "IO 5 s"), ("io_30s", "IO 30 s"), ("io_60s", "IO 60 s"), ("io_30s_slow", "IO 30 s slow"),
         ("io_30s_fast", "IO 30 s fast"), ("comma_5s", "comma 5 s"), ("comma_30s", "comma 30 s")]
 
@@ -38,6 +39,13 @@ drives were in its training data: reference only, not a fair comparison.
 3. 30 s chained fine-tune (chain6): IO about as good as augbias, but slow and comma worse; not adopted.
 4. No gain / worse: stop detection (train or inference), IMU bias from the 30 s of GPS before a blackout,
    learned absolute-speed anchor (much worse), zero-initialised correction head.
+
+Round 2 (best two-seed averages):
+5. **Current speed fed to the network** (speedaware): IO 30 s 14.2%, **60 s 19.1%**, comma 5 s 1.95%; slow traffic worse (~46%).
+6. **Speed-switched pair** (duo: speedaware above 6 m/s, augbias_long below): IO 30 s 14.1%, **60 s 19.1%**, slow **39.1%**,
+   comma 5 s 1.95%, comma 30 s 13.1%. Best balance so far; no extra training.
+7. No gain: speed from turning (centripetal observer), augbias + 30 s chains (slow worse), double training budget
+   (validation improved, test unchanged except slow 37.5%).
 
 Error decomposition (physics, fixed alignment, IO 30 s): 18.2% as is, 7.3% with true speed, 14.5% with true
 heading, so forward-speed integration is the dominant error source.

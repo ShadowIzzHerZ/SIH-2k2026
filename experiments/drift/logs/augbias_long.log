@@ -1,0 +1,28 @@
+/home/claude/SIH-2k2026/experiments/drift/lib.py:231: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  tot += float(loss)
+[augbias_long] ep 0 single loss 61.02 | val 5s med 11.62 30s med 44.30 | score 55.91 | 85s
+[augbias_long] ep 1 single loss 58.21 | val 5s med 14.17 30s med 55.90 | score 70.07 | 85s
+[augbias_long] ep 2 single loss 56.85 | val 5s med 11.24 30s med 36.34 | score 47.58 | 86s
+[augbias_long] ep 3 single loss 56.61 | val 5s med 11.93 30s med 39.88 | score 51.81 | 87s
+[augbias_long] ep 4 single loss 55.78 | val 5s med 10.84 30s med 31.28 | score 42.12 | 86s
+[augbias_long] ep 5 single loss 55.19 | val 5s med 16.70 30s med 61.29 | score 77.99 | 86s
+[augbias_long] ep 6 single loss 54.71 | val 5s med 12.28 30s med 40.44 | score 52.72 | 88s
+[augbias_long] ep 7 single loss 53.71 | val 5s med 12.15 30s med 38.44 | score 50.59 | 90s
+[augbias_long] ep 8 single loss 53.74 | val 5s med 17.36 30s med 54.24 | score 71.60 | 84s
+[augbias_long] ep 9 single loss 52.49 | val 5s med 12.59 30s med 43.06 | score 55.65 | 88s
+[augbias_long] ep 10 single loss 52.24 | val 5s med 11.82 30s med 37.03 | score 48.85 | 88s
+[augbias_long] ep 11 single loss 51.86 | val 5s med 11.96 30s med 40.11 | score 52.08 | 87s
+[augbias_long] ep 12 chain loss 110.93 | val 5s med 11.69 30s med 32.79 | score 44.48 | 155s
+[augbias_long] ep 13 chain loss 107.30 | val 5s med 11.32 30s med 33.69 | score 45.01 | 162s
+[augbias_long] ep 14 chain loss 105.14 | val 5s med 12.99 30s med 39.27 | score 52.25 | 167s
+[augbias_long] ep 15 chain loss 103.95 | val 5s med 12.40 30s med 32.80 | score 45.19 | 172s
+[augbias_long] ep 16 chain loss 101.84 | val 5s med 12.02 30s med 32.05 | score 44.07 | 161s
+[augbias_long] ep 17 chain loss 99.81 | val 5s med 11.70 30s med 30.86 | score 42.56 | 151s
+[augbias_long] ep 18 chain loss 98.86 | val 5s med 11.41 30s med 25.46 | score 36.87 | 155s
+[augbias_long] ep 19 chain loss 97.51 | val 5s med 11.28 30s med 24.60 | score 35.88 | 156s
+[augbias_long] ep 20 chain loss 96.70 | val 5s med 12.29 30s med 26.85 | score 39.15 | 161s
+[augbias_long] ep 21 chain loss 95.38 | val 5s med 11.87 30s med 27.12 | score 38.99 | 153s
+[augbias_long] ep 22 chain loss 95.16 | val 5s med 12.03 30s med 25.70 | score 37.73 | 155s
+[augbias_long] ep 23 chain loss 94.44 | val 5s med 11.76 30s med 24.83 | score 36.59 | 151s
+RESULT augbias_long: io_5s   6.6 | io_30s  14.9 | io_60s  21.7 | io_30s_slow  37.5 | io_30s_fast  13.5 | comma_5s   2.6 | comma_30s  12.0  (50 min)

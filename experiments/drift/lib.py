@@ -287,6 +287,8 @@ def chained_drift_x(model, dataset, device, dt, window_size=50, n_chunks=6, max_
             if bias is not None:
                 raw = raw - bias.unsqueeze(1)
                 imu = raw
+            if hasattr(model, "cur_v0"):
+                model.cur_v0 = v
             c = model(imu)
             if step_fn is not None:
                 speed, heading = step_fn(raw, c, v, th, imu)
