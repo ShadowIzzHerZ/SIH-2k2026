@@ -61,9 +61,9 @@ rows, from [src/report_unseen.py](src/report_unseen.py)).
   [src/data/io_vnbd_loader.py](src/data/io_vnbd_loader.py)) fits each IO-VNBD
   file against its own GPS heading, including test files. The app's phone gyro
   does not need it, but it makes IO-VNBD easier than raw phone data.
-- The app still bundles the ONNX export of `checkpoints/best.pt`. The newest
-  checkpoint exports to the same `[1, 50, 6] -> [1, 50, 2]` interface and matches
-  PyTorch to 4e-6, but it has not been swapped in or tested on a phone yet.
+- The app now bundles the ONNX export of `checkpoints/best_v3chain.pt` (same
+  `[1, 50, 6] -> [1, 50, 2]` interface, matches PyTorch to 4e-6). It loads and
+  runs on the emulator but has not been tested on a phone or a real drive yet.
 - The 2.9% "30 s highway blackout" demo figure in Status was measured on one
   comma2k19 drive with the old `best.pt`, through `src/simulate_blackout.py`.
 - Earlier entries in [Status](#status) quote numbers from older checkpoints and
