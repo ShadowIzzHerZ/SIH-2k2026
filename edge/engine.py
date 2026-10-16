@@ -215,6 +215,7 @@ class EdgeEngine:
         self.live: State | None = None      # high-rate propagated state (undisplayed)
         self._offset = np.zeros(2)          # display offset being faded out
         self._offset_t0 = 0.0
+        self._pre_tick: State | None = None  # last fix shown before the first 10 Hz tick
 
     def push_gnss(self, fix: Fix):
         self.fixes.append(fix)
@@ -257,8 +258,8 @@ class EdgeEngine:
         return self.ticks
 
     def _reanchor(self, st: State, t_now: float):
-        if self.live is not None:
-            shown = self._shown(t_now)
+        shown = self._shown(t_now) if self.live is not None else self._pre_tick
+        if shown is not None:
             self._offset = np.array([shown.x - st.x, shown.y - st.y])
             self._offset_t0 = t_now
         self.live = State(st.t, st.x, st.y, st.heading, st.speed, st.mode)
@@ -270,7 +271,8 @@ class EdgeEngine:
             if fix is None:
                 return State(t, 0.0, 0.0, 0.0, 0.0, mode)
             x, y, spd, hdg = fix
-            return State(t, x, y, hdg or 0.0, spd or 0.0, mode)
+            self._pre_tick = State(t, x, y, hdg or 0.0, spd or 0.0, mode)
+            return self._pre_tick
         L = self.live
         dt = max(0.0, t - L.t)
         if mode == BLACKOUT:  # raw strapdown until the next model result

@@ -144,6 +144,23 @@ def test_jittered_timestamps():
     assert np.hypot(last.x - true[0], last.y - true[1]) < 1.5
 
 
+def test_first_tick_does_not_jump():
+    """Before the first 10 Hz tick the live output shows the fix extrapolated
+    with its Doppler speed. When Doppler and positions disagree (IO-VNBD's
+    phone GPS often does), the first tick must fade in like every later one
+    instead of jumping."""
+    t, xy, th, accel, gyro = _drive()
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp")
+    live = []
+    for i in range(len(t)):
+        if i % 20 == 0:
+            eng.push_gnss(Fix(t[i], *xy[i], 24.0, th[i]))  # Doppler twice the true speed
+        live.append(eng.push_imu(t[i], accel[i], gyro[i]))
+    pts = np.array([[s.x, s.y] for s in live[:200]])
+    step = np.linalg.norm(np.diff(pts, axis=0), axis=1).max()
+    assert step < 3 * 24.0 / 200, f"live output jumped {step:.3f} m at the first tick"
+
+
 class _LinearPredictor:
     """Deterministic stand-in for the network: corrections depend on the input
     and on position in the window, like the real one."""
