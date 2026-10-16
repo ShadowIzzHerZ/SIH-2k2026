@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 ORDER = ["ref_physics_orig", "ref_physics_fwdfix", "phys_zupt", "phys_bias_gyro", "phys_bias_gyro_120s",
          "phys_bias_accel", "phys_bias_both", "ref_v3chain_orig", "baseline", "calibfix", "augbias", "anchor",
-         "chain6"]
+         "chain6", "zeroinit", "calibfix+zupt", "calibfix_s7", "augbias_s7"]
 COLS = [("io_5s", "IO 5 s"), ("io_30s", "IO 30 s"), ("io_60s", "IO 60 s"), ("io_30s_slow", "IO 30 s slow"),
         ("io_30s_fast", "IO 30 s fast"), ("comma_5s", "comma 5 s"), ("comma_30s", "comma 30 s")]
 
@@ -29,6 +29,18 @@ slow/fast = chain mean speed below/above 6 m/s.
 
 ref_v3chain_orig was trained on the old leaky split, so some of these test
 drives were in its training data: reference only, not a fair comparison.
+
+## Ranking (two seeds where run; seed-to-seed spread is ~0.5 pt on IO 30 s, ~3 pt on comma 30 s)
+
+1. **Fixed phone-to-vehicle alignment** (calibfix): clear win on both seeds. Physics alone 27.6 -> 18.2% (IO 30 s);
+   trained model 16.2 -> 15.1% avg (IO 30 s), 24.6 -> 22.3% (IO 60 s), slow 58.6 -> ~41%.
+2. **+ bias/noise augmentation** (augbias): small but consistent on both seeds: IO 30 s 14.65% avg, 60 s 21.1%, comma 30 s 11.7%.
+3. 30 s chained fine-tune (chain6): IO about as good as augbias, but slow and comma worse; not adopted.
+4. No gain / worse: stop detection (train or inference), IMU bias from the 30 s of GPS before a blackout,
+   learned absolute-speed anchor (much worse), zero-initialised correction head.
+
+Error decomposition (physics, fixed alignment, IO 30 s): 18.2% as is, 7.3% with true speed, 14.5% with true
+heading, so forward-speed integration is the dominant error source.
 
 {chr(10).join(lines)}
 """
