@@ -196,14 +196,18 @@
             <!-- Dropped-down details — gone by default. Instructions, the
                  ring, and the skip-calibration shortcut all live here
                  together, skip button directly under the ring. -->
+<com.sih26168.deadreckoning.MaxHeightScrollView
+ android:id="@+id/calibrationDetails"
+ android:layout_width="match_parent"
+ android:layout_height="wrap_content"
+ android:visibility="gone">
             <LinearLayout
-                android:id="@+id/calibrationDetails"
+                android:id="@+id/calibrationDetailsInner"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:paddingHorizontal="14dp"
-                android:paddingBottom="14dp"
-                android:visibility="gone">
+                android:paddingBottom="14dp">
 
                 <View
                     android:layout_width="match_parent"
@@ -284,6 +288,7 @@
                     android:layout_marginTop="14dp"
                     android:text="@string/dev_skip_calibration_button" />
             </LinearLayout>
+</com.sih26168.deadreckoning.MaxHeightScrollView>
         </LinearLayout>
 
         <!-- Tracking state: ONE consolidated card (trackingCard) replacing
@@ -458,14 +463,18 @@
                      telemetry tiles (Drift/Confidence, Pedestrian steps)
                      and ×1/×2/×5 simulation-speed control have no real
                      backing in this app and stay left out. -->
+<com.sih26168.deadreckoning.MaxHeightScrollView
+ android:id="@+id/trackingDetails"
+ android:layout_width="match_parent"
+ android:layout_height="wrap_content"
+ android:visibility="gone">
                 <LinearLayout
-                    android:id="@+id/trackingDetails"
+                    android:id="@+id/trackingDetailsInner"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:paddingHorizontal="10dp"
-                    android:paddingBottom="10dp"
-                    android:visibility="gone">
+                    android:paddingBottom="10dp">
 
                     <View
                         android:layout_width="match_parent"
@@ -603,6 +612,7 @@
                         </LinearLayout>
                     </LinearLayout>
                 </LinearLayout>
+</com.sih26168.deadreckoning.MaxHeightScrollView>
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
