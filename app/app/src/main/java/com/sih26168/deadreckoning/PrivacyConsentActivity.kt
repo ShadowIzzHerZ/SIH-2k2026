@@ -26,6 +26,10 @@ class PrivacyConsentActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_privacy_consent)
+        val formRoot = findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0) as android.view.ViewGroup
+        AdaptiveWindow.lightBars(this, formRoot)
+        AdaptiveWindow.applyInsets(this, formRoot)
+        AdaptiveWindow.capContentWidth(this, formRoot.getChildAt(0))
 
         findViewById<android.widget.Button>(R.id.privacyAgreeButton).setOnClickListener {
             PrivacyConsent.setConsented(this)

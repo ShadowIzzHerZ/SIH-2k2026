@@ -248,7 +248,7 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
         val d = GradientDrawable()
         d.shape = GradientDrawable.OVAL
         d.setColor((colorHex and 0x00FFFFFF) or (alpha shl 24))
-        d.setStroke(2, (Color.WHITE and 0x00FFFFFF) or (alpha shl 24))
+        d.setStroke(maxOf(1, (2 * resources.displayMetrics.density).toInt()), (Color.WHITE and 0x00FFFFFF) or (alpha shl 24))
         val px = (sizeDp * resources.displayMetrics.density).toInt()
         d.setSize(px, px)
         return d
