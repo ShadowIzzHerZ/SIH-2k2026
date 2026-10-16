@@ -204,7 +204,7 @@ class ModelRateFusion:
 
 class EdgeEngine:
     def __init__(self, predictor, R_mount: np.ndarray, model_hz: float = 10.0, resample: str = "mean",
-                 gnss_timeout_s: float = 1.5, live_smooth_s: float = 1.0,
+                 gnss_timeout_s: float = 1.5, live_smooth_s: float = 1.0, live_fade_max_mps: float = 5.0,
                  clock_reset_s: float = 1.0, **fusion_kwargs):
         self.R = np.asarray(R_mount, dtype=np.float64)
         self.core = ModelRateFusion(predictor, dt=1.0 / model_hz, **fusion_kwargs)
@@ -212,9 +212,11 @@ class EdgeEngine:
         self.resampler = make_resampler(resample, model_hz, 6)
         self.gnss_timeout_s = gnss_timeout_s
         self.live_smooth_s = live_smooth_s
+        self.live_fade_max_mps = live_fade_max_mps
         self.clock_reset_s = clock_reset_s
         self.clock_resets = 0
         self._t_max: float | None = None
+        self._fade_s = live_smooth_s
         self.fixes: deque[Fix] = deque(maxlen=256)  # recent fixes, oldest first
         self.ticks: list[State] = []        # finalized 10 Hz track
         self.live: State | None = None      # high-rate propagated state (undisplayed)
@@ -303,6 +305,13 @@ class EdgeEngine:
         if shown is not None:
             self._offset = np.array([shown.x - st.x, shown.y - st.y])
             self._offset_t0 = t_now
+            # A 5 s blackout chunk can move the estimate by tens of metres.
+            # Faded over a fixed second, the live output would briefly run at
+            # several times vehicle speed; stretch the fade instead so the
+            # correction itself moves at most live_fade_max_mps.
+            self._fade_s = self.live_smooth_s
+            if self.live_smooth_s > 0 and self.live_fade_max_mps > 0:
+                self._fade_s = max(self.live_smooth_s, float(np.linalg.norm(self._offset)) / self.live_fade_max_mps)
         self.live = State(st.t, st.x, st.y, st.heading, st.speed, st.mode)
 
     def _propagate(self, t: float, a: np.ndarray, g: np.ndarray) -> State:
@@ -330,8 +339,8 @@ class EdgeEngine:
 
     def _shown(self, t: float) -> State:
         L = self.live
-        if self.live_smooth_s > 0:
-            w = max(0.0, 1.0 - (t - self._offset_t0) / self.live_smooth_s)
+        if self._fade_s > 0:
+            w = max(0.0, 1.0 - (t - self._offset_t0) / self._fade_s)
         else:
             w = 0.0
         return State(t, L.x + w * self._offset[0], L.y + w * self._offset[1], L.heading, L.speed, L.mode)

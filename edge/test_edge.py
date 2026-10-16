@@ -184,6 +184,29 @@ def test_clock_reset():
     assert np.linalg.norm(np.diff(pts, axis=0), axis=1).max() < 3 * 12.0 / 200
 
 
+class _BiasedPredictor:
+    """Adds a constant 2 m/s^2 forward correction: each 5 s chunk lands ~25 m
+    away from the raw strapdown the live output was showing."""
+    window_size = 50
+
+    def __call__(self, w):
+        return np.tile([2.0, 0.0], (len(w), 1))
+
+
+def test_live_fade_rate():
+    t, xy, th, accel, gyro = _drive()
+    eng = EdgeEngine(_BiasedPredictor(), np.eye(3), resample="interp", gnss_timeout_s=0.15)
+    live = []
+    for i in range(len(t)):
+        if i % 20 == 0 and not 20.0 <= t[i] < 40.0:
+            eng.push_gnss(Fix(t[i], *xy[i], 12.0, th[i]))
+        live.append(eng.push_imu(t[i], accel[i], gyro[i]))
+    pts = np.array([[s.x, s.y, s.speed] for s in live if 20.0 <= s.t < 40.0])
+    v_shown = np.linalg.norm(np.diff(pts[:, :2], axis=0), axis=1) * 200
+    excess = v_shown - pts[1:, 2]
+    assert excess.max() < 5.0 + 1.0, f"live output ran {excess.max():.1f} m/s faster than its own speed"
+
+
 class _LinearPredictor:
     """Deterministic stand-in for the network: corrections depend on the input
     and on position in the window, like the real one."""
