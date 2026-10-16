@@ -83,6 +83,7 @@ def _drive(imu_hz=200.0, duration=60.0, speed=12.0, yaw_rate=0.05):
 
 def test_engine_zero_model():
     t, xy, th, accel, gyro = _drive()
+    xy = xy + [500.0, -300.0]  # start away from the origin
     eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp", gnss_timeout_s=0.15)
     live = []
     for i in range(len(t)):
@@ -97,7 +98,7 @@ def test_engine_zero_model():
     true = xy[np.searchsorted(t, last.t)]
     err = np.hypot(last.x - true[0], last.y - true[1])
     assert err / (12.0 * 20) < 0.01, f"drift {err:.2f} m over 240 m"
-    pts = np.array([[s.x, s.y] for s in live if s.t > 1.0])
+    pts = np.array([[s.x, s.y] for s in live])  # from the first sample: no placeholder at the origin
     step = np.linalg.norm(np.diff(pts, axis=0), axis=1).max()
     assert step < 3 * 12.0 / 200, f"high-rate output jumped {step:.3f} m in one sample"
 

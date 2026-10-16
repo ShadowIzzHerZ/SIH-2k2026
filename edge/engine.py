@@ -264,9 +264,13 @@ class EdgeEngine:
         self.live = State(st.t, st.x, st.y, st.heading, st.speed, st.mode)
 
     def _propagate(self, t: float, a: np.ndarray, g: np.ndarray) -> State:
-        mode = GNSS if self._fix_at(t) is not None else BLACKOUT
-        if self.live is None:  # before the first 10 Hz tick
-            return State(t, 0.0, 0.0, 0.0, 0.0, mode)
+        fix = self._fix_at(t)
+        mode = GNSS if fix is not None else BLACKOUT
+        if self.live is None:  # before the first 10 Hz tick: show the fix, not the origin
+            if fix is None:
+                return State(t, 0.0, 0.0, 0.0, 0.0, mode)
+            x, y, spd, hdg = fix
+            return State(t, x, y, hdg or 0.0, spd or 0.0, mode)
         L = self.live
         dt = max(0.0, t - L.t)
         if mode == BLACKOUT:  # raw strapdown until the next model result
