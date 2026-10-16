@@ -782,7 +782,10 @@ class MainActivity : AppCompatActivity() {
             findViewById(android.R.id.content),
             "Calibration is taking longer than usual. $reason",
             Snackbar.LENGTH_INDEFINITE,
-        ).setAnchorView(findViewById(R.id.bottomNav)).setAction("Dismiss") {}
+        ).setAnchorView(
+            // Above the locator button when it's showing, so the notice never covers it.
+            if (recenterButton.visibility == View.VISIBLE) recenterButton else findViewById<View>(R.id.bottomNav)
+        ).setAction("Dismiss") {}
         // Material's Snackbar text view caps itself at 2 lines by default
         // (com.google.android.material.R.integer.mtrl_snackbar_action_text_color_alpha
         // isn't it — it's a hardcoded maxLines=2 on the text view itself) —
