@@ -204,12 +204,17 @@ class ModelRateFusion:
 
 class EdgeEngine:
     def __init__(self, predictor, R_mount: np.ndarray, model_hz: float = 10.0, resample: str = "mean",
-                 gnss_timeout_s: float = 1.5, live_smooth_s: float = 1.0, **fusion_kwargs):
+                 gnss_timeout_s: float = 1.5, live_smooth_s: float = 1.0,
+                 clock_reset_s: float = 1.0, **fusion_kwargs):
         self.R = np.asarray(R_mount, dtype=np.float64)
         self.core = ModelRateFusion(predictor, dt=1.0 / model_hz, **fusion_kwargs)
+        self._resample, self._model_hz = resample, model_hz
         self.resampler = make_resampler(resample, model_hz, 6)
         self.gnss_timeout_s = gnss_timeout_s
         self.live_smooth_s = live_smooth_s
+        self.clock_reset_s = clock_reset_s
+        self.clock_resets = 0
+        self._t_max: float | None = None
         self.fixes: deque[Fix] = deque(maxlen=256)  # recent fixes, oldest first
         self.ticks: list[State] = []        # finalized 10 Hz track
         self.live: State | None = None      # high-rate propagated state (undisplayed)
@@ -241,6 +246,9 @@ class EdgeEngine:
 
     def push_imu(self, t: float, accel: np.ndarray, gyro: np.ndarray) -> State:
         """One raw sample, sensor frame, SI units. Returns the high-rate state."""
+        if self._t_max is not None and t < self._t_max - self.clock_reset_s:
+            self._clock_reset(t)
+        self._t_max = t if self._t_max is None else max(self._t_max, t)
         a = self.R @ np.asarray(accel, dtype=np.float64)
         g = self.R @ np.asarray(gyro, dtype=np.float64)
         finalized = []
@@ -256,6 +264,39 @@ class EdgeEngine:
             self.ticks += self.core.tick(t_tick, s, self._fix_at(t_tick))
         self.ticks += self.core.flush()
         return self.ticks
+
+    def _clock_reset(self, t: float):
+        """The sensor clock jumped back by more than clock_reset_s (a sensor or
+        logger restart). Jitter never does that. Close everything on the old
+        clock, then carry on from the last position on the new one: the
+        resampler and the fix history start over, the model history and the
+        position are kept. Without this the resampler would ignore every
+        sample until the new clock caught up with the old one."""
+        t_old = self._t_max
+        n_ticks = len(self.ticks)
+        self.finish()
+        self.resampler = make_resampler(self._resample, self._model_hz, 6)
+        # Fixes already on the new clock (pushed just before this sample) stay.
+        fresh = []
+        for f in reversed(self.fixes):
+            if not t - self.gnss_timeout_s <= f.t <= t:
+                break
+            fresh.append(f)
+        self.fixes = deque(reversed(fresh), maxlen=self.fixes.maxlen)
+        self._pre_tick = None
+        if len(self.ticks) > n_ticks:  # closing the old clock resolved a chunk
+            st = self.ticks[-1]
+            self._reanchor(st, t_old)
+            L = self.live
+            dt = max(0.0, t_old - st.t)  # bring it up to the last old-clock sample
+            adv = np.array([np.cos(L.heading), np.sin(L.heading)]) * L.speed * dt
+            L.x, L.y = L.x + adv[0], L.y + adv[1]
+            self._offset -= adv
+        if self.live is not None:
+            self.live.t = t
+            self._offset_t0 += t - t_old  # keep fading on the new clock
+        self.clock_resets += 1
+        self._t_max = None
 
     def _reanchor(self, st: State, t_now: float):
         shown = self._shown(t_now) if self.live is not None else self._pre_tick

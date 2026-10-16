@@ -161,6 +161,29 @@ def test_first_tick_does_not_jump():
     assert step < 3 * 24.0 / 200, f"live output jumped {step:.3f} m at the first tick"
 
 
+def test_clock_reset():
+    """The sensor clock restarts at 0 halfway through (a logger restart).
+    The engine must notice, keep its position and carry on, instead of
+    ignoring every sample until the new clock passes the old one."""
+    t, xy, th, accel, gyro = _drive()
+    t_rep = np.where(t < 30.0, t, t - 30.0)
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp", gnss_timeout_s=0.15)
+    live = []
+    for i in range(len(t)):
+        if i % 20 == 0 and not 40.0 <= t[i] < 50.0:  # blackout after the restart
+            eng.push_gnss(Fix(t_rep[i], *xy[i], 12.0, th[i]))
+        live.append(eng.push_imu(t_rep[i], accel[i], gyro[i]))
+    ticks = eng.finish()
+    assert eng.clock_resets == 1
+    assert len(ticks) > 590, len(ticks)
+    bo = [s for s in ticks if s.mode == BLACKOUT]
+    assert 95 <= len(bo) <= 100, len(bo)
+    true = xy[np.searchsorted(t_rep[t >= 30.0], bo[-1].t) + int((t < 30.0).sum())]
+    assert np.hypot(bo[-1].x - true[0], bo[-1].y - true[1]) < 1.5
+    pts = np.array([[s.x, s.y] for s in live])
+    assert np.linalg.norm(np.diff(pts, axis=0), axis=1).max() < 3 * 12.0 / 200
+
+
 class _LinearPredictor:
     """Deterministic stand-in for the network: corrections depend on the input
     and on position in the window, like the real one."""
