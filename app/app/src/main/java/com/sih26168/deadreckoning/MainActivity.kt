@@ -260,6 +260,7 @@ class MainActivity : AppCompatActivity() {
             top = findViewById(R.id.topAppBar),
             bottom = findViewById(R.id.bottomNav),
         )
+        AdaptiveWindow.capContentWidth(this, findViewById(R.id.liveMapContent))
 
         headerIcon = findViewById(R.id.headerIcon)
         titleText = findViewById(R.id.titleText)
