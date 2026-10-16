@@ -115,6 +115,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var modeIconText: TextView
     private lateinit var modeText: TextView
     private lateinit var modeBodyText: TextView
+    private lateinit var roughCalibrationText: View
     private lateinit var simulatedBadge: View
     private lateinit var legendRow: View
     private lateinit var speedValueText: TextView
@@ -295,6 +296,7 @@ class MainActivity : AppCompatActivity() {
         modeIconText = findViewById(R.id.modeIconText)
         modeText = findViewById(R.id.modeText)
         modeBodyText = findViewById(R.id.modeBodyText)
+        roughCalibrationText = findViewById(R.id.roughCalibrationText)
         simulatedBadge = findViewById(R.id.simulatedBadge)
         legendRow = findViewById(R.id.legendRow)
         speedValueText = findViewById(R.id.speedValueText)
@@ -744,6 +746,8 @@ class MainActivity : AppCompatActivity() {
             calibrationSlowNotice?.dismiss()
             calibrationSlowNotice = null
         }
+        roughCalibrationText.visibility =
+            if (calibration.isRoughCalibration) View.VISIBLE else View.GONE
 
         // Yaw timed out to a best-effort estimate: keep offering it real
         // moving samples so it can still lock in properly mid-trip.

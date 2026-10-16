@@ -25,6 +25,7 @@
     <string name="calib_yaw_replay">yaw alignment: collecting confident samples from the replay…</string>
     <string name="calib_yaw_live">yaw alignment: collecting confident samples — drive in a straight line with GPS</string>
     <string name="calib_rough">rough calibration</string>
+    <string name="calib_rough_notice">Rough calibration: heading may drift until it locks in on a straight stretch with GPS.</string>
     <string name="dev_mode_label">DEVELOPER MODE</string>
     <string name="dev_record_toggle">Record training data</string>
     <string name="dev_share_button">Share last recording</string>

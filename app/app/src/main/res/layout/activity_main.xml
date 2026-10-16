@@ -489,6 +489,20 @@
                         android:layout_marginBottom="8dp"
                         style="@style/Text.BodyMd" />
 
+                    <!-- Shown only while CalibrationManager.isRoughCalibration
+                         is true (a stage fell back to a best-effort estimate
+                         or was skipped). Lives in the details, not the
+                         summary row, which has no width to spare. -->
+                    <TextView
+                        android:id="@+id/roughCalibrationText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:text="@string/calib_rough_notice"
+                        android:textColor="@color/warning"
+                        android:visibility="gone"
+                        style="@style/Text.LabelSm" />
+
                     <!-- wrap_content + centered, not stretched edge-to-edge:
                          an earlier equal-width-column version (each
                          LegendItem 0dp+weight) squeezed "Map-matched" (the
