@@ -51,10 +51,11 @@ car cannot drive through a building or slide sideways off a road; using
 that constraint to clean up a drifted position estimate cut error by 62%
 in our tests.
 
-On a 30-second continuous GPS blackout using real recorded highway
-driving, the system held drift to 2.9%, under the problem statement's 10%
-target. On the harder case of slow, stop-and-go urban driving, the current
-model is weaker, closer to 60% drift, and we are not hiding that number.
+On real highway driving the model has never seen, median drift is 3.4% over
+5 seconds, under the problem statement's 10% target, and 13% over a
+30-second continuous blackout. On the harder case of slow, stop-and-go
+driving, the current model is weaker, about 39% median drift over a
+30-second blackout on an unseen drive, and we are not hiding that number.
 The gap comes from how little the training data represents low-speed
 urban stop-and-go compared to steady highway cruising, and it is the
 clearest next place to put more real-world recordings.
@@ -88,11 +89,11 @@ recordings from Jalandhar, Punjab) to correct that drift in real time. The
 system combines phone-to-vehicle calibration, a GNSS/INS fusion state
 machine with smooth transitions between GPS tracking, blackout, and
 reconnect, and map-matching against OpenStreetMap road data to keep the
-estimated position physically plausible. On a 30-second continuous
-blackout using real highway driving data, measured drift was 2.9%, under
-the problem statement's 10% target; on slow urban stop-and-go driving,
-drift is currently closer to 60%, a limitation we are addressing with more
-real-world low-speed recordings. The full pipeline runs on-device on
+estimated position physically plausible. On unseen real highway driving,
+median drift is 3.4% over 5 seconds, under the problem statement's 10%
+target, and 13% over a 30-second blackout; on slow stop-and-go driving it
+is about 39% over a 30-second blackout, a limitation we are addressing with
+more real-world low-speed recordings. The full pipeline runs on-device on
 Android through ONNX Runtime Mobile, with no server dependency for core
 navigation.
 

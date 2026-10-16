@@ -13,21 +13,65 @@ fixed along the way.
 
 ## Results
 
-Dead-reckoning drift %, scored on held-out 5-second windows from the retrained
-model (`checkpoints/best_cleanlabels.pt`, trained on IO-VNBD only, seed 42, no
-regime split, no extra data):
+Best model: **`checkpoints/best_v3chain.pt`** (6-channel CNN+GRU, trained on
+IO-VNBD with the corrected labels and repaired gyro yaw axis plus comma2k19,
+then fine-tuned on chained 5-second chunks). Drift is final position error as a
+percentage of true distance travelled; the PS target is under 10%. "5 s" is one
+isolated window started from the true speed and heading. "30 s" and "60 s" are
+continuous blackouts built from back-to-back 5 s chunks, each started from the
+model's own previous end state, which is what the app does.
 
-| Dataset | Scenario | Mean drift | Median drift | Pass rate (<10%) |
+| Test data | Blackout | Median drift | Mean drift | Under 10% |
 |---|---|---|---|---|
-| [IO-VNBD](https://github.com/onyekpeu/IO-VNBD) (corrected labels) | Mixed real driving, median window about 11 m/s, 23% of windows under 6 m/s | **19.44%** | **11.20%** | **46.2%** |
-| [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) (never trained on) | Highway cruise | **10.47%** | **5.83%** | **71.1%** |
+| comma2k19 highway (never-seen segments) | 5 s | **3.4%** | 8.8% | 78.3% |
+| comma2k19 highway | 30 s | **13.1%** | 26.9% | 38.7% |
+| IO-VNBD, drive not in training | 5 s | **22.0%** | 36.2% | 25.0% |
+| IO-VNBD, drive not in training | 30 s | **38.8%** | 42.5% | 7.7% |
+| IO-VNBD, drive not in training | 60 s | **52.0%** | 51.1% | 3.4% |
 
-Source: [results/eval_report_breakdown_cleanlabels.json](results/eval_report_breakdown_cleanlabels.json).
-For comparison, the previous checkpoint (`checkpoints/best.pt`) scored 62.33%
-mean / 67.56% median / 3.71% pass on IO-VNBD, and 16.49% / 8.94% / 54.53% on
-comma2k19 (which it had been trained on).
+Same tests, other checkpoints (median drift):
 
-**What changed.** Nothing about the model. The IO-VNBD ground truth was
+| Checkpoint | Highway 5 s | Highway 30 s | IO-VNBD unseen 5 s | IO-VNBD unseen 30 s |
+|---|---|---|---|---|
+| **`best_v3chain.pt`** | **3.4%** | **13.1%** | **22.0%** | **38.8%** |
+| `best_cleanlabels.pt` | 5.8% | 86.1% | 21.4% | 91.1% |
+| `best.pt` (in the app today) | 8.9% | 20.8% | 52.5% | 139.4% |
+
+Sources: [results/final_report_v3.json](results/final_report_v3.json) (comma2k19
+rows, reproduced exactly on 2026-10-16) and
+[results/final_report_unseen.json](results/final_report_unseen.json) (IO-VNBD
+rows, from [src/report_unseen.py](src/report_unseen.py)).
+
+**Read these with the following limits in mind:**
+
+- **IO-VNBD ships every drive more than once** (for example `Vw08/S-Vw8.csv` in
+  the Categorised folder and `S-Dataset/S-Vw8.csv` in the Uncategorised folder
+  hold the same samples). The loader splits by file path, so 17 of the 23 test
+  files are copies of training drives. Every IO-VNBD test figure in this repo
+  before 2026-10-16, including `final_report_v3.json`'s 27.2% for a 30 s
+  blackout, was partly scored on training data. The IO-VNBD rows above use only
+  the test drive with no copy in train or val.
+- That leaves **one** unseen IO-VNBD drive (Vta30, 3,156 windows), because the
+  other unseen test files are too short for the yaw-axis repair and are
+  skipped. Treat the IO-VNBD rows as one-drive evidence. Fixing this properly
+  means splitting by recording name and retraining.
+- Slow driving is still the weak spot: on the unseen drive, 5 s windows below
+  6 m/s have 57.6% median drift, against 11.0% at 6 m/s and above.
+- The yaw-axis repair (`recover_yaw_axis` in
+  [src/data/io_vnbd_loader.py](src/data/io_vnbd_loader.py)) fits each IO-VNBD
+  file against its own GPS heading, including test files. The app's phone gyro
+  does not need it, but it makes IO-VNBD easier than raw phone data.
+- The app still bundles the ONNX export of `checkpoints/best.pt`. The newest
+  checkpoint exports to the same `[1, 50, 6] -> [1, 50, 2]` interface and matches
+  PyTorch to 4e-6, but it has not been swapped in or tested on a phone yet.
+- The 2.9% "30 s highway blackout" demo figure in Status was measured on one
+  comma2k19 drive with the old `best.pt`, through `src/simulate_blackout.py`.
+- Earlier entries in [Status](#status) quote numbers from older checkpoints and
+  older labels. They are kept as a record of what was tried.
+
+### How the labels were fixed
+
+The first big jump came from fixing the data, not the model. The IO-VNBD ground truth was
 wrong, in two ways that were verified on the raw files:
 
 1. The speed column headed `GPS SPEED (Kmh)` is metres per second in 93% of the
@@ -47,20 +91,6 @@ the training set grows from 71,842 to 125,967 windows. The long diagnosis of
 "underfitting on urban, low-speed driving" below, and the five fixes tried
 against it, were measuring a broken label. Those entries are kept as a record
 and are marked as superseded.
-
-**Read this with the following limits in mind:**
-
-- The test windows changed (33,552 now, 18,460 before), so the before and after
-  rows are not scored on identical windows.
-- The track is rebuilt by interpolating between GPS arrivals, which lags true
-  motion by the phone's GPS latency, a fraction of a second.
-- These are isolated 5-second windows. The continuous 30 to 45 second blackout
-  numbers further down were measured with the old model and have not been
-  re-measured.
-- `checkpoints/best.pt` and the ONNX model bundled in the Android app are still
-  the old ones. The new checkpoint has not been exported or shipped yet.
-- Median 11.2% is close to the 10% target, but 46% of windows pass, so more
-  than half still do not.
 
 Smaller results from the same investigation, all measured on the old labels
 unless stated:
