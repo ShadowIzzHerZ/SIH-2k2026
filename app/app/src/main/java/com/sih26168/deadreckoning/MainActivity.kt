@@ -61,10 +61,13 @@ class MainActivity : AppCompatActivity() {
     // (see ReplayDataSource's own doc comment: the same clip that measured
     // 2.9% drift over a real 30s continuous blackout). Kept in its own
     // clearly-labeled slot rather than dropped, since it's real recorded
-    // data too, just not ours. Loaded upfront so switching sources
-    // mid-session (tick()) is instant, no asset I/O on the hot path. Asset
-    // filenames and demoNRadio ids below are paired 1:1 by list position.
-    private lateinit var replaySources: List<ReplayDataSource>
+    // data too, just not ours. Parsed on a background thread right after
+    // startup (about 12 MB of JSON, which used to block onCreate long
+    // enough to trigger an ANR), so switching sources mid-session (tick())
+    // is still instant. If replay is picked before its file is parsed, the
+    // lazy just finishes that one parse on the spot. Asset filenames and
+    // demoNRadio ids below are paired 1:1 by list position.
+    private lateinit var replaySources: List<Lazy<ReplayDataSource>>
     private val demoRadioIds = intArrayOf(
         R.id.demo1Radio, R.id.demo2Radio, R.id.demo3Radio,
         R.id.demo4Radio, R.id.demo5Radio, R.id.demo6Radio, R.id.demo7Radio,
@@ -112,6 +115,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var modeIconText: TextView
     private lateinit var modeText: TextView
     private lateinit var modeBodyText: TextView
+    private lateinit var roughCalibrationText: View
     private lateinit var simulatedBadge: View
     private lateinit var legendRow: View
     private lateinit var speedValueText: TextView
@@ -189,6 +193,7 @@ class MainActivity : AppCompatActivity() {
     private var calibrationUiSwitched = false
     private var calibrationStartUptimeMs: Long? = null
     private var calibrationSlowNoticeShown = false
+    private var calibrationSlowNotice: Snackbar? = null
 
     private enum class Tab { LIVE_MAP, SENSORS, SIMULATION }
 
@@ -261,6 +266,10 @@ class MainActivity : AppCompatActivity() {
             bottom = findViewById(R.id.bottomNav),
         )
         AdaptiveWindow.capContentWidth(this, findViewById(R.id.liveMapContent))
+        // Same cap for the Sensors and Simulation tabs, which otherwise
+        // stretched their cards edge to edge on tablets and unfolded phones.
+        AdaptiveWindow.capContentWidth(this, findViewById<android.view.ViewGroup>(R.id.sensorsPanel).getChildAt(0))
+        AdaptiveWindow.capContentWidth(this, findViewById<android.view.ViewGroup>(R.id.simulationPanel).getChildAt(0))
 
         headerIcon = findViewById(R.id.headerIcon)
         titleText = findViewById(R.id.titleText)
@@ -291,6 +300,7 @@ class MainActivity : AppCompatActivity() {
         modeIconText = findViewById(R.id.modeIconText)
         modeText = findViewById(R.id.modeText)
         modeBodyText = findViewById(R.id.modeBodyText)
+        roughCalibrationText = findViewById(R.id.roughCalibrationText)
         simulatedBadge = findViewById(R.id.simulatedBadge)
         legendRow = findViewById(R.id.legendRow)
         speedValueText = findViewById(R.id.speedValueText)
@@ -341,14 +351,15 @@ class MainActivity : AppCompatActivity() {
         sensorReader = SensorReader(this)
         locationReader = LocationReader(this)
         replaySources = listOf(
-            ReplayDataSource(this, "replay_demo1.json"),
-            ReplayDataSource(this, "replay_demo2.json"),
-            ReplayDataSource(this, "replay_demo_1305.json"),
-            ReplayDataSource(this, "replay_demo_1332.json"),
-            ReplayDataSource(this, "replay_demo_2117.json"),
-            ReplayDataSource(this, "replay_demo_2142.json"),
-            ReplayDataSource(this, "replay_drive.json"),
-        )
+            "replay_demo1.json",
+            "replay_demo2.json",
+            "replay_demo_1305.json",
+            "replay_demo_1332.json",
+            "replay_demo_2117.json",
+            "replay_demo_2142.json",
+            "replay_drive.json",
+        ).map { name -> lazy { ReplayDataSource(applicationContext, name) } }
+        Thread({ replaySources.forEach { it.value } }, "replay-prefetch").start()
         model = BiasCorrectionModel(this)
         // Fetches a newer model if one is published; it takes effect on the
         // next app start. See ModelUpdater.
@@ -402,6 +413,10 @@ class MainActivity : AppCompatActivity() {
         sensorsPanel.visibility = if (tab == Tab.SENSORS) View.VISIBLE else View.GONE
         simulationPanel.visibility = if (tab == Tab.SIMULATION) View.VISIBLE else View.GONE
         recenterButton.visibility = if (tab == Tab.LIVE_MAP) View.VISIBLE else View.GONE
+        // A calibration notice shown on another tab is anchored to the nav
+        // bar, which put it right over the locator button once you came
+        // back to the map. Re-anchor it to whatever is showing now.
+        calibrationSlowNotice?.anchorView = slowNoticeAnchor()
 
         val activeColor = ContextCompat.getColor(this, R.color.on_primary_container)
         val inactiveColor = ContextCompat.getColor(this, R.color.on_surface_muted)
@@ -579,7 +594,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun readSample(usingReplay: Boolean, demo: Int): Sample {
         if (usingReplay) {
-            val replayData = replaySources[demo - 1]
+            val replayData = replaySources[demo - 1].value
             val row = replayData.rows[replayIndex]
             replayIndex = (replayIndex + 1) % replayData.rows.size
             return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad, true)
@@ -630,6 +645,8 @@ class MainActivity : AppCompatActivity() {
             calibrationUiSwitched = false
             calibrationStartUptimeMs = null
             calibrationSlowNoticeShown = false
+            calibrationSlowNotice?.dismiss()
+            calibrationSlowNotice = null
         }
 
         val sample = readSample(usingReplay, demo)
@@ -706,6 +723,7 @@ class MainActivity : AppCompatActivity() {
             if (sample.hasFix && sample.hasBearing) {
                 calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
             }
+            calibration.tickYawWait()
             showCalibrating(
                 getString(
                     if (usingReplay) R.string.calib_yaw_replay else R.string.calib_yaw_live
@@ -727,6 +745,18 @@ class MainActivity : AppCompatActivity() {
             trackingContent.visibility = View.VISIBLE
             trackingCard.alpha = 0f
             trackingCard.animate().alpha(1f).setDuration(300L).start()
+            // The "taking longer than usual" notice is moot once calibration
+            // is done; it used to stay up over the map until dismissed.
+            calibrationSlowNotice?.dismiss()
+            calibrationSlowNotice = null
+        }
+        roughCalibrationText.visibility =
+            if (calibration.isRoughCalibration) View.VISIBLE else View.GONE
+
+        // Yaw timed out to a best-effort estimate: keep offering it real
+        // moving samples so it can still lock in properly mid-trip.
+        if (!calibration.yawLocked && sample.hasFix && sample.hasBearing) {
+            calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
         }
 
         val calAccel = calibration.calibrate(sample.rawAccel)
@@ -785,10 +815,7 @@ class MainActivity : AppCompatActivity() {
             findViewById(android.R.id.content),
             "Calibration is taking longer than usual. $reason",
             Snackbar.LENGTH_INDEFINITE,
-        ).setAnchorView(
-            // Above the locator button when it's showing, so the notice never covers it.
-            if (recenterButton.visibility == View.VISIBLE) recenterButton else findViewById<View>(R.id.bottomNav)
-        ).setAction("Dismiss") {}
+        ).setAnchorView(slowNoticeAnchor()).setAction("Dismiss") {}
         // Material's Snackbar text view caps itself at 2 lines by default
         // (com.google.android.material.R.integer.mtrl_snackbar_action_text_color_alpha
         // isn't it — it's a hardcoded maxLines=2 on the text view itself) —
@@ -799,7 +826,13 @@ class MainActivity : AppCompatActivity() {
         snackbar.view.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)
             ?.maxLines = 5
         snackbar.show()
+        calibrationSlowNotice = snackbar
     }
+
+    /** Above the locator button when it's showing, so the notice never
+     * covers it; otherwise above the bottom nav. */
+    private fun slowNoticeAnchor(): View =
+        if (recenterButton.visibility == View.VISIBLE) recenterButton else findViewById(R.id.bottomNav)
 
     /** Flips calibrationDetails (ring/instructions/skip-button) between
      * shown and hidden — the calibration-time counterpart of

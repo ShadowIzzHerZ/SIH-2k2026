@@ -200,4 +200,52 @@ class CalibrationManagerTest {
         }
         assertFalse("stationary samples must not count toward yaw alignment", cal.isReady)
     }
+
+    @Test
+    fun `yaw stage finishes on its own when the phone never moves`() {
+        // Parked car, a desk, or an emulator whose GPS reports speed 0:
+        // no sample ever passes the speed gate, so only the wall-clock
+        // cap can end the stage. This used to sit at 50% forever.
+        val cal = leveledManager()
+        repeat(299) {
+            cal.addYawSample(floatArrayOf(0.01f, 0.01f, g), gpsSpeed = 0f, gpsHeadingRad = 0f)
+            cal.tickYawWait()
+        }
+        assertFalse(cal.isReady)
+        assertTrue("progress should keep moving while it waits", cal.progressPercent > 90)
+
+        cal.tickYawWait()
+        assertTrue("yaw must finish once its time cap is up", cal.isReady)
+        assertEquals(100, cal.progressPercent)
+        assertTrue("a timed-out yaw must be flagged rough", cal.isRoughCalibration)
+        assertFalse("...and still open to a real lock-in later", cal.yawLocked)
+    }
+
+    @Test
+    fun `a timed-out yaw still locks in once real motion arrives`() {
+        val cal = leveledManager()
+        repeat(300) { cal.tickYawWait() }
+        require(cal.isReady && !cal.yawLocked)
+
+        feedYaw(cal, n = 60, headingRad = 1.0f, trueYawOffset = 0.6f)
+
+        assertTrue(cal.yawLocked)
+        assertTrue(cal.yawConverged)
+        assertFalse(cal.isRoughCalibration)
+        assertEquals(0.6f, cal.psiYaw, 0.15f)
+    }
+
+    @Test
+    fun `walking pace counts toward yaw alignment`() {
+        // The bundled demo recordings are on foot, ~1-1.4 m/s.
+        val cal = leveledManager()
+        repeat(60) {
+            val phoneAng = 1.0f - 0.6f
+            val ax = 2f * cos(phoneAng.toDouble()).toFloat()
+            val ay = 2f * sin(phoneAng.toDouble()).toFloat()
+            cal.addYawSample(floatArrayOf(ax, ay, g), gpsSpeed = 1.3f, gpsHeadingRad = 1.0f)
+        }
+        assertTrue(cal.isReady)
+        assertTrue(cal.yawLocked)
+    }
 }
