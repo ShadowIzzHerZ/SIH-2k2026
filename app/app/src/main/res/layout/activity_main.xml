@@ -839,13 +839,13 @@
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/location_needed_settings_title"
+                            android:text="@string/replay_fallback_title"
                             style="@style/Text.LabelMd" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/replay_real_drive"
+                            android:text="@string/replay_fallback_body"
                             style="@style/Text.BodyMd" />
                     </LinearLayout>
                 </LinearLayout>
