@@ -253,6 +253,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         setContentView(R.layout.activity_main)
+        AdaptiveWindow.lightBars(this, findViewById(R.id.topAppBar))
+        AdaptiveWindow.applyInsets(
+            this,
+            root = findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0),
+            top = findViewById(R.id.topAppBar),
+            bottom = findViewById(R.id.bottomNav),
+        )
 
         headerIcon = findViewById(R.id.headerIcon)
         titleText = findViewById(R.id.titleText)

@@ -57,6 +57,10 @@ class AuthActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_auth)
+        val formRoot = findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0) as android.view.ViewGroup
+        AdaptiveWindow.lightBars(this, formRoot)
+        AdaptiveWindow.applyInsets(this, formRoot)
+        AdaptiveWindow.capContentWidth(this, formRoot.getChildAt(0))
 
         emailField = findViewById(R.id.emailField)
         passwordField = findViewById(R.id.passwordField)
