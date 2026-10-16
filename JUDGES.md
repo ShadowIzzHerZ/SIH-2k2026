@@ -88,22 +88,27 @@ predicted trajectory ──► loss = per-step speed error + end-to-end drift %
 | [src/evaluate_with_mapmatching.py](src/evaluate_with_mapmatching.py) | Measures map-matching's real improvement on the trained model's own predictions |
 | [src/export_onnx.py](src/export_onnx.py) | Exports the trained network to ONNX for the Android app — fixed input shape on purpose (see its docstring) |
 
-**Real, measured results** (checkpoint `checkpoints/best.pt`, full evidence
-trail in [results/README.md](results/README.md)):
+**Real, measured results** (best checkpoint `checkpoints/best_v3chain.pt`,
+median drift as a % of distance travelled; full table and caveats in the
+[README's Results section](README.md#results)):
 
-| Dataset | Scenario | Mean drift | Median drift | Pass rate (<10%) |
-|---|---|---|---|---|
-| comma2k19 | Highway cruise, steady speed | **16.49%** | **8.94%** | 54.53% |
-| IO-VNBD | Urban stop-and-go, low speed | 62.33% | 67.56% | 3.71% |
+| Test data | 5 s window | 30 s blackout | 60 s blackout |
+|---|---|---|---|
+| comma2k19 highway (never-seen segments) | **3.4%** | **13.1%** | n/a (segments too short) |
+| IO-VNBD, drive not in training | 22.0% | 38.8% | 52.0% |
 
-Meets/nearly meets the PS's target on highway-style driving; honestly
-weaker on harder low-speed urban driving — diagnosed, not hidden (four
-different fixes tried, all landed in the same ~60-65% band — see
-`src/diagnose_drift.py` and §6 of `docs/understanding.md`).
+Meets the PS's <10% target on short highway stretches, and is still well
+above it on slow stop-and-go driving (57.6% median on unseen IO-VNBD windows
+below 6 m/s). The model the app ships today (`checkpoints/best.pt`) is much
+worse on the same tests: 8.9% / 20.8% on highway and 52.5% / 139.4% on the
+unseen IO-VNBD drive. IO-VNBD ships each drive in two folders, so earlier
+IO-VNBD test numbers in this repo were partly scored on training drives; the
+IO-VNBD row above uses the one test drive with no copy in training (see
+[src/report_unseen.py](src/report_unseen.py)).
 
 Map-matching cut error **62%** on a real road segment with injected
 drift (20.1m → 7.6m mean error). The fusion layer measured **2.9% drift**
-over a real 30-second continuous highway blackout, with a **0.0m**
+over a real 30-second continuous highway blackout (one comma2k19 drive, old `best.pt`), with a **0.0m**
 reconnect jump (no visible teleport when GPS returns).
 
 **Try it:**
