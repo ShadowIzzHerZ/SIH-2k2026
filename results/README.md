@@ -6,7 +6,18 @@ main [README.md](../README.md)'s Status section is the full narrative
 directory itself doesn't read as an undifferentiated pile of JSON when
 you're browsing it directly.
 
-## Current production checkpoint (`checkpoints/best.pt`)
+## Current numbers (checked 2026-10-16)
+
+| File | What it is | Headline number |
+|---|---|---|
+| [final_report_v3.json](final_report_v3.json) | `src/report_final.py` on the full test split: window and chained 10/30/60 s drift, split by speed, for `best_v3chain.pt` and four other checkpoints. Reproduced exactly on 2026-10-16. Use its comma2k19 rows; its IO-VNBD rows include test files that are copies of training drives. | comma2k19, `best_v3chain.pt`: **3.4%** median (5 s), **13.1%** (30 s) |
+| [final_report_unseen.json](final_report_unseen.json) | `src/report_unseen.py`: the same scoring on only the IO-VNBD test drive with no copy in train/val (Vta30). | IO-VNBD unseen, `best_v3chain.pt`: 22.0% median (5 s), 38.8% (30 s), 52.0% (60 s) |
+
+The sections below describe older checkpoints. Their IO-VNBD numbers were
+measured on the overlapping split and, before the label fixes, on broken
+labels; keep them as a record only.
+
+## App checkpoint (`checkpoints/best.pt`)
 
 The 6-raw-channel network, trained on IO-VNBD + comma2k19 combined (the
 one the app ships). "Current" files have no run suffix; the `_run1`

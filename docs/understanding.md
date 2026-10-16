@@ -216,31 +216,42 @@ Challenge** (`src/data/decimeter_loader.py` — a third independent
 real-phone dataset, real GNSS+IMU with survey-grade ground truth, US
 highway/suburban driving).
 
-**Actual measured numbers, on real held-out data, checkpoint
-`checkpoints/best.pt`:**
+**Current measured numbers, best checkpoint `checkpoints/best_v3chain.pt`**
+(median drift as a % of distance travelled; full table and caveats in the
+[README's Results section](../README.md#results)):
 
-| Dataset | Scenario | Mean drift | Median drift | Pass rate (<10%) |
-|---|---|---|---|---|
-| comma2k19 | Highway cruise, steady speed | **16.49%** | **8.94%** | 54.53% |
-| IO-VNBD | Urban stop-and-go, low speed | 62.33% | 67.56% | 3.71% |
+| Test data | 5 s window | 30 s blackout | 60 s blackout |
+|---|---|---|---|
+| comma2k19 highway (never-seen segments) | **3.4%** | **13.1%** | n/a (segments too short) |
+| IO-VNBD, drive not in training | 22.0% | 38.8% | 52.0% |
 
-**The honest story you should actually tell a judge (this is a
-strength, not a weakness — own it):** the model **meets or nearly meets
-the PS's <10% target on highway-style driving** — the case where a
-phone's IMU actually has an unambiguous signal to work with (steady
-speed, few turns). It's **openly weaker on low-speed, frequent-turn
-urban driving** — the harder case. We didn't just accept that number; we
-diagnosed it properly (`src/diagnose_drift.py`) and tried five different
-real fixes: a bigger architecture, mixing in comma2k19 as extra training
-data, fixing a real learning-rate-schedule bug we found along the way,
-properly-normalized extra engineered features, and — most recently —
-mixing in the Google Smartphone Decimeter Challenge dataset (2023
-edition). **The first four landed in roughly the same 60-65% band; the
-fifth landed worse still.** The diagnostic shows this is **broad,
-spread-out underfitting on a genuinely harder scenario**, not one
-fixable bug or a few bad outlier windows (removing the worst 5% of
-windows barely moves the mean; no single factor — distance, yaw rate,
-speed — correlates strongly with per-window error).
+The model the app ships today (`checkpoints/best.pt`) scores 8.9% / 20.8%
+on highway and 52.5% / 139.4% on the unseen IO-VNBD drive, so the newest
+checkpoint is far better on every row.
+
+**Two things a judge may find, so say them first.** IO-VNBD ships every
+drive in two folders and the loader splits by file, so 17 of the 23 IO-VNBD
+test files were copies of training drives. Every IO-VNBD test number in this
+repo before 2026-10-16 was partly scored on training data. The IO-VNBD row
+above uses the one test drive with no copy in training
+(`src/report_unseen.py`), so it is one-drive evidence. Second, slow driving
+is still the weak spot: 57.6% median on unseen IO-VNBD windows below 6 m/s,
+against 11.0% at 6 m/s and above.
+
+**What moved the numbers.** The biggest gains came from fixing the data,
+not the network: IO-VNBD's speed column was in m/s despite its "Kmh" header,
+its GPS positions were stale repeats between fixes, and its gyro "yaw"
+column was not the vehicle's yaw axis (all three are fixed in
+`src/data/io_vnbd_loader.py`). After that, fine-tuning on chained 5-second
+chunks taught the model to recover from its own end-of-chunk errors, which
+is what cut 30-second blackout drift on highway from 86% (`best_cleanlabels.pt`)
+to 13%.
+
+**History (older checkpoints, older labels, kept as a record).** Before the
+label fixes, the shipped `best.pt` measured 16.49% mean / 8.94% median on
+comma2k19 and 62.33% / 67.56% on IO-VNBD. Five fixes tried against the
+IO-VNBD number all landed in the 60-75% band; that diagnosis of "broad
+underfitting on urban driving" was measuring broken labels.
 
 **The fifth attempt (decimeter), in more detail — because the result is
 worth understanding, not just citing:** decimeter is a third independent
@@ -269,17 +280,13 @@ low-speed/turning regime — a real trade-off in a small shared model, not
 a bug. `checkpoints/best.pt` (the shipped checkpoint) is unchanged;
 this run is kept as `checkpoints/best_decimeter.pt`, reference only.
 
-**Say it like this:** *"On highway-style driving, we're right at the PS's
-target — 8.94% median drift, and we found an even easier real-world
-dataset (Google's own Smartphone Decimeter Challenge) where we hit 2.77%
-median — genuinely excellent. On slow, stop-and-go urban driving, we're
-honestly weaker, around 60-75% depending on exactly what else we trained
-alongside it. We didn't hide that — we spent real time diagnosing why,
-tried five different fixes including throwing more and better data at it,
-and every one of them tells the same story: this is genuine underfitting
-on a harder scenario, not a bug we're too lazy to fix or a data problem
-we just hadn't solved yet. We'd rather show you a real, defensible number
-than an inflated one."*
+**Say it like this:** *"On highway driving we beat the PS's target: 3.4%
+median drift over 5 seconds and 13% over a 30-second blackout, on data the
+model never trained on. On slow city driving we're still well above it, about
+39% median over 30 seconds on an unseen drive. Most of our gains came from
+finding and fixing real errors in the official dataset's labels, and we also
+found that its test split overlaps its training drives, so we re-scored on an
+unseen drive rather than quote the flattering number."*
 
 *(If pushed on "why not just fix it": low-speed urban IMU signal is
 fundamentally noisier and more ambiguous — accelerometer/gyro signal-to-
@@ -316,7 +323,7 @@ state machine with three modes:
   jump: 0.0m** — no teleport.
 
 **Real results with this fusion layer, on real held-out data:**
-comma2k19 highway, 30-second continuous blackout: **2.9% drift** — under
+comma2k19 highway, 30-second continuous blackout (one drive, old `best.pt`): **2.9% drift** — under
 the PS's 10% target. Honest caveat: chaining many 5-second blackout
 chunks back-to-back on IO-VNBD's harder scenario compounds error further
 than a single window shows (measured 77-236% across real 45-second
@@ -516,11 +523,14 @@ actually catch the bug if it came back."*
 Being upfront about these makes you look *more* credible, not less —
 judges have seen a hundred pitches that hide the rough edges.
 
-- **Low-speed urban driving drift is genuinely higher** (~60% vs
-  the highway case's ~9% median) — a real, diagnosed limitation of the
-  trained network on a harder scenario, not something app-layer
-  engineering can fix. Lead with the highway result; if pushed on this,
-  explain the diagnosis (§6).
+- **Slow city driving drift is still much higher** (about 39% median over a
+  30-second blackout on an unseen IO-VNBD drive, against 13% on highway).
+  Lead with the highway result; if pushed, explain §6.
+- **The IO-VNBD test split overlaps its training drives** (the dataset ships
+  each drive twice). Only one unseen IO-VNBD drive is left to score on, so a
+  proper re-split and retrain is still to do.
+- **The app still bundles the older `best.pt` model**; the newer
+  `best_v3chain.pt` is exported and checked but not yet swapped in.
 - **The on-device map-matcher is a simplified greedy matcher**, not the
   full HMM used offline — a deliberate, explained scope decision (online
   matching can't see the future the way offline evaluation can).
@@ -548,8 +558,8 @@ own motion sensors to keep tracking position through that blackout,
 corrected by a small neural network trained to fix the sensor's own
 noise and bias — not a black box, a physics engine with a learned
 correction layer, trained end-to-end against the actual drift
-percentage. On highway-style driving we're right at the target — under
-9% median drift. On harder low-speed urban driving we're honestly
+percentage. On highway driving we beat the target — 3.4% median drift,
+13% over a 30-second blackout. On slow city driving we're honestly
 weaker, and we can show you exactly why we diagnosed that rather than
 hide it. On top of that we built the two other pieces ISRO explicitly
 asked for: a fusion layer that instantly and seamlessly switches between
@@ -575,7 +585,7 @@ learning, it needs a reliable rule.
 **"How do you know the model isn't just memorizing the training data?"**
 comma2k19 — a second, completely independent, real-world dataset
 (different device, different country) the model was never trained
-against — gave *better* results (29% zero-shot) than the training
+against — gave *better* results (29% zero-shot, with the first model) than the training
 dataset's own test split, and tracks scenario difficulty sensibly
 (steady highway is easier than stop-and-go urban, exactly as expected).
 That's a real generalization signal, not overfitting.
