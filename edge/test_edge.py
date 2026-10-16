@@ -124,6 +124,25 @@ def test_imu_gap_with_gnss():
     assert all(s.mode == "gnss" for s in ticks), sorted({s.mode for s in ticks})
 
 
+def test_jittered_timestamps():
+    """3 ms of timestamp jitter on a 200 Hz stream (timestamps step backwards
+    hundreds of times) must not make the high-rate track drift away from
+    the 10 Hz one."""
+    t, xy, th, accel, gyro = _drive()
+    t_rep = t + 0.003 * np.random.default_rng(0).standard_normal(len(t))
+    assert (np.diff(t_rep) < 0).sum() > 100
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp", gnss_timeout_s=0.15)
+    live = []
+    for i in range(len(t)):
+        if i % 20 == 0 and not 20.0 <= t[i] < 40.0:
+            eng.push_gnss(Fix(t[i], *xy[i], 12.0, th[i]))
+        live.append(eng.push_imu(t_rep[i], accel[i], gyro[i]))
+    eng.finish()
+    last = [s for s in live if s.mode == BLACKOUT][-1]
+    true = xy[np.searchsorted(t, last.t)]
+    assert np.hypot(last.x - true[0], last.y - true[1]) < 1.5
+
+
 class _LinearPredictor:
     """Deterministic stand-in for the network: corrections depend on the input
     and on position in the window, like the real one."""
