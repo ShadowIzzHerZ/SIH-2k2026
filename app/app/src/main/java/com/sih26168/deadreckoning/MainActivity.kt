@@ -266,6 +266,10 @@ class MainActivity : AppCompatActivity() {
             bottom = findViewById(R.id.bottomNav),
         )
         AdaptiveWindow.capContentWidth(this, findViewById(R.id.liveMapContent))
+        // Same cap for the Sensors and Simulation tabs, which otherwise
+        // stretched their cards edge to edge on tablets and unfolded phones.
+        AdaptiveWindow.capContentWidth(this, findViewById<android.view.ViewGroup>(R.id.sensorsPanel).getChildAt(0))
+        AdaptiveWindow.capContentWidth(this, findViewById<android.view.ViewGroup>(R.id.simulationPanel).getChildAt(0))
 
         headerIcon = findViewById(R.id.headerIcon)
         titleText = findViewById(R.id.titleText)
