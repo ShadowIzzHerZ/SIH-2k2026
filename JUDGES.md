@@ -99,9 +99,11 @@ median drift as a % of distance travelled; full table and caveats in the
 
 Meets the PS's <10% target on short highway stretches, and is still well
 above it on slow stop-and-go driving (57.6% median on unseen IO-VNBD windows
-below 6 m/s). The model the app ships today (`checkpoints/best.pt`) is much
-worse on the same tests: 8.9% / 20.8% on highway and 52.5% / 139.4% on the
-unseen IO-VNBD drive. IO-VNBD ships each drive in two folders, so earlier
+below 6 m/s). This is the model the app ships, as the ONNX export
+`checkpoints/dead_reckoning_model.onnx`. The app's previous model
+(`checkpoints/best.pt`, shipped until 2026-10-16) is much worse on the same
+tests: 8.9% / 20.8% on highway and 52.5% / 139.4% on the unseen IO-VNBD
+drive. IO-VNBD ships each drive in two folders, so earlier
 IO-VNBD test numbers in this repo were partly scored on training drives; the
 IO-VNBD row above uses the one test drive with no copy in training (see
 [src/report_unseen.py](src/report_unseen.py)).
@@ -126,8 +128,8 @@ inference**, not a notebook. This is it: every piece above (calibration,
 physics integrator, the trained network, fusion mode-switching,
 map-matching) ported to native Kotlin and running for real on a phone —
 ONNX Runtime Mobile for inference, no network call anywhere in the
-dead-reckoning pipeline itself (only the map's background tiles need
-internet).
+dead-reckoning pipeline itself (only the map's background tiles and the
+model update check at app start use the internet).
 
 | File | What it does |
 |---|---|
@@ -136,6 +138,7 @@ internet).
 | [SensorReader.kt](app/app/src/main/java/com/sih26168/deadreckoning/SensorReader.kt) | Raw accelerometer/gyroscope via `SensorManager` |
 | [LocationReader.kt](app/app/src/main/java/com/sih26168/deadreckoning/LocationReader.kt) | Raw GPS via plain `LocationManager` — no Google Play Services, no API key |
 | [BiasCorrectionModel.kt](app/app/src/main/java/com/sih26168/deadreckoning/BiasCorrectionModel.kt) | ONNX Runtime Mobile wrapper running the exported trained network |
+| [ModelUpdater.kt](app/app/src/main/java/com/sih26168/deadreckoning/ModelUpdater.kt) + [ModelManifest.kt](app/app/src/main/java/com/sih26168/deadreckoning/ModelManifest.kt) | Fetches a newer model from Supabase Storage without a new APK, verifies it (size, SHA-256, input/output shapes, one test run) and falls back to the bundled model on any failure. See [app/README.md](app/README.md#model-updates-without-a-new-apk) |
 | [FusionEngine.kt](app/app/src/main/java/com/sih26168/deadreckoning/FusionEngine.kt) | The live GNSS↔INS state machine — same design as `src/fusion.py`, including ZUPT (zero-velocity update) for when the phone is genuinely at rest |
 | [RoadMapView.kt](app/app/src/main/java/com/sih26168/deadreckoning/RoadMapView.kt) | Real OpenStreetMap-tile map (osmdroid) — mode-colored trail, a blinking "live" marker, translucent glass status cards |
 | [MapMatcher.kt](app/app/src/main/java/com/sih26168/deadreckoning/MapMatcher.kt) + [RoadGraph.kt](app/app/src/main/java/com/sih26168/deadreckoning/RoadGraph.kt) | Live greedy sequential map-matcher against a bundled pre-fetched OSM road extract — same non-holonomic/continuity reasoning as `src/map_matching.py`, simplified for online (can't see the future) matching |
