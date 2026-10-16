@@ -102,6 +102,28 @@ def test_engine_zero_model():
     assert step < 3 * 12.0 / 200, f"high-rate output jumped {step:.3f} m in one sample"
 
 
+def test_imu_gap_with_gnss():
+    """An IMU dropout while GNSS keeps arriving is not a blackout. The 10 Hz
+    ticks inside the gap are only emitted when the next IMU sample lands, by
+    which time newer fixes have been pushed; each tick must still see the
+    fix that was current at its own time."""
+    t, xy, th, accel, gyro = _drive()
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp")
+    tg = np.arange(0.037, t[-1], 0.1)  # receiver not phase-locked to the IMU
+    gi = 0
+    for i in range(len(t)):
+        while gi < len(tg) and tg[gi] <= t[i]:
+            j = np.searchsorted(t, tg[gi])
+            eng.push_gnss(Fix(tg[gi], *xy[j], 12.0, th[j]))
+            gi += 1
+        if 30.0 <= t[i] < 30.5:
+            continue  # 0.5 s of IMU lost
+        eng.push_imu(t[i], accel[i], gyro[i])
+    ticks = eng.finish()
+    assert eng.core.model_calls == 0, eng.core.model_calls
+    assert all(s.mode == "gnss" for s in ticks), sorted({s.mode for s in ticks})
+
+
 class _LinearPredictor:
     """Deterministic stand-in for the network: corrections depend on the input
     and on position in the window, like the real one."""

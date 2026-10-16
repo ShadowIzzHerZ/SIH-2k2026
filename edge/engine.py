@@ -210,20 +210,26 @@ class EdgeEngine:
         self.resampler = make_resampler(resample, model_hz, 6)
         self.gnss_timeout_s = gnss_timeout_s
         self.live_smooth_s = live_smooth_s
-        self.fix: Fix | None = None
+        self.fixes: deque[Fix] = deque(maxlen=256)  # recent fixes, oldest first
         self.ticks: list[State] = []        # finalized 10 Hz track
         self.live: State | None = None      # high-rate propagated state (undisplayed)
         self._offset = np.zeros(2)          # display offset being faded out
         self._offset_t0 = 0.0
 
     def push_gnss(self, fix: Fix):
-        self.fix = fix
+        self.fixes.append(fix)
 
     def _fix_at(self, t: float):
-        """The latest fix, extrapolated to t, or None if it is stale. Lets a
-        1-5 Hz GNSS receiver drive the 10 Hz state machine."""
-        f = self.fix
-        if f is None or not (0.0 <= t - f.t <= self.gnss_timeout_s):
+        """The newest fix taken at or before t, extrapolated to t, or None if
+        it is stale. Lets a 1-5 Hz GNSS receiver drive the 10 Hz state machine.
+
+        Not simply the newest fix: a 10 Hz tick is only emitted once an IMU
+        sample after it arrives, and after an IMU dropout that can be well
+        after the tick, when fixes newer than the tick have already been
+        pushed. Using those would make the tick look like a blackout and
+        start a spurious model chunk and blend."""
+        f = next((f for f in reversed(self.fixes) if f.t <= t), None)
+        if f is None or t - f.t > self.gnss_timeout_s:
             return None
         x, y = f.x, f.y
         if f.speed is not None and f.heading is not None:
