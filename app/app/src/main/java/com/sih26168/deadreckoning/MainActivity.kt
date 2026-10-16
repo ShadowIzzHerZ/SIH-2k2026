@@ -192,6 +192,7 @@ class MainActivity : AppCompatActivity() {
     private var calibrationUiSwitched = false
     private var calibrationStartUptimeMs: Long? = null
     private var calibrationSlowNoticeShown = false
+    private var calibrationSlowNotice: Snackbar? = null
 
     private enum class Tab { LIVE_MAP, SENSORS, SIMULATION }
 
@@ -406,6 +407,10 @@ class MainActivity : AppCompatActivity() {
         sensorsPanel.visibility = if (tab == Tab.SENSORS) View.VISIBLE else View.GONE
         simulationPanel.visibility = if (tab == Tab.SIMULATION) View.VISIBLE else View.GONE
         recenterButton.visibility = if (tab == Tab.LIVE_MAP) View.VISIBLE else View.GONE
+        // A calibration notice shown on another tab is anchored to the nav
+        // bar, which put it right over the locator button once you came
+        // back to the map. Re-anchor it to whatever is showing now.
+        calibrationSlowNotice?.anchorView = slowNoticeAnchor()
 
         val activeColor = ContextCompat.getColor(this, R.color.on_primary_container)
         val inactiveColor = ContextCompat.getColor(this, R.color.on_surface_muted)
@@ -634,6 +639,8 @@ class MainActivity : AppCompatActivity() {
             calibrationUiSwitched = false
             calibrationStartUptimeMs = null
             calibrationSlowNoticeShown = false
+            calibrationSlowNotice?.dismiss()
+            calibrationSlowNotice = null
         }
 
         val sample = readSample(usingReplay, demo)
@@ -732,6 +739,10 @@ class MainActivity : AppCompatActivity() {
             trackingContent.visibility = View.VISIBLE
             trackingCard.alpha = 0f
             trackingCard.animate().alpha(1f).setDuration(300L).start()
+            // The "taking longer than usual" notice is moot once calibration
+            // is done; it used to stay up over the map until dismissed.
+            calibrationSlowNotice?.dismiss()
+            calibrationSlowNotice = null
         }
 
         // Yaw timed out to a best-effort estimate: keep offering it real
@@ -796,10 +807,7 @@ class MainActivity : AppCompatActivity() {
             findViewById(android.R.id.content),
             "Calibration is taking longer than usual. $reason",
             Snackbar.LENGTH_INDEFINITE,
-        ).setAnchorView(
-            // Above the locator button when it's showing, so the notice never covers it.
-            if (recenterButton.visibility == View.VISIBLE) recenterButton else findViewById<View>(R.id.bottomNav)
-        ).setAction("Dismiss") {}
+        ).setAnchorView(slowNoticeAnchor()).setAction("Dismiss") {}
         // Material's Snackbar text view caps itself at 2 lines by default
         // (com.google.android.material.R.integer.mtrl_snackbar_action_text_color_alpha
         // isn't it — it's a hardcoded maxLines=2 on the text view itself) —
@@ -810,7 +818,13 @@ class MainActivity : AppCompatActivity() {
         snackbar.view.findViewById<TextView>(com.google.android.material.R.id.snackbar_text)
             ?.maxLines = 5
         snackbar.show()
+        calibrationSlowNotice = snackbar
     }
+
+    /** Above the locator button when it's showing, so the notice never
+     * covers it; otherwise above the bottom nav. */
+    private fun slowNoticeAnchor(): View =
+        if (recenterButton.visibility == View.VISIBLE) recenterButton else findViewById(R.id.bottomNav)
 
     /** Flips calibrationDetails (ring/instructions/skip-button) between
      * shown and hidden — the calibration-time counterpart of
