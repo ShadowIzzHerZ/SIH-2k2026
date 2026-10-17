@@ -11,6 +11,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -97,6 +98,10 @@ class AuthActivity : AppCompatActivity() {
             } else {
                 handleSignIn(email, password)
             }
+            // runCatching/mapCatching also catch the CancellationException
+            // thrown when the screen closes mid-request; rethrow it so a
+            // cancelled request isn't reported as a sign-in failure.
+            (outcome.exceptionOrNull() as? CancellationException)?.let { throw it }
             setLoading(false)
             outcome.fold(
                 onSuccess = { finished ->
