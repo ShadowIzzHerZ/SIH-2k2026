@@ -409,3 +409,18 @@ EXPERIMENTS["moredata"] = dict(EXPERIMENTS["speedaware"],
 EXPERIMENTS["richmore"] = dict(EXPERIMENTS["moredata"],
     desc="speedaware + richer augmentation + 18 recovered training drives",
     train_ds=lambda model, sp: RichAugDataset(sp["train"]))
+
+
+def slow_windows(ds, vmax=8.0):
+    """Training windows whose mean speed is below vmax (stop-and-go traffic)."""
+    from src.data.windowing import IOVNBDWindowDataset
+    return IOVNBDWindowDataset([w for w in ds.windows if float(w.speed_gt.mean()) < vmax])
+
+
+EXPERIMENTS["slowspec"] = dict(EXPERIMENTS["moredata"],
+    desc="slow specialist: speedaware + richer augmentation trained only on windows below 8 m/s (with recovered drives); meant for the duo's low-speed half",
+    train_ds=lambda model, sp: RichAugDataset(slow_windows(sp["train"])))
+
+
+EXPERIMENTS["richmore_long"] = dict(EXPERIMENTS["richmore"],
+    desc="richmore with double the training budget (12 single-window + 12 chained epochs)")
