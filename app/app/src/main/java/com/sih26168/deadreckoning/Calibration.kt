@@ -87,77 +87,88 @@ object Calibration {
     }
 
     /**
-     * Estimate constant yaw offset between the leveled phone frame and the
-     * vehicle forward direction, using confident (moving) samples where
-     * horizontal accel direction can be compared against GPS course-over-
-     * ground — same approach and same reasoning as
-     * calibration.py's estimate_yaw_misalignment (median of angle diffs
-     * over the highest-magnitude samples, not a full least-squares fit —
-     * robust to the low-magnitude samples where direction is ill-defined).
+     * Estimate the constant yaw offset between the leveled phone frame and
+     * the vehicle forward direction, against GPS speed and course — same
+     * method as calibration.py's estimate_yaw_misalignment.
+     *
+     * The leveled phone frame has an unknown yaw, so its accel direction
+     * can't be compared with a world-frame course directly (that used to
+     * return the mount offset plus the average course). Instead both sides
+     * are put in the vehicle frame: GPS says the car had longitudinal accel
+     * dv/dt and lateral accel v * d(course)/dt, and psi is the
+     * least-squares 2D rotation taking the measured horizontal accel onto
+     * that. Braking counts the same as accelerating instead of voting for
+     * a 180 degree flip.
+     *
+     * levelAccelXY, gtHeadingXY (unit direction-of-travel vectors, any
+     * fixed world frame) and speedMps are consecutive samples dtS apart.
+     * Samples slower than minSpeedMps, or whose GPS-implied accel is below
+     * minHorizAccel m/s^2 (no direction), are ignored. Returns 0 (i.e.
+     * uncalibrated) rather than a guess when nothing is usable or the fit
+     * quality (see [yawMisalignmentSpread]) is below minFitQuality.
      */
-    fun estimateYawMisalignment(levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>): Float {
-        val diffs = yawAngleDiffs(levelAccelXY, gtHeadingXY)
-        if (diffs.isEmpty()) return 0f
-        return diffs.sorted()[diffs.size / 2]
+    fun estimateYawMisalignment(
+        levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>, speedMps: List<Float>, dtS: Float,
+        minSpeedMps: Float = 2.0f, minHorizAccel: Float = 0.3f, minFitQuality: Float = 0.5f,
+    ): Float {
+        val fit = yawFit(levelAccelXY, gtHeadingXY, speedMps, dtS, minSpeedMps, minHorizAccel) ?: return 0f
+        if (fit.quality < minFitQuality) return 0f
+        return atan2(fit.cross, fit.dot).toFloat()
     }
 
     /**
      * How much the samples behind [estimateYawMisalignment] actually agree
-     * with each other: circular variance (1 - mean resultant length) of
-     * the same filtered angle diffs. 0 = perfectly aligned, approaching
-     * 1 = scattered all around the circle. Roughly, an angular spread of
-     * sigma radians gives sigma^2 / 2.
+     * on one angle: 1 - |sum m.e| / sum |m||e| over the usable samples
+     * (m = measured, e = GPS-implied accel). 0 = every sample gives the
+     * same rotation, approaching 1 = no consistent rotation; 1 when no
+     * sample is usable at all.
      *
-     * NOT part of the calibration.py port; added for *live* calibration.
-     * Offline, a bad window can just be re-run over different data. Live,
-     * the yaw estimate locks in once at trip start and everything after it
-     * inherits the error, so the initial stretch has to be checked for
-     * actually being the straight line the estimate assumes. The median
-     * alone can't reveal that: a stretch that swings between two headings
-     * (a turn, a lane change, stop-and-go) yields a perfectly *stable*
-     * median of two disagreeing populations.
-     *
-     * Circular variance specifically, rather than a median-absolute-
-     * deviation: MAD is robust to a minority of outliers, which is the
-     * exact opposite of what's wanted here. Found the hard way in
-     * CalibrationManagerTest — after the top-quartile magnitude filter
-     * leaves only a handful of samples, a genuinely bimodal stretch that
-     * happens to split 8-2 has an MAD of ~0 and sails through the gate.
-     * Circular variance is *sensitive* to that minority, and handles
-     * angle wrapping natively instead of by hand.
+     * NOT part of the calibration.py port; added for *live* calibration,
+     * where the yaw estimate locks in once at trip start and everything
+     * after it inherits the error (see CalibrationManager).
      */
-    fun yawMisalignmentSpread(levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>): Float {
-        val diffs = yawAngleDiffs(levelAccelXY, gtHeadingXY)
-        if (diffs.size < 2) return 1f
-        var sumCos = 0.0
-        var sumSin = 0.0
-        for (d in diffs) {
-            sumCos += cos(d.toDouble())
-            sumSin += sin(d.toDouble())
-        }
-        val n = diffs.size
-        val resultant = sqrt((sumCos / n) * (sumCos / n) + (sumSin / n) * (sumSin / n))
-        return (1.0 - resultant).toFloat()
+    fun yawMisalignmentSpread(
+        levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>, speedMps: List<Float>, dtS: Float,
+        minSpeedMps: Float = 2.0f, minHorizAccel: Float = 0.3f,
+    ): Float {
+        val fit = yawFit(levelAccelXY, gtHeadingXY, speedMps, dtS, minSpeedMps, minHorizAccel) ?: return 1f
+        return (1.0 - fit.quality).toFloat()
     }
 
-    /** The per-sample (heading - accel direction) angle diffs both of the
-     * above are built on, restricted to the highest-magnitude quarter of
-     * samples — direction is ill-defined where horizontal accel is tiny.
-     * Shared so the estimate and its spread can never be computed over
-     * different sample sets. */
-    private fun yawAngleDiffs(levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>): List<Float> {
-        val mags = levelAccelXY.map { sqrt((it[0] * it[0] + it[1] * it[1]).toDouble()).toFloat() }
-        val sorted = mags.sorted()
-        val p75 = sorted[(sorted.size * 0.75).toInt().coerceIn(0, sorted.size - 1)]
-        val diffs = mutableListOf<Float>()
-        for (i in levelAccelXY.indices) {
-            if (mags[i] <= p75) continue
-            val aAng = atan2(levelAccelXY[i][1].toDouble(), levelAccelXY[i][0].toDouble())
-            val gAng = atan2(gtHeadingXY[i][1].toDouble(), gtHeadingXY[i][0].toDouble())
-            val diff = atan2(sin(gAng - aAng), cos(gAng - aAng))
-            diffs.add(diff.toFloat())
+    private class YawFit(val cross: Double, val dot: Double, val quality: Double)
+
+    /** The least-squares rotation sums both of the above are built on, over
+     * the usable samples — shared so the estimate and its spread can never
+     * be computed over different sample sets. Null when no sample is
+     * usable. */
+    private fun yawFit(
+        levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>, speedMps: List<Float>, dtS: Float,
+        minSpeedMps: Float, minHorizAccel: Float,
+    ): YawFit? {
+        val n = minOf(levelAccelXY.size, gtHeadingXY.size, speedMps.size)
+        if (n < 3) return null
+        val crs = DoubleArray(n) { atan2(gtHeadingXY[it][1].toDouble(), gtHeadingXY[it][0].toDouble()) }
+        var cross = 0.0
+        var dot = 0.0
+        var norm = 0.0
+        for (i in 1 until n - 1) {
+            val v = speedMps[i].toDouble()
+            // Central differences: GPS-implied [forward, left] accel in the vehicle frame.
+            val eLon = (speedMps[i + 1] - speedMps[i - 1]) / (2.0 * dtS)
+            val dCrs = crs[i + 1] - crs[i - 1]
+            val eLat = v * atan2(sin(dCrs), cos(dCrs)) / (2.0 * dtS)
+            val mx = levelAccelXY[i][0].toDouble()
+            val my = levelAccelXY[i][1].toDouble()
+            if (!(eLon.isFinite() && eLat.isFinite() && mx.isFinite() && my.isFinite())) continue
+            if (!(v > minSpeedMps)) continue
+            val eMag = sqrt(eLon * eLon + eLat * eLat)
+            if (eMag <= minHorizAccel) continue
+            cross += mx * eLat - my * eLon
+            dot += mx * eLon + my * eLat
+            norm += sqrt(mx * mx + my * my) * eMag
         }
-        return diffs
+        if (norm <= 0.0) return null
+        return YawFit(cross, dot, sqrt(cross * cross + dot * dot) / norm)
     }
 
     private fun wrap(a: Float): Float = atan2(sin(a.toDouble()), cos(a.toDouble())).toFloat()

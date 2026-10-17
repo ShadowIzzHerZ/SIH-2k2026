@@ -11,7 +11,7 @@ import org.junit.Test
 /**
  * Tests the two live-calibration gates (see CalibrationManager's class
  * doc): leveling waiting for a genuinely stationary window, and yaw
- * lock-in waiting for two estimates to agree. Both exist because a bad
+ * lock-in waiting for checkpoint estimates to agree. Both exist because a bad
  * live calibration is silent — it doesn't crash or look wrong, it just
  * tilts every downstream number for the rest of the trip — so the gates
  * themselves are the only thing standing between "held the phone wrong
@@ -107,17 +107,32 @@ class CalibrationManagerTest {
         assertFalse("...but must report itself as a degraded estimate", cal.levelConverged)
     }
 
-    /** Feeds yaw samples for a vehicle accelerating along `headingRad`
-     * with the phone's own frame rotated by `trueYawOffset` from it. */
-    private fun feedYaw(cal: CalibrationManager, n: Int, headingRad: Float, trueYawOffset: Float, noise: Float = 0.05f) {
+    /** A car speeding up, braking and weaving, with the course starting
+     * at `course0`. Kept across feedYaw calls so the GPS speed/course it
+     * reports stays continuous. */
+    private class Drive(course0: Double, val dt: Double = 0.1) {
+        var t = 0.0
+        var v = 12.0
+        var crs = course0
+    }
+
+    /** Feeds yaw samples from `drive`, with the leveled phone frame rotated
+     * by `trueYawOffset` from the vehicle frame (yawRotation(trueYawOffset)
+     * takes phone to vehicle). */
+    private fun feedYaw(cal: CalibrationManager, n: Int, drive: Drive, trueYawOffset: Float, noise: Float = 0.05f) {
+        val c = cos(trueYawOffset.toDouble())
+        val s = sin(trueYawOffset.toDouble())
         repeat(n) {
-            // Forward accel in the vehicle frame, expressed in the
-            // (leveled) phone frame by rotating back through the offset.
-            val a = 2.0f
-            val phoneAng = headingRad - trueYawOffset
-            val ax = a * cos(phoneAng.toDouble()).toFloat() + rng.nextFloat().minus(0.5f) * noise
-            val ay = a * sin(phoneAng.toDouble()).toFloat() + rng.nextFloat().minus(0.5f) * noise
-            cal.addYawSample(floatArrayOf(ax, ay, g), gpsSpeed = 15f, gpsHeadingRad = headingRad)
+            val aLon = 1.5 * sin(2 * Math.PI * drive.t / 6.0)
+            val yawRate = 0.15 * sin(2 * Math.PI * drive.t / 5.0)
+            drive.v += aLon * drive.dt
+            drive.crs += yawRate * drive.dt
+            drive.t += drive.dt
+            val aLat = drive.v * yawRate
+            // Vehicle-frame [forward, left] accel expressed in the phone frame.
+            val ax = (c * aLon + s * aLat).toFloat() + rng.nextFloat().minus(0.5f) * noise
+            val ay = (-s * aLon + c * aLat).toFloat() + rng.nextFloat().minus(0.5f) * noise
+            cal.addYawSample(floatArrayOf(ax, ay, g), gpsSpeed = drive.v.toFloat(), gpsHeadingRad = drive.crs.toFloat())
         }
     }
 
@@ -141,7 +156,7 @@ class CalibrationManagerTest {
         val cal = leveledManager()
         val trueOffset = 0.6f  // phone mounted ~34 degrees off the vehicle's forward axis
 
-        feedYaw(cal, n = 60, headingRad = 1.0f, trueYawOffset = trueOffset)
+        feedYaw(cal, n = 60, Drive(course0 = 1.0), trueYawOffset = trueOffset)
 
         assertTrue("a clean straight-line stretch should lock yaw in", cal.isReady)
         assertTrue("...and report itself converged", cal.yawConverged)
@@ -149,20 +164,33 @@ class CalibrationManagerTest {
     }
 
     @Test
-    fun `a real turn during the confident stretch delays lock-in past the naive early window`() {
-        // A realistic case, not an adversarial infinite oscillation: the
-        // vehicle turns once during the collection window (a real
-        // driveway-to-road turn, e.g.), then drives straight. A fixed
-        // minConfidentSamples cutoff would lock in mid-turn; settledness
-        // should make it wait for the post-turn stretch to actually
-        // settle instead.
+    fun `the locked-in yaw does not depend on the course driven`() {
+        // Regression: the estimate used to compare the leveled phone-frame
+        // accel angle with the world-frame GPS course, returning the mount
+        // offset plus the course instead of the mount offset alone.
+        for (course in listOf(-2.5, 0.0, 1.6, 3.0)) {
+            val cal = leveledManager()
+            feedYaw(cal, n = 90, Drive(course0 = course), trueYawOffset = 0.6f)
+            assertTrue(cal.isReady)
+            assertTrue(cal.yawConverged)
+            assertEquals("course $course", 0.6f, cal.psiYaw, 0.1f)
+        }
+    }
+
+    @Test
+    fun `an early inconsistent stretch delays lock-in past the naive early window`() {
+        // The phone shifts in its mount early in the collection window. A
+        // fixed minConfidentSamples cutoff would lock in on the mixture;
+        // settledness should make it wait for the later stretch to
+        // actually settle instead.
         val cal = leveledManager(minConfidentSamples = 20, maxConfidentSamples = 200, yawWindowSamples = 25)
-        feedYaw(cal, n = 20, headingRad = 0.2f, trueYawOffset = 0.6f)  // pre-turn, would satisfy minConfidentSamples alone
-        feedYaw(cal, n = 90, headingRad = 2.4f, trueYawOffset = -0.9f) // turn, then enough of a real straight stretch to fully flush the pre-turn window
+        val drive = Drive(course0 = 0.2)
+        feedYaw(cal, n = 20, drive, trueYawOffset = 0.6f)  // would satisfy minConfidentSamples alone
+        feedYaw(cal, n = 90, drive, trueYawOffset = -0.9f) // enough of a stretch to fully flush the early window
 
         assertTrue(cal.isReady)
         assertEquals(
-            "should settle on the post-turn straight stretch's true offset, not something blended with the pre-turn value",
+            "should settle on the later stretch's true offset, not something blended with the early value",
             -0.9f, cal.psiYaw, 0.2f,
         )
     }
@@ -173,9 +201,10 @@ class CalibrationManagerTest {
         // A turn that doesn't resolve into any lasting straight stretch
         // before the safety cap — must still commit to something rather
         // than stall the demo, but must own up to being degraded.
-        feedYaw(cal, n = 20, headingRad = 0.2f, trueYawOffset = 0.6f)
-        feedYaw(cal, n = 20, headingRad = 1.6f, trueYawOffset = -0.3f)
-        feedYaw(cal, n = 20, headingRad = 3.0f, trueYawOffset = 0.9f)
+        val drive = Drive(course0 = 0.2)
+        feedYaw(cal, n = 20, drive, trueYawOffset = 0.6f)
+        feedYaw(cal, n = 20, drive, trueYawOffset = -0.3f)
+        feedYaw(cal, n = 20, drive, trueYawOffset = 0.9f)
 
         assertTrue("yaw must eventually commit rather than stall the demo forever", cal.isReady)
         assertFalse("...but must report itself as a degraded estimate", cal.yawConverged)
@@ -185,10 +214,23 @@ class CalibrationManagerTest {
     @Test
     fun `a clean calibration is not flagged as rough`() {
         val cal = leveledManager()
-        feedYaw(cal, n = 60, headingRad = 1.0f, trueYawOffset = 0.6f)
+        feedYaw(cal, n = 60, Drive(course0 = 1.0), trueYawOffset = 0.6f)
 
         assertTrue(cal.isReady)
         assertFalse("a fully converged calibration must not be labelled rough", cal.isRoughCalibration)
+    }
+
+    @Test
+    fun `steady cruising alone does not lock in a converged yaw`() {
+        // Constant speed on a straight road: GPS implies no accel to match
+        // the measured accel against, so there is nothing to estimate from.
+        val cal = leveledManager(minConfidentSamples = 20, maxConfidentSamples = 60)
+        repeat(60) {
+            cal.addYawSample(floatArrayOf(0.4f, -0.3f, g), gpsSpeed = 15f, gpsHeadingRad = 1.0f)
+        }
+        assertTrue("must still commit at the safety cap", cal.isReady)
+        assertFalse("...but not as a converged estimate", cal.yawConverged)
+        assertEquals(0f, cal.psiYaw, 0f)
     }
 
     @Test
