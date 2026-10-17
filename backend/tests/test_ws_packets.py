@@ -2,10 +2,12 @@
 """Malformed timestamp/seq values must not drop the WebSocket or break the ingestion queue."""
 import time
 import unittest
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.api import websocket as ws_module
 from app.api.websocket import active_connections, _has_valid_queue_keys
 
 
@@ -25,7 +27,10 @@ class TestPacketKeyValidation(unittest.TestCase):
 
 class TestWebSocketBadPackets(unittest.TestCase):
     def test_bad_timestamps_do_not_drop_connection(self):
-        with TestClient(app) as client:
+        # Fresh queue: the module-level one may already be bound to another
+        # test's event loop, and each TestClient runs its own loop.
+        with mock.patch.object(ws_module, "queue_mgr", ws_module.IngestionQueueManager(maxsize=100)), \
+             TestClient(app) as client:
             token = client.post("/auth/token", json={"device_id": "ws_bad_ts", "expires_minutes": 5}).json()["access_token"]
             with client.websocket_connect(f"/ws/track/ws_bad_ts?token={token}") as ws:
                 t = time.time()
