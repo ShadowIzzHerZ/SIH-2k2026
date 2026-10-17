@@ -453,3 +453,8 @@ def speedjitter_loss(model, splits, rel=0.1, absn=0.5):
 EXPERIMENTS["speedjitter"] = dict(EXPERIMENTS["moredata"],
     desc="moredata + noisy speed input during single-window training (10% + 0.5 m/s)",
     loss_fn=speedjitter_loss)
+
+
+EXPERIMENTS["moredata_swa"] = dict(EXPERIMENTS["moredata"],
+    desc="moredata + weight average of the 6 chained epochs (kept if val agrees); targets the big seed-to-seed swings",
+    train_kw={"swa": True})

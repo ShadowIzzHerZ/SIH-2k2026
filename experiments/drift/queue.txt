@@ -15,3 +15,5 @@ moredata --seed 11
 ens_moredata4
 speedjitter
 speedjitter --seed 7
+moredata_swa
+moredata_swa --seed 11
