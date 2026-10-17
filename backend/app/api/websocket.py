@@ -19,6 +19,9 @@ router = APIRouter()
 queue_mgr = IngestionQueueManager()
 active_connections: Dict[str, WebSocket] = {}
 device_kalman_filters: Dict[str, IMUKalmanFilter] = {}
+# Mode forced via POST /device/{id}/mode ('stationary' or 'moving'). It wins over
+# the per-packet "mode" until it is cleared by setting the mode back to 'adaptive'.
+device_mode_overrides: Dict[str, str] = {}
 
 async def restore_or_init_filter(device_id: str) -> IMUKalmanFilter:
     """
@@ -127,6 +130,10 @@ async def queue_worker():
             if not kf:
                 kf = await restore_or_init_filter(device_id)
                 device_kalman_filters[device_id] = kf
+
+            forced_mode = device_mode_overrides.get(device_id)
+            if forced_mode:
+                packet = {**packet, "mode": forced_mode}
 
             # 2. 9-DOF IMU Kalman Filter Statistical Sensor Fusion
             fused_state = kf.process_sample(packet)
