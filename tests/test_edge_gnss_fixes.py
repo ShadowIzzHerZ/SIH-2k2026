@@ -96,3 +96,40 @@ def test_fix_on_new_clock_survives_clock_reset():
     eng.push_imu(0.0, np.array([0.0, 0.0, 9.81]), np.zeros(3))
     assert eng.clock_resets == 1
     assert list(eng.fixes) == [first]
+
+
+def test_fix_late_by_more_than_clock_reset_s():
+    """A 1 Hz receiver delivers the 9.9 s fix after the 11.0 s one, on the
+    same clock. Over clock_reset_s (1 s) late, it used to be taken for a clock
+    restart and appended last, so the ticks after 11.0 found it first, called
+    it stale from 11.5 s on and ran a spurious blackout until the next fix."""
+    t_imu = np.arange(0, 20, 0.005)
+    t_gnss = list(np.arange(0.0, 20, 1.0))
+    t_gnss.insert(t_gnss.index(11.0) + 1, 9.9)
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp")
+    gi = 0
+    for ti in t_imu:
+        while gi < len(t_gnss) and (t_gnss[gi] <= ti or (gi and t_gnss[gi] < t_gnss[gi - 1])):
+            eng.push_gnss(Fix(t_gnss[gi], 10 * t_gnss[gi], 0.0, 10.0, 0.0))
+            gi += 1
+        eng.push_imu(ti, np.array([0.0, 0.0, 9.81]), np.zeros(3))
+    ticks = eng.finish()
+    assert eng.clock_resets == 0
+    assert not [s.t for s in ticks if s.mode != "gnss"], sorted({round(s.t, 1) for s in ticks if s.mode != "gnss"})
+
+
+def test_two_fixes_on_new_clock_survive_clock_reset():
+    """A clock restart, with two fixes in on the new clock before the IMU
+    sample that reveals it. Both are sorted in ahead of the old clock's
+    fixes; the reset keeps them, in order, and drops the old ones."""
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp")
+    for ti in np.arange(0, 10, 0.005):
+        if round(ti / 0.005) % 20 == 0:
+            eng.push_gnss(Fix(ti, 10 * ti, 0.0, 10.0, 0.0))
+        eng.push_imu(ti, np.array([0.0, 0.0, 9.81]), np.zeros(3))
+    new = [Fix(0.0, 100.0, 0.0, 10.0, 0.0), Fix(0.1, 101.0, 0.0, 10.0, 0.0)]
+    for f in new:
+        eng.push_gnss(f)
+    eng.push_imu(0.1, np.array([0.0, 0.0, 9.81]), np.zeros(3))
+    assert eng.clock_resets == 1
+    assert list(eng.fixes) == new

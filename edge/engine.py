@@ -243,10 +243,11 @@ class EdgeEngine:
             if heading is None:
                 heading = float(np.arctan2(dy, dx)) if dist > 1e-6 else prev.heading
             fix = Fix(fix.t, fix.x, fix.y, speed, heading)
-        # A late fix is put back in time order. A jump back by more than
-        # clock_reset_s is a clock restart, not a late fix: it goes last, so
-        # _clock_reset can tell the fixes on the new clock from the old ones.
-        if prev is None or fix.t >= prev.t or fix.t < prev.t - self.clock_reset_s:
+        # A late fix is put back in time order, however late. The first fix
+        # after a clock restart lands here too (at the front); that can't be
+        # told from a late fix by its time alone, so _clock_reset sorts it
+        # out once the IMU clock shows whether it restarted.
+        if prev is None or fix.t >= prev.t:
             self.fixes.append(fix)
             return
         if len(self.fixes) == self.fixes.maxlen:
@@ -318,12 +319,8 @@ class EdgeEngine:
         self.finish()
         self.resampler = make_resampler(self._resample, self._model_hz, 6)
         # Fixes already on the new clock (pushed just before this sample) stay.
-        fresh = []
-        for f in reversed(self.fixes):
-            if not t - self.gnss_timeout_s <= f.t <= t:
-                break
-            fresh.append(f)
-        self.fixes = deque(reversed(fresh), maxlen=self.fixes.maxlen)
+        # push_gnss sorted them in ahead of the old clock's fixes.
+        self.fixes = deque((f for f in self.fixes if t - self.gnss_timeout_s <= f.t <= t), maxlen=self.fixes.maxlen)
         self._pre_tick = None
         if len(self.ticks) > n_ticks:  # closing the old clock resolved a chunk
             st = self.ticks[-1]
