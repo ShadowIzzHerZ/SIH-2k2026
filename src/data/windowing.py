@@ -377,12 +377,41 @@ def compute_channel_norm_stats(windows: list[Window], extra_features: bool) -> t
     return mean.astype(np.float32), std.astype(np.float32)
 
 
+def recording_key(path: str) -> str:
+    """IO-VNBD ships the same drive in more than one folder (e.g.
+    "Categorised .../Vw08/S-Vw8.csv" and "Uncategorised .../S-Dataset/S-Vw8.csv"
+    hold the same samples), so a drive is identified by its file name,
+    case-insensitive, not by its path."""
+    return Path(path).name.lower()
+
+
+def split_recordings(csv_paths: list[str], train_split: float, val_split: float,
+                     seed: int = 0) -> dict[str, list[str]]:
+    """Shuffle and split at the recording level: every copy of one drive
+    lands in the same split. The fractions apply to distinct recordings."""
+    by_key: dict[str, list[str]] = {}
+    for p in sorted(csv_paths):
+        by_key.setdefault(recording_key(p), []).append(p)
+    keys = np.array(sorted(by_key))
+    np.random.default_rng(seed).shuffle(keys)
+    n = len(keys)
+    n_train = int(n * train_split)
+    n_val = int(n * val_split)
+    key_splits = {
+        "train": keys[:n_train],
+        "val": keys[n_train:n_train + n_val],
+        "test": keys[n_train + n_val:],
+    }
+    return {split: [p for k in ks for p in by_key[k]] for split, ks in key_splits.items()}
+
+
 def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_rate_hz: float,
                          window_size: int, window_stride: int,
                          train_split: float, val_split: float, seed: int = 0,
                          file_prefix: str = "", extra_features: bool = False):
     """Discover CSV files, load+calibrate+resample each sequence, window
-    them, then split at the *file* level into train/val/test.
+    them, then split at the *recording* level into train/val/test (all
+    copies of one drive share a split, see split_recordings).
 
     file_prefix filters by filename prefix — set to "S-" (see config) to
     train only on smartphone recordings. IO-VNBD mixes vehicle CAN-bus
@@ -396,17 +425,7 @@ def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_r
     if not csv_paths:
         raise FileNotFoundError(f"No CSVs found under {root} matching prefix '{file_prefix}' — check data_root/variant/file_prefix in config.")
 
-    rng = np.random.default_rng(seed)
-    paths = np.array(csv_paths)
-    rng.shuffle(paths)
-    n = len(paths)
-    n_train = int(n * train_split)
-    n_val = int(n * val_split)
-    split_paths = {
-        "train": paths[:n_train],
-        "val": paths[n_train:n_train + n_val],
-        "test": paths[n_train + n_val:],
-    }
+    split_paths = split_recordings(csv_paths, train_split, val_split, seed)
 
     dt = 1.0 / sample_rate_hz
     split_windows: dict[str, list[Window]] = {}
