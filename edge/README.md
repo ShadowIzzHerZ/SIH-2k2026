@@ -81,10 +81,11 @@ metric. Raw rows are in `benchmarks/`.
 
 What this says, plainly:
 
-1. The engine works end to end on a real high-rate IMU, but the current
-   `checkpoints/dead_reckoning_model.onnx` (exported 2026-09-05 from the
-   then-production `best.pt`) does not beat plain strapdown integration once
-   the sensor frame is right. The model lands near 14% either way; strapdown
+1. The engine works end to end on a real high-rate IMU, but the model these
+   rows were measured with (the 2026-09-05 ONNX export of the then-production
+   `best.pt`; `checkpoints/dead_reckoning_model.onnx` is now the export of
+   `best_v3chain.pt`, not yet re-run here) does not beat plain strapdown
+   integration once the sensor frame is right. The model lands near 14% either way; strapdown
    only looks worse when its forward axis is scrambled.
 2. The comma2k19 training data was leveled in a scrambled frame. comma's
    device is z-down, and `src.calibration.leveling_rotation` turns that

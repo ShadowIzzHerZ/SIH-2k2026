@@ -225,7 +225,7 @@ highway/suburban driving).
 | comma2k19 highway (never-seen segments) | **3.4%** | **13.1%** | n/a (segments too short) |
 | IO-VNBD, drive not in training | 22.0% | 38.8% | 52.0% |
 
-The model the app ships today (`checkpoints/best.pt`) scores 8.9% / 20.8%
+The model the app shipped until 2026-10-16 (`checkpoints/best.pt`) scores 8.9% / 20.8%
 on highway and 52.5% / 139.4% on the unseen IO-VNBD drive, so the newest
 checkpoint is far better on every row.
 
@@ -529,8 +529,8 @@ judges have seen a hundred pitches that hide the rough edges.
 - **The IO-VNBD test split overlaps its training drives** (the dataset ships
   each drive twice). Only one unseen IO-VNBD drive is left to score on, so a
   proper re-split and retrain is still to do.
-- **The app still bundles the older `best.pt` model**; the newer
-  `best_v3chain.pt` is exported and checked but not yet swapped in.
+- **The app now bundles `best_v3chain.pt`**, but it has only been run on
+  the emulator, not yet on a phone or a real drive.
 - **The on-device map-matcher is a simplified greedy matcher**, not the
   full HMM used offline — a deliberate, explained scope decision (online
   matching can't see the future the way offline evaluation can).

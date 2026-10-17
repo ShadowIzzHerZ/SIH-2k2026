@@ -35,7 +35,7 @@ Same tests, other checkpoints (median drift):
 |---|---|---|---|---|
 | **`best_v3chain.pt`** | **3.4%** | **13.1%** | **22.0%** | **38.8%** |
 | `best_cleanlabels.pt` | 5.8% | 86.1% | 21.4% | 91.1% |
-| `best.pt` (in the app today) | 8.9% | 20.8% | 52.5% | 139.4% |
+| `best.pt` (in the app until 2026-10-16) | 8.9% | 20.8% | 52.5% | 139.4% |
 
 Sources: [results/final_report_v3.json](results/final_report_v3.json) (comma2k19
 rows, reproduced exactly on 2026-10-16) and
