@@ -294,8 +294,10 @@ def _plot_track(ax, gnss_xy, result, gnss_available, lo, hi):
     if len(blackout_idx):
         ax.scatter(*gnss_xy[lo + blackout_idx[0]], marker="x", s=140, color="#dc2626", zorder=3,
                    linewidths=3, label="blackout starts")
-        ax.scatter(*gnss_xy[lo + blackout_idx[-1]], marker="x", s=140, color="#16a34a", zorder=3,
-                   linewidths=3, label="GNSS reconnects")
+        back = lo + blackout_idx[-1] + 1  # first sample with GNSS again, not the last one without
+        if back < hi:
+            ax.scatter(*gnss_xy[back], marker="x", s=140, color="#16a34a", zorder=3,
+                       linewidths=3, label="GNSS reconnects")
     ax.set_aspect("equal", adjustable="datalim")
 
 
