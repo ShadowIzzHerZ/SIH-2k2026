@@ -31,6 +31,11 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import java.time.Instant
 
+// Process-level, so ModelUpdater.checkForUpdate runs once per app start
+// rather than on every onCreate (a configuration change recreates the
+// Activity, and a second check could race the first one's download).
+private var modelUpdateCheckStarted = false
+
 /**
  * Live on-device demo of the whole pipeline this repo trains and
  * validates in Python: SensorReader (raw IMU) -> CalibrationManager
@@ -352,7 +357,10 @@ class MainActivity : AppCompatActivity() {
         model = BiasCorrectionModel(this)
         // Fetches a newer model if one is published; it takes effect on the
         // next app start. See ModelUpdater.
-        activityScope.launch { ModelUpdater.checkForUpdate(applicationContext) }
+        if (!modelUpdateCheckStarted) {
+            modelUpdateCheckStarted = true
+            activityScope.launch { ModelUpdater.checkForUpdate(applicationContext) }
+        }
         fusion = FusionEngine(model)
         mapMatcher = MapMatcher(RoadGraph(this))
         devRecorder = DevRecorder(this)
