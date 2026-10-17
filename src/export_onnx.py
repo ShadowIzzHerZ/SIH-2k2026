@@ -16,11 +16,12 @@ does one window at a time on-device, so a fixed batch size of 1 keeps the
 exported graph simpler and avoids surprises in the mobile runtime.
 
 Run:
-    python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints/best.pt
+    python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints/best_v3chain.pt
 """
 from __future__ import annotations
 
 import argparse
+import inspect
 
 import onnx
 import onnxruntime as ort
@@ -33,7 +34,7 @@ from src.models.bias_correction_net import BiasCorrectionNet
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
-    parser.add_argument("--checkpoint", default="checkpoints/best.pt")
+    parser.add_argument("--checkpoint", default="checkpoints/best_v3chain.pt")  # the shipped model, see checkpoints/README.md
     args = parser.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
@@ -53,6 +54,11 @@ def main():
     dummy = torch.randn(1, window_size, cfg["model"]["input_channels"])
     out_path = cfg["export"]["onnx_path"]
 
+    # torch >= 2.9 switched torch.onnx.export to the dynamo exporter by
+    # default, which needs the extra onnxscript package and can split the
+    # weights into a separate .data file the app would not pick up. Ask for
+    # the TorchScript exporter that produced the shipped single-file model.
+    extra = {"dynamo": False} if "dynamo" in inspect.signature(torch.onnx.export).parameters else {}
     torch.onnx.export(
         model,
         dummy,
@@ -61,6 +67,7 @@ def main():
         output_names=["corrections"],
         opset_version=cfg["export"]["opset"],
         dynamic_axes=None,  # fixed shape, see module docstring
+        **extra,
     )
 
     # sanity-check: structural validity + numerical parity vs. the torch model
