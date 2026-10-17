@@ -8,78 +8,42 @@ import android.util.Log
 import java.nio.FloatBuffer
 
 /**
- * FusionEngine's only real dependency on BiasCorrectionModel — pulled out
- * so a plain JVM unit test (no device, no ONNX runtime, no Android
- * Context) can exercise FusionEngine's actual integration/ZUPT logic
- * against a fake Predictor instead. See FusionEngineTest.
- */
-interface Predictor {
-    fun predict(window: Array<FloatArray>): Array<FloatArray>
-}
-
-/**
- * Loads and runs the exported BiasCorrectionNet (checkpoints/
- * dead_reckoning_model.onnx, bundled as an asset by the app module's
- * syncModel Gradle task, or a newer verified copy fetched by
+ * Loads and runs one role of the exported ensemble (checkpoints/
+ * model_slow.onnx or model_fast.onnx, bundled as assets by the app
+ * module's syncModel Gradle task, or a newer verified copy fetched by
  * ModelUpdater) via ONNX Runtime Mobile.
  *
- * Contract matches src/export_onnx.py's docstring exactly: a
- * (1, T, 6) calibrated-IMU window in — [ax, ay, az, gx, gy, gz], vehicle
- * frame, real physical units, NOT z-score normalized (this checkpoint is
- * the plain 6-raw-channel production model, not the reverted
- * --extra_features variant — see configs/default.yaml) — producing a
- * (1, T, 2) [delta_v, delta_theta] correction sequence out. T is
- * whatever's fed in; the ONNX graph itself was exported with a fixed
- * window_size (see export_onnx.py), matching FusionEngine's chunking.
+ * Contract matches src/export_ensemble.py's docstring exactly: a
+ * (1, 50, C) window in, C = role.channels — [ax, ay, az, gx, gy, gz],
+ * vehicle frame, real physical units, NOT z-score normalized, plus for
+ * ModelRole.FAST the start speed / 10 as a 7th channel (EnsembleModel
+ * adds it) — producing a (1, 50, 2) [delta_v, delta_theta] correction
+ * sequence out. The graph has a fixed window size, matching
+ * FusionEngine's chunking.
  */
-class BiasCorrectionModel(context: Context, assetName: String = DEFAULT_ASSET) : Predictor {
-
-    private val env = OrtEnvironment.getEnvironment()
-    private val session: OrtSession
-
-    /** Which model is running: ModelUpdater.BUNDLED_MODEL_VERSION for the
-     * APK's own copy, or the version of a verified download. */
-    val loadedVersion: Int
-
-    init {
-        // Prefer a model ModelUpdater downloaded and verified on an earlier
-        // run. Anything wrong with it (fails to open, wrong shapes) means
-        // it is deleted and the bundled model loads instead, so an update
-        // can never leave the app without a working model.
-        var downloadedSession: OrtSession? = null
-        var version = ModelUpdater.BUNDLED_MODEL_VERSION
-        val downloaded = if (assetName == DEFAULT_ASSET) ModelUpdater.downloadedModel(context) else null
-        if (downloaded != null) {
-            try {
-                downloadedSession = env.createSession(downloaded.bytes, OrtSession.SessionOptions())
-                ModelUpdater.requireCompatible(downloadedSession)
-                version = downloaded.version
-            } catch (e: Exception) {
-                Log.w(TAG, "downloaded model v${downloaded.version} failed to load, using bundled model", e)
-                downloadedSession?.close()
-                downloadedSession = null
-                ModelUpdater.discardDownloaded(context)
-            }
-        }
-        session = downloadedSession ?: run {
-            val modelBytes = context.assets.open(assetName).use { it.readBytes() }
-            env.createSession(modelBytes, OrtSession.SessionOptions())
-        }
-        loadedVersion = version
-        Log.i(TAG, "loaded model v$loadedVersion (${if (downloadedSession != null) "downloaded" else "bundled"})")
-    }
+class BiasCorrectionModel private constructor(
+    private val env: OrtEnvironment,
+    private val session: OrtSession,
+    val role: ModelRole,
+    /** ModelUpdater.bundledVersion(role) for the APK's own copy, or the
+     * version of a verified download. */
+    val loadedVersion: Int,
+    val source: ModelSource,
+) : Predictor, AutoCloseable {
 
     /**
-     * window: T samples of [ax, ay, az, gx, gy, gz] (calibrated, vehicle
-     * frame). Returns T samples of [delta_v, delta_theta].
+     * window: 50 samples of role.channels values. Returns 50 samples of
+     * [delta_v, delta_theta].
      */
     override fun predict(window: Array<FloatArray>): Array<FloatArray> {
         val t = window.size
-        val flat = FloatArray(t * 6)
+        val c = role.channels
+        val flat = FloatArray(t * c)
         for (i in 0 until t) {
-            System.arraycopy(window[i], 0, flat, i * 6, 6)
+            require(window[i].size == c) { "${role.key} model takes $c channels, got ${window[i].size}" }
+            System.arraycopy(window[i], 0, flat, i * c, c)
         }
-        val shape = longArrayOf(1, t.toLong(), 6)
+        val shape = longArrayOf(1, t.toLong(), c.toLong())
         OnnxTensor.createTensor(env, FloatBuffer.wrap(flat), shape).use { inputTensor ->
             val inputName = session.inputNames.iterator().next()
             session.run(mapOf(inputName to inputTensor)).use { result ->
@@ -90,12 +54,55 @@ class BiasCorrectionModel(context: Context, assetName: String = DEFAULT_ASSET) :
         }
     }
 
-    fun close() {
+    override fun close() {
         session.close()
     }
 
     companion object {
-        const val DEFAULT_ASSET = "dead_reckoning_model.onnx"
         private const val TAG = "BiasCorrectionModel"
+
+        /**
+         * Prefers a model ModelUpdater downloaded and verified on an
+         * earlier run. Anything wrong with it (fails to open, wrong
+         * shapes) means it is deleted and the bundled model loads instead,
+         * so an update can never leave the app without a working model.
+         * Throws only if the bundled model for [role] is broken too.
+         */
+        fun load(context: Context, role: ModelRole): BiasCorrectionModel {
+            val env = OrtEnvironment.getEnvironment()
+            val downloaded = ModelUpdater.downloadedModel(context, role)
+            val loaded = ModelFallback.load(
+                downloadedVersion = downloaded?.version,
+                downloadedBytes = downloaded?.let { d -> { d.bytes } },
+                bundledVersion = ModelUpdater.bundledVersion(role),
+                bundledBytes = { context.assets.open(role.asset).use { it.readBytes() } },
+                open = { bytes -> env.createSession(bytes, OrtSession.SessionOptions()) },
+                check = { ModelUpdater.requireCompatible(it, role) },
+                close = { it.close() },
+                onDownloadedFailed = { e ->
+                    Log.w(TAG, "downloaded ${role.key} model v${downloaded?.version} failed to load, using bundled model", e)
+                    ModelUpdater.discardDownloaded(context, role)
+                },
+            )
+            Log.i(TAG, "loaded ${role.key} model v${loaded.version} (${loaded.source.name.lowercase()})")
+            return BiasCorrectionModel(env, loaded.session, role, loaded.version, loaded.source)
+        }
+
+        /**
+         * Both roles as one EnsembleModel. A role that can't load even from
+         * the APK is left out and the other covers every speed; only if
+         * both fail does this throw.
+         */
+        fun loadEnsemble(context: Context): EnsembleModel {
+            val models = ModelRole.values().associateWith { role ->
+                try {
+                    load(context, role)
+                } catch (e: Exception) {
+                    Log.e(TAG, "${role.key} model failed to load even from the APK; the other model covers every speed", e)
+                    null
+                }
+            }
+            return EnsembleModel(slow = models[ModelRole.SLOW], fast = models[ModelRole.FAST])
+        }
     }
 }

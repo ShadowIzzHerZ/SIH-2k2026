@@ -35,8 +35,9 @@ import java.time.Instant
  * Live on-device demo of the whole pipeline this repo trains and
  * validates in Python: SensorReader (raw IMU) -> CalibrationManager
  * (Calibration.kt, matching src/calibration.py) -> FusionEngine (matching
- * the fixed src/fusion.py) -> BiasCorrectionModel (ONNX Runtime, the
- * checkpoints/dead_reckoning_model.onnx export) -> RoadMapView (a real
+ * the fixed src/fusion.py) -> EnsembleModel (two BiasCorrectionModels on
+ * ONNX Runtime, the checkpoints/model_slow.onnx and model_fast.onnx exports,
+ * gated on speed) -> RoadMapView (a real
  * OpenStreetMap-tile map).
  *
  * UI is a pixel-match of the Stitch "Zen Civic" mockups (each screen's
@@ -72,7 +73,7 @@ class MainActivity : AppCompatActivity() {
     private var replayIndex = 0
 
     private var calibration = CalibrationManager()
-    private lateinit var model: BiasCorrectionModel
+    private lateinit var model: EnsembleModel
     private lateinit var fusion: FusionEngine
     private lateinit var mapMatcher: MapMatcher
 
@@ -349,8 +350,8 @@ class MainActivity : AppCompatActivity() {
             ReplayDataSource(this, "replay_demo_2142.json"),
             ReplayDataSource(this, "replay_drive.json"),
         )
-        model = BiasCorrectionModel(this)
-        // Fetches a newer model if one is published; it takes effect on the
+        model = BiasCorrectionModel.loadEnsemble(this)
+        // Fetches newer models if any are published; they take effect on the
         // next app start. See ModelUpdater.
         activityScope.launch { ModelUpdater.checkForUpdate(applicationContext) }
         fusion = FusionEngine(model)

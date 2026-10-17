@@ -5,6 +5,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -290,5 +291,67 @@ class FusionEngineTest {
             "a near-stationary fix snapped heading to $bogusHeading instead of holding ~$realHeading",
             angleDiff(engine.state.heading, realHeading) < 0.01f,
         )
+    }
+
+    /** Records the start speed FusionEngine hands the model per chunk. */
+    private class SpeedRecorder : Predictor {
+        val speeds = mutableListOf<Float>()
+        override fun predict(window: Array<FloatArray>): Array<FloatArray> =
+            throw AssertionError("FusionEngine should always pass the start speed")
+        override fun predict(window: Array<FloatArray>, startSpeed: Float): Array<FloatArray> {
+            speeds += startSpeed
+            return Array(window.size) { floatArrayOf(0f, 0f) }
+        }
+    }
+
+    @Test
+    fun `each chunk tells the model the speed its integration starts from`() {
+        val rec = SpeedRecorder()
+        val engine = FusionEngine(rec)
+        warmUpGnssTracking(engine, speed = 15f)
+        // Steady cruise: small forward accel keeps it moving, so neither
+        // ZUPT nor the low-speed clamp is involved.
+        repeat(windowSize * 2) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0.5f, 0f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = false,
+                lat = 0.0, lon = 0.0, gnssSpeed = 0f, gnssHeadingRad = 0f,
+            )
+        }
+        assertEquals(2, rec.speeds.size)
+        // First chunk starts from the last GNSS speed, the second from the
+        // first chunk's own integrated end speed (15 + 0.5 * 5 s).
+        assertEquals(15f, rec.speeds[0], 1e-3f)
+        assertEquals(17.5f, rec.speeds[1], 1e-2f)
+    }
+
+    @Test
+    fun `fusion through the ensemble switches to the slow model once the car slows`() {
+        class Tagged(val v: Float) : Predictor {
+            override fun predict(window: Array<FloatArray>) = Array(window.size) { floatArrayOf(v, 0f) }
+        }
+        val fastCalls = intArrayOf(0)
+        val fast = object : Predictor {
+            override fun predict(window: Array<FloatArray>): Array<FloatArray> {
+                fastCalls[0]++
+                return Array(window.size) { floatArrayOf(0f, 0f) }
+            }
+        }
+        val ensemble = EnsembleModel(Tagged(0f), fast)
+        val engine = FusionEngine(ensemble)
+        warmUpGnssTracking(engine, speed = 8f)
+        // Braking at 1 m/s^2: chunk 1 starts at 8 m/s (fast), chunk 2 at
+        // 3 m/s (slow).
+        repeat(windowSize * 2) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(-1f, 0f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = false,
+                lat = 0.0, lon = 0.0, gnssSpeed = 0f, gnssHeadingRad = 0f,
+            )
+        }
+        assertEquals(1, fastCalls[0])
+        assertEquals(ModelRole.SLOW, ensemble.lastUsed)
     }
 }

@@ -16,39 +16,52 @@ import java.nio.FloatBuffer
 import java.util.concurrent.TimeUnit
 
 /**
- * Model-only updates: lets a newer BiasCorrectionNet reach phones without
- * a new APK.
+ * Model-only updates: lets newer ensemble models reach phones without a
+ * new APK.
  *
  * On app start MainActivity calls checkForUpdate() in the background. It
  * fetches manifest.json from the public "models" bucket in the project's
- * Supabase Storage (see ModelManifest and scripts/publish_model.py) and,
- * if the version is newer than what would run now, downloads the model,
- * checks its size and SHA-256, opens it with ONNX Runtime, checks the
- * input/output shapes and runs one test window. Only then is it moved into
- * place. The new model is picked up the next time the app starts;
- * the session already running is never swapped mid-drive.
+ * Supabase Storage (see ModelManifest, EnsembleManifest and
+ * scripts/publish_model.py) and, for each ModelRole whose published
+ * version is newer than what would run now, downloads that model, checks
+ * its size and SHA-256, opens it with ONNX Runtime, checks the role's
+ * input/output shapes and runs one test window. Only then is it moved
+ * into place. The roles are independent: a bad download of one never
+ * touches the other. A new model is picked up the next time the app
+ * starts; the session already running is never swapped mid-drive.
  *
  * BiasCorrectionModel asks downloadedModel() for a verified file at load
- * time and falls back to the model bundled in the APK on any failure, so
- * a bad download or a corrupted file can never stop the app from working.
- * The dead-reckoning pipeline itself stays fully offline; with no network
- * this whole class is a logged no-op.
+ * time and falls back to the role's model bundled in the APK on any
+ * failure, so a bad download or a corrupted file can never stop the app
+ * from working. The dead-reckoning pipeline itself stays fully offline;
+ * with no network this whole class is a logged no-op.
  */
 object ModelUpdater {
 
-    /** Version of the model bundled in the APK's assets. Bump this
-     * whenever checkpoints/dead_reckoning_model.onnx is replaced, so a
-     * phone with the new APK doesn't keep an older downloaded model.
-     * 1 = best.pt, 2 = best_v3chain.pt. */
-    const val BUNDLED_MODEL_VERSION = 2
+    /** Version of each role's model bundled in the APK's assets. Bump one
+     * whenever its checkpoints/model_<role>.onnx is replaced, so a phone
+     * with the new APK doesn't keep an older downloaded model.
+     * 1 = augbias_long (slow) and speedaware (fast), the first ensemble. */
+    const val BUNDLED_SLOW_VERSION = 1
+    const val BUNDLED_FAST_VERSION = 1
+
+    fun bundledVersion(role: ModelRole): Int = when (role) {
+        ModelRole.SLOW -> BUNDLED_SLOW_VERSION
+        ModelRole.FAST -> BUNDLED_FAST_VERSION
+    }
 
     private const val TAG = "ModelUpdater"
     private const val DIR_NAME = "model_update"
-    private const val MODEL_FILE = "current.onnx"
     private const val PREFS_NAME = "model_update_prefs"
-    private const val KEY_VERSION = "installed_version"
-    private const val KEY_SHA256 = "installed_sha256"
-    private const val KEY_REJECTED = "rejected_version"
+    // The single model the app ran before the ensemble. Removed on the
+    // first check so it doesn't sit on the phone forever.
+    private const val LEGACY_MODEL_FILE = "current.onnx"
+    private val LEGACY_KEYS = listOf("installed_version", "installed_sha256", "rejected_version")
+
+    private fun modelFile(role: ModelRole) = "${role.key}.onnx"
+    private fun keyVersion(role: ModelRole) = "${role.key}_installed_version"
+    private fun keySha(role: ModelRole) = "${role.key}_installed_sha256"
+    private fun keyRejected(role: ModelRole) = "${role.key}_rejected_version"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -65,19 +78,19 @@ object ModelUpdater {
     }
 
     /**
-     * The downloaded model, if there is one newer than the bundled model
-     * and its bytes still match the SHA-256 recorded at install time.
-     * Returns null (and cleans up) otherwise, so the caller loads the
-     * bundled model.
+     * The downloaded model for [role], if there is one newer than the
+     * bundled model and its bytes still match the SHA-256 recorded at
+     * install time. Returns null (and cleans up) otherwise, so the caller
+     * loads the bundled model.
      */
-    fun downloadedModel(context: Context): Downloaded? {
+    fun downloadedModel(context: Context, role: ModelRole): Downloaded? {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val version = prefs.getInt(KEY_VERSION, 0)
-        val sha = prefs.getString(KEY_SHA256, null)
-        val file = File(File(context.filesDir, DIR_NAME), MODEL_FILE)
-        if (version <= BUNDLED_MODEL_VERSION || sha == null || !file.exists()) {
+        val version = prefs.getInt(keyVersion(role), 0)
+        val sha = prefs.getString(keySha(role), null)
+        val file = File(File(context.filesDir, DIR_NAME), modelFile(role))
+        if (version <= bundledVersion(role) || sha == null || !file.exists()) {
             // Nothing installed, or the APK now bundles something as new.
-            if (file.exists() || version != 0) clearInstalled(context, rejected = false)
+            if (file.exists() || version != 0) clearInstalled(context, role, rejected = false)
             return null
         }
         return try {
@@ -85,15 +98,15 @@ object ModelUpdater {
             if (ModelChecks.sha256Hex(bytes) != sha) {
                 // The file changed on disk after it was verified. Delete it
                 // but don't blacklist the version: a fresh download is fine.
-                Log.w(TAG, "downloaded model v$version failed its checksum on load, using bundled model")
-                clearInstalled(context, rejected = false)
+                Log.w(TAG, "downloaded ${role.key} model v$version failed its checksum on load, using bundled model")
+                clearInstalled(context, role, rejected = false)
                 null
             } else {
                 Downloaded(version, bytes)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "could not read downloaded model v$version, using bundled model", e)
-            clearInstalled(context, rejected = false)
+            Log.w(TAG, "could not read downloaded ${role.key} model v$version, using bundled model", e)
+            clearInstalled(context, role, rejected = false)
             null
         }
     }
@@ -101,55 +114,74 @@ object ModelUpdater {
     /** Called when a downloaded model fails to load. Deletes it and
      * remembers its version so the same file isn't fetched again; a
      * later, higher version is still accepted. */
-    fun discardDownloaded(context: Context) = clearInstalled(context, rejected = true)
+    fun discardDownloaded(context: Context, role: ModelRole) = clearInstalled(context, role, rejected = true)
 
-    private fun clearInstalled(context: Context, rejected: Boolean) {
+    private fun clearInstalled(context: Context, role: ModelRole, rejected: Boolean) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val version = prefs.getInt(KEY_VERSION, 0)
-        File(File(context.filesDir, DIR_NAME), MODEL_FILE).delete()
+        val version = prefs.getInt(keyVersion(role), 0)
+        File(File(context.filesDir, DIR_NAME), modelFile(role)).delete()
         prefs.edit().apply {
-            remove(KEY_VERSION)
-            remove(KEY_SHA256)
-            if (rejected && version > 0) putInt(KEY_REJECTED, version)
+            remove(keyVersion(role))
+            remove(keySha(role))
+            if (rejected && version > 0) putInt(keyRejected(role), version)
         }.commit()
     }
 
+    private fun clearLegacy(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        File(File(context.filesDir, DIR_NAME), LEGACY_MODEL_FILE).delete()
+        if (LEGACY_KEYS.any(prefs::contains)) {
+            prefs.edit().apply { LEGACY_KEYS.forEach(::remove) }.commit()
+        }
+    }
+
     /** Throws if this session's shapes aren't exactly what FusionEngine
-     * feeds and reads (see ModelChecks). */
-    fun requireCompatible(session: OrtSession) {
+     * feeds and reads for [role] (see ModelChecks). */
+    fun requireCompatible(session: OrtSession, role: ModelRole) {
         val inputs = session.inputInfo.values.map { (it.info as TensorInfo).shape }
         val outputs = session.outputInfo.values.map { (it.info as TensorInfo).shape }
-        require(ModelChecks.shapesCompatible(inputs, outputs)) {
-            "model shapes ${inputs.map { it.toList() }} -> ${outputs.map { it.toList() }} " +
-                "don't match ${ModelChecks.INPUT_SHAPE.toList()} -> ${ModelChecks.OUTPUT_SHAPE.toList()}"
+        require(ModelChecks.shapesCompatible(inputs, outputs, role)) {
+            "${role.key} model shapes ${inputs.map { it.toList() }} -> ${outputs.map { it.toList() }} " +
+                "don't match ${ModelChecks.inputShape(role.channels).toList()} -> ${ModelChecks.OUTPUT_SHAPE.toList()}"
         }
     }
 
-    /** Never throws; every failure comes back as Result.Failed. */
-    suspend fun checkForUpdate(context: Context): Result = withContext(Dispatchers.IO) {
-        try {
-            val result = check(context.applicationContext)
-            when (result) {
-                is Result.Installed -> Log.i(TAG, "installed model v${result.version}, active from next app start")
-                is Result.UpToDate -> Log.i(TAG, "model up to date")
-                is Result.Failed -> Log.w(TAG, "update rejected: ${result.reason}")
+    /** One Result per role. Never throws; every failure comes back as
+     * Result.Failed, and a failure fetching the manifest is reported for
+     * every role. */
+    suspend fun checkForUpdate(context: Context): Map<ModelRole, Result> = withContext(Dispatchers.IO) {
+        val app = context.applicationContext
+        val results = try {
+            clearLegacy(app)
+            val baseUrl = BuildConfig.MODEL_BASE_URL.trimEnd('/')
+            val manifestJson = fetch("$baseUrl/manifest.json", noCache = true, maxBytes = 16 * 1024)
+            val manifests = EnsembleManifest.parse(String(manifestJson, Charsets.UTF_8))
+            ModelRole.values().associateWith { role ->
+                val m = manifests[role] ?: return@associateWith Result.UpToDate
+                try {
+                    check(app, baseUrl, role, m)
+                } catch (e: Exception) {
+                    Result.Failed(e.toString())
+                }
             }
-            result
         } catch (e: Exception) {
             Log.w(TAG, "update check failed: $e")
-            Result.Failed(e.toString())
+            ModelRole.values().associateWith { Result.Failed(e.toString()) }
         }
+        for ((role, result) in results) {
+            when (result) {
+                is Result.Installed -> Log.i(TAG, "installed ${role.key} model v${result.version}, active from next app start")
+                is Result.UpToDate -> Log.i(TAG, "${role.key} model up to date")
+                is Result.Failed -> Log.w(TAG, "${role.key} update rejected: ${result.reason}")
+            }
+        }
+        results
     }
 
-    private fun check(context: Context): Result {
-        val baseUrl = BuildConfig.MODEL_BASE_URL.trimEnd('/')
+    private fun check(context: Context, baseUrl: String, role: ModelRole, manifest: ModelManifest): Result {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-        val manifestJson = fetch("$baseUrl/manifest.json", noCache = true, maxBytes = 16 * 1024)
-        val manifest = ModelManifest.parse(String(manifestJson, Charsets.UTF_8))
-
-        val running = maxOf(BUNDLED_MODEL_VERSION, prefs.getInt(KEY_VERSION, 0))
-        val rejected = prefs.getInt(KEY_REJECTED, 0).takeIf { it > 0 }
+        val running = maxOf(bundledVersion(role), prefs.getInt(keyVersion(role), 0))
+        val rejected = prefs.getInt(keyRejected(role), 0).takeIf { it > 0 }
         if (!ModelChecks.shouldDownload(manifest.version, running, rejected)) return Result.UpToDate
 
         val bytes = fetch("$baseUrl/${manifest.file}", noCache = false, maxBytes = ModelManifest.MAX_MODEL_BYTES)
@@ -161,43 +193,43 @@ object ModelUpdater {
             return Result.Failed("v${manifest.version}: checksum mismatch")
         }
         try {
-            validate(bytes)
+            validate(bytes, role)
         } catch (e: Exception) {
             // A model that downloads fine but can't run here would fail
             // the same way every time, so don't fetch this version again.
-            prefs.edit().putInt(KEY_REJECTED, manifest.version).commit()
+            prefs.edit().putInt(keyRejected(role), manifest.version).commit()
             return Result.Failed("v${manifest.version}: ${e.message}")
         }
 
         // Write to a temp file and rename, so a crash mid-write never
-        // leaves a half-written current.onnx behind.
+        // leaves a half-written model behind.
         val dir = File(context.filesDir, DIR_NAME).apply { mkdirs() }
-        val tmp = File(dir, "$MODEL_FILE.tmp")
+        val tmp = File(dir, "${modelFile(role)}.tmp")
         tmp.writeBytes(bytes)
-        val target = File(dir, MODEL_FILE)
+        val target = File(dir, modelFile(role))
         if (!tmp.renameTo(target)) {
             tmp.delete()
             return Result.Failed("v${manifest.version}: could not move model into place")
         }
         prefs.edit()
-            .putInt(KEY_VERSION, manifest.version)
-            .putString(KEY_SHA256, sha)
+            .putInt(keyVersion(role), manifest.version)
+            .putString(keySha(role), sha)
             .commit()
         return Result.Installed(manifest.version)
     }
 
     /** Opens the model, checks its shapes and runs one all-zero window,
      * which is a stationary phone. Throws on any problem. */
-    private fun validate(bytes: ByteArray) {
+    private fun validate(bytes: ByteArray, role: ModelRole) {
         val env = OrtEnvironment.getEnvironment()
         env.createSession(bytes, OrtSession.SessionOptions()).use { session ->
-            requireCompatible(session)
-            val window = FloatArray(50 * 6)
-            OnnxTensor.createTensor(env, FloatBuffer.wrap(window), ModelChecks.INPUT_SHAPE).use { input ->
+            requireCompatible(session, role)
+            val window = FloatArray(ModelChecks.WINDOW.toInt() * role.channels)
+            OnnxTensor.createTensor(env, FloatBuffer.wrap(window), ModelChecks.inputShape(role.channels)).use { input ->
                 session.run(mapOf(session.inputNames.first() to input)).use { result ->
                     @Suppress("UNCHECKED_CAST")
                     val out = (result[0].value as Array<Array<FloatArray>>)[0]
-                    require(out.size == 50 && out.all { it.size == 2 && it.all(Float::isFinite) }) {
+                    require(ModelChecks.outputUsable(out)) {
                         "test inference gave a wrong-shaped or non-finite output"
                     }
                 }
