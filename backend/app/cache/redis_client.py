@@ -11,8 +11,20 @@ settings = get_settings()
 
 class InMemoryCacheFallback:
     """High-speed in-memory LRU/TTL cache fallback when Redis is unreachable."""
+    _PURGE_INTERVAL_SEC = 60.0
+
     def __init__(self):
         self._store: Dict[str, Dict[str, Any]] = {}
+        self._last_purge = time.time()
+
+    def _purge_expired(self, now: float):
+        """Drop expired keys. Without this, a key that is never read again (e.g. a
+        device that stopped connecting) stayed in memory forever despite its TTL."""
+        expired = [k for k, item in self._store.items()
+                   if item["expires_at"] and now > item["expires_at"]]
+        for k in expired:
+            del self._store[k]
+        self._last_purge = now
 
     async def get(self, key: str) -> Optional[str]:
         item = self._store.get(key)
@@ -24,7 +36,10 @@ class InMemoryCacheFallback:
         return item["value"]
 
     async def set(self, key: str, value: str, ex: Optional[int] = None) -> bool:
-        expires_at = time.time() + ex if ex else None
+        now = time.time()
+        if now - self._last_purge >= self._PURGE_INTERVAL_SEC:
+            self._purge_expired(now)
+        expires_at = now + ex if ex else None
         self._store[key] = {"value": value, "expires_at": expires_at}
         return True
 
