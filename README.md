@@ -300,7 +300,7 @@ python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
 python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
 
 # 4. export for the mobile app
-python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints/best.pt
+python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints/best_v3chain.pt
 
 # sanity check any time you change the integrator/model/loss
 python -m tests.test_pipeline_smoke
