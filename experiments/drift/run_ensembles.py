@@ -33,6 +33,8 @@ which = sys.argv[1:]
 hist = [int(a.split("=", 1)[1]) for a in which if a.startswith("hist=")]
 sp = ideas2.hist_splits(hist[0])() if hist else aligned.build_splits()
 net = (lambda: ideas2.HistNet()) if hist else lib.new_model
+if "speed" in which:  # members take the current speed as an input
+    net = ideas2.HistSpeedNet if hist else ideas.SpeedAwareNet
 runs = []  # (name, desc, model, needs current speed)
 if "rescore" in which:
     runs.append(("A_physics", "physics only, fixed calibration (aligned metric)", lib.ZeroNet(), False))
@@ -51,7 +53,7 @@ for base in [a.split("=", 1)[1] for a in which if a.startswith("base=")] or ["au
 if "seedens" in which:
     names = [a.split("=", 1)[1] for a in which if a.startswith("ens=")] or ["augbias", "augbias_s7", "augbias_long"]
     runs.append(("seedens_" + "+".join(names), "mean correction of " + " + ".join(names),
-                 ideas2.MeanEnsemble([load(n, net) for n in names]), False))
+                 ideas2.MeanEnsemble([load(n, net) for n in names]), "speed" in which))
 for name, desc, m, v0 in runs:
     res = aligned.evaluate(m.eval(), sp, set_v0=v0)
     rec = lib.save_result(name, desc, res)
