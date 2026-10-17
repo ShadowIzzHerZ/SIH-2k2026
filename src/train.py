@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import time
 from pathlib import Path
@@ -197,6 +198,24 @@ def chain_loss(model, batch, dt: float, device, weights: dict):
         last_chain_drift = cd
     metrics["chain_drift_pct"] = last_chain_drift.mean().item()   # cumulative over all K chunks
     return total / K, metrics
+
+
+RESUME_LR_FLOOR_FRAC = 0.01
+
+
+def build_lr_scheduler(opt, train_cfg: dict, resume: bool):
+    """Per-epoch LR schedule; see the comment at its call site in main()."""
+    if not resume:
+        return torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=train_cfg["epochs"])
+    cycle_len = max(train_cfg["early_stop_patience"] + 2, 10)
+    floor = RESUME_LR_FLOOR_FRAC
+
+    def factor(epoch: int) -> float:
+        if epoch >= cycle_len:
+            return floor
+        return floor + (1.0 - floor) * 0.5 * (1.0 + math.cos(math.pi * epoch / cycle_len))
+
+    return torch.optim.lr_scheduler.LambdaLR(opt, factor)
 
 
 def main():
@@ -526,11 +545,15 @@ def main():
     # can lean on. Sized to the guaranteed window instead, so LR reaches a
     # genuinely low, fine-tuning-scale value even in that worst case
     # (T_max=10, patience=8 -> LR ~2e-4 by the 8th epoch instead of ~9.7e-4).
+    # CosineAnnealingLR is periodic, though: a resumed cycle that *does* keep
+    # finding new bests runs past T_max and the LR climbs straight back to
+    # the peak by epoch 2*T_max. So on a resume the short cosine decays to a
+    # small floor (RESUME_LR_FLOOR_FRAC of the base LR) and then holds there.
     # Cold start keeps the full-length cycle (unchanged; that run already
     # reached the 63.26% best cleanly over 57 real epochs, finding enough
-    # new bests along the way to actually use a long cycle).
-    cycle_len = cfg["train"]["epochs"] if not args.resume else max(cfg["train"]["early_stop_patience"] + 2, 10)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cycle_len)
+    # new bests along the way to actually use a long cycle). T_max equals
+    # the epoch count there, so it never wraps.
+    scheduler = build_lr_scheduler(opt, cfg["train"], resume=bool(args.resume))
 
     # Seed "best" from the loaded checkpoint's real val drift (not inf) so
     # this run only overwrites best.pt when it actually beats what it
