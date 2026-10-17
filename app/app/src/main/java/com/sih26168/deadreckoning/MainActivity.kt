@@ -561,8 +561,13 @@ class MainActivity : AppCompatActivity() {
         val hasLocationPermission = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
             .all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
         if (hasLocationPermission) locationReader.start()
-        ticking = true
-        tickHandler.postDelayed(::tick, tickIntervalMs)
+        // Can run twice (e.g. "continue with demo", then granting location
+        // later): a second self-reposting tick loop would run fusion at
+        // 20 Hz while it assumes dt = 0.1 s, so only ever start one.
+        if (!ticking) {
+            ticking = true
+            tickHandler.postDelayed(::tick, tickIntervalMs)
+        }
     }
 
     private data class Sample(
