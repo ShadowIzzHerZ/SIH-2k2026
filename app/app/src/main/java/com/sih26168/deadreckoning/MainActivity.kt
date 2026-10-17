@@ -967,6 +967,10 @@ class MainActivity : AppCompatActivity() {
         locationReader.stop()
         model.close()
         devRecorder.stop()
+        // A recording still running here ends now, so it gets the same
+        // upload as a Record-switch stop. No-op if none was running
+        // (recordingSessionStartedAt is cleared on every stop).
+        uploadRecordingSessionIfConsented()
         // Same cleanup AuthActivity's own activityScope gets. Recording
         // uploads run in AppScope instead, so this doesn't cut them off.
         activityScope.cancel()
