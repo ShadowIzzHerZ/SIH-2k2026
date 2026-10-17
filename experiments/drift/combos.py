@@ -45,6 +45,10 @@ COMBOS = {
     "ens_all5": ("ens", ["moredata", "moredata_s7", "moredata_s3", "richaug", "richaug_s7"],
                  "average of moredata (3 seeds) and richaug (2 seeds)"),
     "ens_moredata4": ("ens", ["moredata", "moredata_s7", "moredata_s3", "moredata_s11"], "average of 4 moredata seeds"),
+    "duo_ens3_slowspec7": ("duo", [["moredata", "moredata_s7", "moredata_s3"], "slowspec"],
+                           "3-seed moredata average above 7 m/s, slow specialist below", 7.0),
+    "duo_all5_slowspec7": ("duo", [["moredata", "moredata_s7", "moredata_s3", "richaug", "richaug_s7"], "slowspec"],
+                           "5-model average above 7 m/s, slow specialist below", 7.0),
     "ens_round3": ("ens", ["moredata", "moredata_s7", "richaug", "richaug_s7"],
                    "average of moredata and richaug, both seeds"),
     "duo_moredata_slowspec": ("duo", ["moredata", "slowspec"], "moredata above 6 m/s, slow specialist below"),
@@ -58,6 +62,8 @@ def run(name):
     mode, members, desc, *sw = COMBOS[name]
     if members[0] is None:
         members = [Mix(["moredata", "moredata_s7"])] + members[1:]
+    elif isinstance(members[0], list):
+        members = [Mix(members[0])] + members[1:]
     m = Mix(members, mode, *sw).eval()
     sp = lib.build_splits("fwdfix")  # only val/test are used here
     res = lib.evaluate(m, sp, chain_fn=lib.chained_drift_x, fwd=ideas.speedaware_forward)
