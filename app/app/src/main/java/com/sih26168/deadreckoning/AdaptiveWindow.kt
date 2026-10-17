@@ -19,17 +19,18 @@ object AdaptiveWindow {
      * given views, on top of whatever padding they already declare. */
     fun applyInsets(activity: Activity, root: View, top: View? = null, bottom: View? = null) {
         WindowCompat.setDecorFitsSystemWindows(activity.window, false)
-        val topBase = top?.paddingTop ?: 0
+        val topBase = (top ?: root).paddingTop
         val bottomBase = (bottom ?: root).paddingBottom
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
-            if (top != null) {
-                top.setPadding(top.paddingLeft, topBase + bars.top, top.paddingRight, top.paddingBottom)
-            } else {
-                root.setPadding(root.paddingLeft, bars.top, root.paddingRight, root.paddingBottom)
-            }
+            // With no separate top view the root takes the status bar inset,
+            // still on top of its own declared padding (it used to replace it).
+            (top ?: root).setPadding(
+                (top ?: root).paddingLeft, topBase + bars.top,
+                (top ?: root).paddingRight, (top ?: root).paddingBottom
+            )
             (bottom ?: root).setPadding(
                 (bottom ?: root).paddingLeft, (bottom ?: root).paddingTop,
                 (bottom ?: root).paddingRight, bottomBase + bars.bottom
