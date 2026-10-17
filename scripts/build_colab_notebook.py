@@ -122,6 +122,7 @@ for rel in [
     "src/models/bias_correction_net.py",
     "src/data/io_vnbd_loader.py",
     "src/data/windowing.py",
+    "src/chain_eval.py",  # src.train and src.evaluate import it
     "src/train.py",
     "src/evaluate.py",
     "src/export_onnx.py",
@@ -165,13 +166,16 @@ real names filled in) before training.
 """))
 
 cells.append(md(
-"""## 6. Get the best checkpoint to resume from
+"""## 6. Get the checkpoint to resume from
 
-Never cold-starts if a better starting point exists. Checks, in order:
-1. Google Drive from a previous Colab run (Step 2), if mounted and present
-2. `checkpoints/best.pt` already pushed to the GitHub repo (the last
-   locally-trained result — currently ~62.8% test drift)
-3. otherwise trains from scratch
+Same scheme as `scripts/train_until_target.sh`: the loop warm-starts from
+`checkpoints/best_v3chain.pt` (the checkpoint the app ships, see
+`checkpoints/README.md`) and writes its own results to
+`checkpoints/best_loop.pt` / `results/eval_report_loop.json`, so it can never
+overwrite `best_v3chain.pt` or the older `best.pt`. This cell gets, in order:
+1. `best_loop.pt` from Google Drive, if a previous Colab run left one (Step 2)
+2. `best_v3chain.pt` from the GitHub repo (the starting point)
+3. if neither is reachable, Step 7 trains from scratch
 
 `src.train`'s `--resume` flag (below) then warm-starts from whatever this
 cell finds, instead of random init.
@@ -185,33 +189,45 @@ import urllib.request
 os.makedirs("checkpoints", exist_ok=True)
 os.makedirs("results", exist_ok=True)
 
-GITHUB_RAW = "https://raw.githubusercontent.com/ShadowIzzHerZ/Sih/main"
+GITHUB_RAW = "https://raw.githubusercontent.com/ShadowIzzHerZ/SIH-2k2026/main"
+RESUME_FROM = "checkpoints/best_v3chain.pt"  # the shipped model
+RUN_NAME = "loop"
+OUT = f"checkpoints/best_{RUN_NAME}.pt"     # what the loop trains into
+REPORT = f"results/eval_report_{RUN_NAME}.json"
 
-if os.path.exists(CKPT_DIR + "/best.pt"):
-    shutil.copy(CKPT_DIR + "/best.pt", "checkpoints/best.pt")
-    if os.path.exists(RESULTS_DIR + "/train_history.json"):
-        shutil.copy(RESULTS_DIR + "/train_history.json", "results/train_history.json")
-    print("resuming from Google Drive checkpoint (previous Colab run)")
-else:
-    try:
-        urllib.request.urlretrieve(GITHUB_RAW + "/checkpoints/best.pt", "checkpoints/best.pt")
-        print("resuming from checkpoints/best.pt already in the GitHub repo (~62.8% test drift)")
-    except Exception as e:
-        print(f"no existing checkpoint found anywhere ({e}) — will train from scratch")
+drive_ok = os.path.exists("/content/drive/MyDrive")
+if drive_ok and os.path.exists(CKPT_DIR + f"/best_{RUN_NAME}.pt"):
+    shutil.copy(CKPT_DIR + f"/best_{RUN_NAME}.pt", OUT)
+    if os.path.exists(RESULTS_DIR + f"/train_history_{RUN_NAME}.json"):
+        shutil.copy(RESULTS_DIR + f"/train_history_{RUN_NAME}.json", f"results/train_history_{RUN_NAME}.json")
+    print(f"resuming from {OUT} on Google Drive (previous Colab run)")
+try:
+    urllib.request.urlretrieve(GITHUB_RAW + "/" + RESUME_FROM, RESUME_FROM)
+    print(f"downloaded {RESUME_FROM} from the GitHub repo")
+except Exception as e:
+    print(f"could not download {RESUME_FROM} ({e})")
+if not os.path.exists(OUT) and not os.path.exists(RESUME_FROM):
+    print("no checkpoint found anywhere — Step 7 will train from scratch")
 """))
 
 cells.append(md(
 """## 7. Train until the target drift is hit (or this runtime ends)
 
-Each cycle runs a full `src.train` pass (`--resume checkpoints/best.pt` once
-one exists) — a cosine-annealed "warm restart" from the current best weights
-— then evaluates on the real held-out test set. It keeps looping,
+Each cycle runs a full `src.train` pass with `--run_name loop` (resuming from
+`best_loop.pt` once one exists, otherwise from `best_v3chain.pt`) — a
+cosine-annealed "warm restart" from the current best weights — then
+evaluates on the real held-out test set. `src.train` only writes
+`best_loop.pt` when it beats the weights it started from. It keeps looping,
 checkpointing to Drive after every cycle so nothing is lost if Colab
 disconnects mid-run, until either the PS's <10% drift target is hit or the
 cycle cap below is reached (a safety backstop against a runaway loop, not a
 real target — at ~60 epochs/cycle it's far more cycles than one Colab
 session will ever reach, so in practice this only stops on target-hit,
 failure, or the runtime itself ending).
+
+`TRAIN_ARGS` is passed through to `src.train`, e.g.
+`["--chain_train_chunks", "3"]` to keep the chained-chunk objective
+`best_v3chain.pt` was fine-tuned with.
 """))
 
 cells.append(code(
@@ -223,79 +239,113 @@ import os
 
 TARGET_DRIFT_PCT = 10.0
 MAX_CYCLES = 500  # safety backstop only, see markdown above — not a real limit
+TRAIN_ARGS = []
+
+
+def current_checkpoint():
+    # best_loop.pt once this loop has improved on its starting point, else
+    # the starting point itself (None = nothing yet, cold start)
+    for p in (OUT, RESUME_FROM):
+        if os.path.exists(p):
+            return p
+    return None
+
 
 cycle = 0
 while cycle < MAX_CYCLES:
     cycle += 1
-    resume_args = ["--resume", "checkpoints/best.pt"] if os.path.exists("checkpoints/best.pt") else []
-    print(f"\\n{'='*70}\\ncycle {cycle} {'(warm restart)' if resume_args else '(cold start)'}\\n{'='*70}")
+    start = current_checkpoint()
+    resume_args = ["--resume", start] if start else []
+    print(f"\\n{'='*70}\\ncycle {cycle} {('(warm restart from ' + start + ')') if start else '(cold start)'}\\n{'='*70}")
 
     # -u: unbuffered stdout. Without it, src.train's stdout is piped (not a
     # TTY) so Python fully block-buffers it — nothing appears in the Colab
     # cell until the whole cycle's subprocess exits and flushes everything
     # at once, which can look like a silent hang for many minutes on a
     # cold-start cycle. -u makes per-epoch progress genuinely live here too.
-    train_ret = subprocess.run([sys.executable, "-u", "-m", "src.train", "--config", "configs/default.yaml", *resume_args])
+    train_ret = subprocess.run([sys.executable, "-u", "-m", "src.train", "--config", "configs/default.yaml",
+                                *resume_args, "--run_name", RUN_NAME, *TRAIN_ARGS])
     if train_ret.returncode != 0:
         print("training subprocess exited with an error — stopping the loop, see output above")
         break
 
-    if os.path.exists("/content/drive/MyDrive"):
-        shutil.copy("checkpoints/best.pt", CKPT_DIR + "/best.pt")
-        if os.path.exists("results/train_history.json"):
-            shutil.copy("results/train_history.json", RESULTS_DIR + "/train_history.json")
+    if drive_ok and os.path.exists(OUT):
+        shutil.copy(OUT, CKPT_DIR + f"/best_{RUN_NAME}.pt")
+        if os.path.exists(f"results/train_history_{RUN_NAME}.json"):
+            shutil.copy(f"results/train_history_{RUN_NAME}.json", RESULTS_DIR + f"/train_history_{RUN_NAME}.json")
 
+    ckpt = current_checkpoint()
     eval_ret = subprocess.run(
-        [sys.executable, "-m", "src.evaluate", "--config", "configs/default.yaml", "--checkpoint", "checkpoints/best.pt"],
+        [sys.executable, "-m", "src.evaluate", "--config", "configs/default.yaml", "--checkpoint", ckpt,
+         "--run_name", RUN_NAME],
         capture_output=True, text=True,
     )
     print(eval_ret.stdout[-1500:])
-    if eval_ret.returncode != 0 or not os.path.exists("results/eval_report.json"):
+    if eval_ret.returncode != 0 or not os.path.exists(REPORT):
         print("evaluate failed or produced no report — stopping the loop, see output above")
         break
 
-    report = json.load(open("results/eval_report.json"))
+    report = json.load(open(REPORT))
     mean_drift = report["mean_drift_pct"]
-    print(f"cycle {cycle}: test mean drift {mean_drift:.2f}% (target < {TARGET_DRIFT_PCT}%)")
-    if os.path.exists("/content/drive/MyDrive"):
-        shutil.copy("results/eval_report.json", RESULTS_DIR + "/eval_report.json")
+    print(f"cycle {cycle}: {ckpt} test mean drift {mean_drift:.2f}% (target < {TARGET_DRIFT_PCT}%)")
+    if drive_ok:
+        shutil.copy(REPORT, RESULTS_DIR + f"/eval_report_{RUN_NAME}.json")
 
     if mean_drift < TARGET_DRIFT_PCT:
         print(f"\\n🎯 target reached after {cycle} cycle(s) — stopping.")
         break
 else:
-    print(f"\\nhit the {MAX_CYCLES}-cycle safety cap without reaching target — this would be very unusual; check results/train_history.json for what's actually happening (plateaued vs. still improving).")
+    print(f"\\nhit the {MAX_CYCLES}-cycle safety cap without reaching target — this would be very unusual; check results/train_history_{RUN_NAME}.json for what's actually happening (plateaued vs. still improving).")
 
-assert os.path.exists("checkpoints/best.pt"), "checkpoint still missing — something is wrong, scroll up"
-print(f"\\n✅ checkpoints/best.pt: {os.path.getsize('checkpoints/best.pt')} bytes")
+ckpt = current_checkpoint()
+assert ckpt, "no checkpoint at all — something is wrong, scroll up"
+print(f"\\n✅ {ckpt}: {os.path.getsize(ckpt)} bytes"
+      + ("" if ckpt == OUT else f" (no cycle beat {RESUME_FROM}, so there is no {OUT})"))
 """))
 
 cells.append(md(
 """## 8. Evaluate against the PS's <10% drift benchmark
 
 (Step 7's loop already ran this each cycle — this cell just re-confirms the
-final number on the checkpoint the loop stopped on.)
+final number on the checkpoint the loop stopped on: `best_loop.pt`, or
+`best_v3chain.pt` if no cycle improved on it.)
 """))
 cells.append(code(
 """import os
-assert os.path.exists("checkpoints/best.pt"), (
-    "checkpoints/best.pt doesn't exist — go back and get Step 7 to finish with a ✅ first."
-)
-!python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
+ckpt = OUT if os.path.exists(OUT) else RESUME_FROM
+assert os.path.exists(ckpt), f"{ckpt} doesn't exist — go back and get Step 7 to finish with a ✅ first."
+!python -m src.evaluate --config configs/default.yaml --checkpoint {ckpt} --run_name {RUN_NAME}
 """))
 
-cells.append(md("## 9. Export to ONNX (for the mobile app)"))
+cells.append(md(
+"""## 9. Export to ONNX (for the mobile app)
+
+Exports `best_loop.pt` to `checkpoints/dead_reckoning_model_loop.onnx`, not
+to the config's `checkpoints/dead_reckoning_model.onnx`: that name is the
+model the app ships, and copying a Colab export over it by accident would
+replace it with whatever this run produced. Compare
+`results/eval_report_loop.json` against `results/README.md` first, then copy
+it over the shipped file by hand if it really is better. If no cycle beat
+`best_v3chain.pt`, there is nothing new to export.
+"""))
 cells.append(code(
 """import os
-assert os.path.exists("checkpoints/best.pt"), (
-    "checkpoints/best.pt doesn't exist — go back and get Step 7 to finish with a ✅ first."
-)
-!python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints/best.pt
-
 import shutil
-if os.path.exists("checkpoints/dead_reckoning_model.onnx") and os.path.exists("/content/drive/MyDrive"):
-    shutil.copy("checkpoints/dead_reckoning_model.onnx", CKPT_DIR + "/dead_reckoning_model.onnx")
-    print("ONNX model copied to Drive")
+import yaml
+
+ONNX_OUT = f"checkpoints/dead_reckoning_model_{RUN_NAME}.onnx"
+if not os.path.exists(OUT):
+    print(f"{OUT} doesn't exist (no cycle beat {RESUME_FROM}) — nothing new to export; "
+          f"the shipped ONNX is already {RESUME_FROM}.")
+else:
+    export_cfg = yaml.safe_load(open("configs/default.yaml"))
+    export_cfg["export"]["onnx_path"] = ONNX_OUT
+    with open(f"configs/export_{RUN_NAME}.yaml", "w") as f:
+        yaml.safe_dump(export_cfg, f)
+    !python -m src.export_onnx --config configs/export_{RUN_NAME}.yaml --checkpoint {OUT}
+    if os.path.exists(ONNX_OUT) and drive_ok:
+        shutil.copy(ONNX_OUT, CKPT_DIR + f"/dead_reckoning_model_{RUN_NAME}.onnx")
+        print("ONNX model copied to Drive")
 """))
 
 cells.append(md(
@@ -304,7 +354,7 @@ cells.append(code(
 """from google.colab import files
 import os
 
-for f in ["checkpoints/best.pt", "checkpoints/dead_reckoning_model.onnx", "results/eval_report.json"]:
+for f in [OUT, f"checkpoints/dead_reckoning_model_{RUN_NAME}.onnx", REPORT]:
     if os.path.exists(f):
         files.download(f)
     else:
