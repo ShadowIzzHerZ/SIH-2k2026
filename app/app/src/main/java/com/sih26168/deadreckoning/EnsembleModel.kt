@@ -135,8 +135,10 @@ class EnsembleModel(
 
     private fun run(role: ModelRole, window: Array<FloatArray>, startSpeed: Float): Array<FloatArray>? {
         val model = (if (role == ModelRole.FAST) fast else slow) ?: return null
-        val input = if (role == ModelRole.FAST) SpeedGate.withSpeedChannel(window, startSpeed) else window
+        // withSpeedChannel is inside the try too: a window it rejects must
+        // fall back like any other failure, not crash the tick.
         val out = try {
+            val input = if (role == ModelRole.FAST) SpeedGate.withSpeedChannel(window, startSpeed) else window
             model.predict(input)
         } catch (e: Exception) {
             return null
