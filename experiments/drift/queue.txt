@@ -49,3 +49,7 @@ ens_last9mix
 lastepoch --seed 17
 lastepoch --seed 21
 ens_lastepoch8
+lastepoch_chain6 --seed 11
+lastepoch_chain6 --seed 3
+ens_chain6_4
+ens_last6_chain6_4
