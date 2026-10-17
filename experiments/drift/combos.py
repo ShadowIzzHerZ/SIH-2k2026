@@ -67,6 +67,8 @@ COMBOS = {
                          "average of 3 last-epoch speedaware seeds without the recovered drives"),
     "ens_lastepoch8": ("ens", ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13",
                                "lastepoch_s17", "lastepoch_s21"], "average of 8 last-epoch moredata seeds"),
+    "ens_last9mix": ("ens", ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13"] + ["lastepoch_noextra", "lastepoch_noextra_s7", "lastepoch_noextra_s3"], "average of 6 last-epoch moredata + 3 last-epoch no-extra seeds"),
+    "duo_last6_noextra7": ("duo", [["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13"], ["lastepoch_noextra", "lastepoch_noextra_s7", "lastepoch_noextra_s3"]], "6-seed last-epoch moredata average above 7 m/s, 3-seed no-extra average below", 7.0),
     "ens_round3": ("ens", ["moredata", "moredata_s7", "richaug", "richaug_s7"],
                    "average of moredata and richaug, both seeds"),
     "duo_moredata_slowspec": ("duo", ["moredata", "slowspec"], "moredata above 6 m/s, slow specialist below"),
@@ -82,6 +84,8 @@ def run(name):
         members = [Mix(["moredata", "moredata_s7"])] + members[1:]
     elif isinstance(members[0], list):
         members = [Mix(members[0])] + members[1:]
+    if mode == "duo" and isinstance(members[1], list):
+        members = [members[0], Mix(members[1])]
     m = Mix(members, mode, *sw).eval()
     sp = lib.build_splits("fwdfix")  # only val/test are used here
     res = lib.evaluate(m, sp, chain_fn=lib.chained_drift_x, fwd=ideas.speedaware_forward)

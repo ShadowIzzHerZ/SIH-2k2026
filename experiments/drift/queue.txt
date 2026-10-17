@@ -44,6 +44,8 @@ lastepoch_noextra --seed 3
 ens_lastnoextra3
 lastepoch_chain6
 lastepoch_chain6 --seed 7
+duo_last6_noextra7
+ens_last9mix
 lastepoch --seed 17
 lastepoch --seed 21
 ens_lastepoch8
