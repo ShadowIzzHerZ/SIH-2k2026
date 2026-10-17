@@ -91,10 +91,17 @@ def main():
 
     print(json.dumps(report, indent=2))
     json.dump(report, open(f"results/eval_{args.run_name}.json", "w"), indent=2)
+    print_summary(report)
+
+
+def print_summary(report):
     print("\n=== summary (median drift %, share under 10%) ===")
     for name, e in report.items():
         for kind in ("window", "chained_30s"):
             for k, v in e[kind].items():
+                if not v:  # chained_drift returns {} when no complete chain exists
+                    print(f"{name:22s} {kind:12s} {k:13s} no complete chains")
+                    continue
                 med = v.get("median", v.get("median_drift_pct")); pas = v.get("pass_pct", v.get("pass_rate_pct"))
                 print(f"{name:22s} {kind:12s} {k:13s} median {med:6.1f}%   under10 {pas:5.1f}%")
 
