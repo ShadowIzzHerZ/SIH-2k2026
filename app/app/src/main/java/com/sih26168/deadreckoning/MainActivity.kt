@@ -239,8 +239,30 @@ class MainActivity : AppCompatActivity() {
             locationRequiredCard.visibility = View.GONE
             startPipeline()
         } else {
-            locationRequiredCard.visibility = View.VISIBLE
+            showLocationRequired()
         }
+    }
+
+    /** Shows locationRequiredCard. When only approximate location was
+     * granted (Android 12+ lets the user pick it in the permission dialog)
+     * the card says precise location is what's missing: approximate fixes
+     * have no speed or bearing, which hasRecentFix and yaw calibration both
+     * need, so live mode can't run on them. The card's settings button is
+     * where precise location can be turned on. */
+    private fun showLocationRequired() {
+        val approximateOnly =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        findViewById<TextView>(R.id.locationNeededTitle).setText(
+            if (approximateOnly) R.string.location_precise_needed_title else R.string.location_needed_title
+        )
+        findViewById<TextView>(R.id.locationNeededBody).setText(
+            if (approximateOnly) R.string.location_precise_needed_body else R.string.location_needed_body
+        )
+        findViewById<TextView>(R.id.locationSettingsBody).setText(
+            if (approximateOnly) R.string.location_precise_needed_settings_body else R.string.location_needed_settings_body
+        )
+        locationRequiredCard.visibility = View.VISIBLE
     }
 
     private fun locationPermissionGranted(): Boolean =
