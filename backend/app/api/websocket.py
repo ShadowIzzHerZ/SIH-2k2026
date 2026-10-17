@@ -50,6 +50,9 @@ async def restore_or_init_filter(device_id: str) -> IMUKalmanFilter:
             kf.movement_state = last_pos.get("movement_state", "REST")
             kf.step_count = last_pos.get("step_count", 0)
             kf.last_timestamp = last_pos["timestamp"]
+            step_age = last_pos.get("last_step_age_sec")
+            if step_age is not None:
+                kf._last_step_time = kf.last_timestamp - step_age
             cov = last_pos.get("covariance")
             if cov is not None and np.shape(cov) == (9, 9):
                 kf.P = np.array(cov, dtype=np.float64)
