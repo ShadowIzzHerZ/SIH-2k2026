@@ -2,7 +2,7 @@
 import asyncio
 import json
 import logging
-from typing import Dict, Any, Optional, Set
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.core.auth import authenticate_ws
 from app.core.time_sync import TimeSyncManager
@@ -175,7 +175,7 @@ async def queue_worker():
             queue_mgr.task_done()
 
 _db_write_lock = asyncio.Lock()
-_pending_writes: Set[asyncio.Task] = set()
+_pending_writes: set[asyncio.Task] = set()
 
 async def drain_pending_writes(timeout: float = 10.0):
     """Wait for in-flight trajectory writes to finish (called on shutdown)."""
