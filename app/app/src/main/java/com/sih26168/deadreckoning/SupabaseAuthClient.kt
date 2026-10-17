@@ -120,7 +120,9 @@ object SupabaseAuthClient {
 
                 client.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string().orEmpty()
-                    Log.d(TAG, "signUp: HTTP ${response.code}, body=$responseBody")
+                    // Status only: a successful body carries the access and
+                    // refresh tokens, which must never reach logcat.
+                    Log.d(TAG, "signUp: HTTP ${response.code}")
                     if (!response.isSuccessful) {
                         throw IOException(extractErrorMessage(responseBody, response.code))
                     }
@@ -162,7 +164,7 @@ object SupabaseAuthClient {
 
                 client.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string().orEmpty()
-                    Log.d(TAG, "signIn: HTTP ${response.code}, body=$responseBody")
+                    Log.d(TAG, "signIn: HTTP ${response.code}")
                     if (!response.isSuccessful) {
                         throw IOException(extractErrorMessage(responseBody, response.code))
                     }
