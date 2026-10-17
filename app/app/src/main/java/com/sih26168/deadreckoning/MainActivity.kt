@@ -536,7 +536,9 @@ class MainActivity : AppCompatActivity() {
         val endLon = recordingSessionEndLon
         val hadBlackout = recordingSessionHadBlackout
 
-        activityScope.launch {
+        // AppScope, not activityScope: the upload is a single request that
+        // must survive this Activity finishing or being recreated.
+        AppScope.launch {
             SupabaseAuthClient.recordDriveSession(
                 session = session,
                 deviceId = deviceId,
@@ -965,8 +967,8 @@ class MainActivity : AppCompatActivity() {
         locationReader.stop()
         model.close()
         devRecorder.stop()
-        // Same cleanup AuthActivity's own activityScope gets — otherwise a
-        // recording-upload coroutine outlives the Activity that started it.
+        // Same cleanup AuthActivity's own activityScope gets. Recording
+        // uploads run in AppScope instead, so this doesn't cut them off.
         activityScope.cancel()
     }
 }
