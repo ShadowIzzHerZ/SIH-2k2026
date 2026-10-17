@@ -705,6 +705,8 @@ class MainActivity : AppCompatActivity() {
             // bearing could get fed into yaw alignment as if it were real.
             if (sample.hasFix && sample.hasBearing) {
                 calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
+            } else {
+                calibration.breakYawRun()
             }
             showCalibrating(
                 getString(

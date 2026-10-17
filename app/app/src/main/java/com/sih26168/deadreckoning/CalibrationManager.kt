@@ -37,29 +37,17 @@ import kotlin.math.sqrt
  *     vehicle levels immediately instead of waiting out the timeout.
  *   - Yaw lock-in waits for the estimate to *settle* — two checkpoints
  *     ~1s apart agreeing — instead of locking in on whatever
- *     `minConfidentSamples` happens to produce first. The estimate
- *     assumes an initial straight-line stretch (see
- *     estimate_yaw_misalignment); a stretch containing a turn, a lane
- *     change, or stop-and-go traffic makes the raw median swing wildly
- *     as more samples arrive, and settledness catches that directly.
+ *     `minConfidentSamples` happens to produce first. A stretch whose
+ *     samples don't agree on one mount angle (a phone shifting in its
+ *     mount, GPS speed/course noise) makes the estimate swing as more
+ *     samples arrive, and settledness catches that directly. A
+ *     checkpoint with no usable fit at all (steady cruising: GPS implies
+ *     no accel to match against) never counts as agreeing.
  *
- *     Tried circular variance of the underlying angle diffs first (do
- *     the *samples* agree with each other, not just the estimate) — it's
- *     the theoretically cleaner check, and synthetic tests confirmed it
- *     rejects an alternating-heading stretch correctly. But measuring it
- *     against this app's own bundled real recorded drive (see
- *     ReplayDataSource) found real accel-vs-GPS-heading noise is louder
- *     than that synthetic test assumed: circular variance swung from
- *     0.14 to 0.84 across different windows of the *same* validated
- *     drive, with no threshold separating "real noisy driving" from "an
- *     actual turn" — so gating on it made every real calibration run out
- *     the safety cap and get flagged degraded, on data that was fine.
- *     Checkpoint settledness alone turned out to already reject the
- *     synthetic alternating-heading case just as well (each checkpoint's
- *     median swings between the two headings' respective values, which
- *     is exactly what settledness checks for) — so it's the one gate
- *     doing real work; circular variance is kept as a much looser,
- *     informational-only signal (see [yawSpreadThresh]'s doc).
+ *     A checkpoint whose fit is too incoherent for
+ *     Calibration.estimateYawMisalignment to answer (it returns 0, see
+ *     [yawSpreadThresh]) doesn't count as agreeing either, or a run of
+ *     refusals would "settle" on 0.
  *
  * Both gates have a hard safety cap (maxLevelSamples / maxConfidentSamples):
  * a genuinely noisy environment — road vibration through a mount, a
@@ -84,15 +72,15 @@ class CalibrationManager(
     // anyway, while still rejecting a mid-turn estimate that swings tens
     // of degrees between checkpoints.
     private val yawStabilityThreshRad: Float = 0.15f,
-    // Informational only (see class doc) — not part of the isReady gate.
-    // Only flags isRoughCalibration for near-total incoherence (real
-    // validated driving data measured up to 0.84; this sits well above
-    // that so it doesn't cry wolf on real noisy-but-fine driving).
-    private val yawSpreadThresh: Float = 0.95f,
+    // Not part of the isReady gate. Flags isRoughCalibration when the
+    // locked-in estimate's fit is this incoherent (Calibration.
+    // yawMisalignmentSpread) — 0.5 is where estimateYawMisalignment's
+    // default minFitQuality makes it refuse and return 0.
+    private val yawSpreadThresh: Float = 0.5f,
     private val yawCheckpointGap: Int = 10,
     // Consecutive checkpoints (each yawCheckpointGap raw ticks apart) that
-    // must all agree before locking in — not just the latest two. A
-    // median over a small filtered subset can land close to a previous
+    // must all agree before locking in — not just the latest two. An
+    // estimate over a small filtered subset can land close to a previous
     // checkpoint's value by pure chance even from genuinely inconsistent
     // data (measured directly: a synthetic 50/50 random-mix stretch with
     // no real consistent direction still passed a 2-checkpoint agreement
@@ -108,10 +96,14 @@ class CalibrationManager(
     // history for a stable estimate, short enough to actually recover
     // after a turn within one confident-collection window.
     private val yawWindowSamples: Int = 60,
+    // Spacing of addYawSample calls, s — MainActivity's 10 Hz tick. The
+    // estimate differentiates GPS speed and course over it.
+    private val yawSampleDtS: Float = 0.1f,
 ) {
     private val levelBuf = ArrayList<FloatArray>(levelSamples)
     private val yawAccelBuf = ArrayList<FloatArray>()
     private val yawHeadingBuf = ArrayList<FloatArray>()
+    private val yawSpeedBuf = ArrayList<Float>()
 
     private var levelSamplesSeen = 0
     private var yawSamplesSeen = 0
@@ -187,7 +179,13 @@ class CalibrationManager(
      * `yawCheckpointGap` samples apart agree, or at maxConfidentSamples,
      * whichever comes first — see class doc. */
     fun addYawSample(rawAccel: FloatArray, gpsSpeed: Float, gpsHeadingRad: Float) {
-        if (!isLeveled || isReady || gpsSpeed <= minSpeedMps) return
+        if (!isLeveled || isReady) return
+        if (gpsSpeed <= minSpeedMps) {
+            // The estimate differentiates consecutive samples, so a slow
+            // stretch breaks the run instead of being stitched over.
+            breakYawRun()
+            return
+        }
         val leveled = Calibration.matVec3(rLevel!!, rawAccel)
         yawAccelBuf.add(floatArrayOf(leveled[0], leveled[1]))
         yawHeadingBuf.add(
@@ -196,9 +194,11 @@ class CalibrationManager(
                 kotlin.math.sin(gpsHeadingRad.toDouble()).toFloat(),
             )
         )
+        yawSpeedBuf.add(gpsSpeed)
         if (yawAccelBuf.size > yawWindowSamples) {
             yawAccelBuf.removeAt(0)
             yawHeadingBuf.removeAt(0)
+            yawSpeedBuf.removeAt(0)
         }
 
         yawSamplesSeen++
@@ -210,28 +210,39 @@ class CalibrationManager(
         if (n < minConfidentSamples) return
         if (n - lastYawCheckpointSize < yawCheckpointGap && lastYawEstimate != null) return
 
-        val estimate = Calibration.estimateYawMisalignment(yawAccelBuf, yawHeadingBuf)
+        val estimate = Calibration.estimateYawMisalignment(
+            yawAccelBuf, yawHeadingBuf, yawSpeedBuf, yawSampleDtS, minSpeedMps
+        )
+        val spread = Calibration.yawMisalignmentSpread(
+            yawAccelBuf, yawHeadingBuf, yawSpeedBuf, yawSampleDtS, minSpeedMps
+        )
+        val incoherent = spread >= yawSpreadThresh
         // The load-bearing check: has the estimate stopped moving across
-        // yawRequiredAgreements checkpoints in a row? See class doc for
-        // why circular variance didn't add anything real data didn't
-        // already fail cleanly, and this streak's own doc for why two
-        // checkpoints agreeing isn't enough on its own.
-        val agreesWithLast = lastYawEstimate?.let { angleDiff(estimate, it) < yawStabilityThreshRad } == true
+        // yawRequiredAgreements checkpoints in a row? See this streak's
+        // own doc for why two checkpoints agreeing isn't enough on its own.
+        val agreesWithLast = !incoherent &&
+            lastYawEstimate?.let { angleDiff(estimate, it) < yawStabilityThreshRad } == true
         yawAgreementStreak = if (agreesWithLast) yawAgreementStreak + 1 else 0
         val settled = yawAgreementStreak >= yawRequiredAgreements - 1
         val giveUp = n >= maxConfidentSamples
 
         if (settled || giveUp) {
             psiYaw = estimate
-            // Near-total incoherence even in a settled estimate is still
-            // worth flagging — see yawSpreadThresh's doc.
-            val incoherent = Calibration.yawMisalignmentSpread(yawAccelBuf, yawHeadingBuf) >= yawSpreadThresh
             yawConverged = settled && !incoherent
             isReady = true
             return
         }
         lastYawEstimate = estimate
         lastYawCheckpointSize = n
+    }
+
+    /** Drop the buffered yaw samples: the next addYawSample isn't
+     * yawSampleDtS after the last one (no GPS fix/bearing that tick, or
+     * too slow), so differencing across the gap would be wrong. */
+    fun breakYawRun() {
+        yawAccelBuf.clear()
+        yawHeadingBuf.clear()
+        yawSpeedBuf.clear()
     }
 
     /**
