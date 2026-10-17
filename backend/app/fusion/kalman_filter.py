@@ -158,6 +158,10 @@ class IMUKalmanFilter:
         Process a single IMU reading packet (at 10Hz) with mode specification.
         """
         current_ts = packet.get("timestamp", 0.0)
+        if "timestamp" in packet and self.last_timestamp is not None and current_ts < self.last_timestamp:
+            # Older than the state (e.g. backlog processed after newer live frames): stepping
+            # with it would run the filter backwards in time, so leave the state untouched.
+            return {**self._fused_state(), "stale": True}
         dt = (current_ts - self.last_timestamp) if self.last_timestamp else 0.10
         dt = max(0.01, min(1.0, dt))
         self.last_timestamp = current_ts
@@ -176,6 +180,9 @@ class IMUKalmanFilter:
             if np.linalg.norm(mag) > 1e-3:
                 self.update_magnetometer(mag)
 
+        return {**self._fused_state(), "stale": False}
+
+    def _fused_state(self) -> Dict[str, Any]:
         return {
             "x": float(self.x[0, 0]),
             "y": float(self.x[1, 0]),
