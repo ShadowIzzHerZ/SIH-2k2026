@@ -53,6 +53,8 @@ COMBOS = {
                       "average of all 6 moredata seeds (no seed picked by test results)"),
     "duo_ens6_slowspec7": ("duo", [["moredata", "moredata_s7", "moredata_s3", "moredata_s11", "moredata_s5", "moredata_s13"],
                                    "slowspec"], "6-seed moredata average above 7 m/s, slow specialist below", 7.0),
+    "ens_speedaware3": ("ens", ["speedaware", "speedaware_s7", "speedaware_s3"],
+                        "average of 3 speedaware seeds (no extra drives): fair control for the moredata ensembles"),
     "ens_round3": ("ens", ["moredata", "moredata_s7", "richaug", "richaug_s7"],
                    "average of moredata and richaug, both seeds"),
     "duo_moredata_slowspec": ("duo", ["moredata", "slowspec"], "moredata above 6 m/s, slow specialist below"),
