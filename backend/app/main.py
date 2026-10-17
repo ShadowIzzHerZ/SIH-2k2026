@@ -22,9 +22,28 @@ logging.basicConfig(
 logger = logging.getLogger("sih_backend")
 settings = get_settings()
 
+# Placeholder secrets shipped in .env.example / DEPLOYMENT.md
+_PLACEHOLDER_SECRETS = {
+    "change-me-generate-with-openssl-rand-hex-32",
+    "your_generated_jwt_secret_key_here",
+}
+
+def warn_if_weak_secret_key(secret_key: str) -> bool:
+    """Log a warning for a short or placeholder JWT secret. Startup is not blocked."""
+    if secret_key in _PLACEHOLDER_SECRETS:
+        logger.warning("SECRET_KEY is still the example placeholder; anyone can forge device tokens. "
+                       "Generate one with: openssl rand -hex 32")
+        return True
+    if len(secret_key.encode("utf-8")) < 32:
+        logger.warning(f"SECRET_KEY is only {len(secret_key.encode('utf-8'))} bytes; use at least 32 "
+                       "random bytes for HS256 (openssl rand -hex 32).")
+        return True
+    return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing SIH Dead Reckoning Backend...")
+    warn_if_weak_secret_key(settings.SECRET_KEY)
     await cache_manager.connect()
     await init_db()
     
