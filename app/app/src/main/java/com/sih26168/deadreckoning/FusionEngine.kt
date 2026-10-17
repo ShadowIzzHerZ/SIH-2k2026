@@ -302,15 +302,13 @@ class FusionEngine(
         // real Location.hasBearing() explicitly.
         gnssHasBearing: Boolean = true,
     ) {
-        if (rollingWindow.size >= windowSize) rollingWindow.removeFirst()
-        rollingWindow.addLast(calibratedAccel + calibratedGyro)
-
         // The model can only ever be called with a full windowSize buffer
         // (see class doc) — force GNSS_TRACKING behavior, real or
         // simulated blackout ignored, until there's enough real history to
         // safely resolve a chunk. Only matters for the first ~5s right
-        // after calibration completes.
-        val effectiveAvailable = available || rollingWindow.size < windowSize
+        // after calibration completes. Counts this tick's own sample, which
+        // is only pushed into rollingWindow below.
+        val effectiveAvailable = available || rollingWindow.size + 1 < windowSize
 
         if (effectiveAvailable && !wasAvailable) {
             // GNSS just came back — fold in any pending (< windowSize)
@@ -323,11 +321,23 @@ class FusionEngine(
             // the true last blackout position yet — chunkAnchor always is,
             // updated immediately inside resolveChunk regardless of how
             // long the display takes to visually catch up to it.
+            //
+            // Flushed BEFORE this tick's sample joins rollingWindow: this
+            // sample is GNSS-available, not part of the blackout, so the
+            // window's last `pending` rows must still be exactly the
+            // blackout's own samples (same chunk fusion.py's run_fusion
+            // integrates). Pushing first shifted the harvest one sample
+            // late — dropping the first blackout sample and integrating
+            // this one instead.
             flushPending()
             blendRemaining = blendSamples
             blendFrom = chunkAnchor.copy()
             chunkBlendRemaining = 0  // superseded by the GNSS-reconnect blend starting now
         }
+
+        if (rollingWindow.size >= windowSize) rollingWindow.removeFirst()
+        rollingWindow.addLast(calibratedAccel + calibratedGyro)
+
         if (!effectiveAvailable && wasAvailable) {
             // Blackout just started fresh (from GNSS_TRACKING or BLEND) —
             // anchor to the real current state and start clean. Explicit
