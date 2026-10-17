@@ -42,4 +42,4 @@ phone mount, engine/wheels off — `calibration.py` uses this to work out the
 phone's mounting angle relative to the vehicle.
 
 ## Status
-- [ ] No recordings yet — this is set up and ready for the first drop
+- [x] 10 `openroute_*` recordings from 2026-09-09 and 2026-09-10, collected with the app's Developer mode
