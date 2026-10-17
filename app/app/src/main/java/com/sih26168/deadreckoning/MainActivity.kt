@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -237,6 +238,13 @@ class MainActivity : AppCompatActivity() {
             locationRequiredCard.visibility = View.VISIBLE
         }
     }
+
+    // Asked when a recording starts (see startRecordingService()). The
+    // answer needs no handling: RecordingService runs either way, this
+    // only decides whether its notification is visible.
+    private val requestNotificationPermission = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -490,7 +498,9 @@ class MainActivity : AppCompatActivity() {
                 recordingSessionEndLat = null
                 recordingSessionEndLon = null
                 recordingSessionHadBlackout = false
+                startRecordingService()
             } else {
+                RecordingService.stop(this)
                 val file = devRecorder.stop()
                 devRecordStatus.text = if (file != null) {
                     "Saved ${file.name} — ${devRecorder.sampleCount} samples"
@@ -513,6 +523,23 @@ class MainActivity : AppCompatActivity() {
             calibration.skipForTesting()
             Toast.makeText(this, "Calibration skipped (testing) — not a real estimate", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /** Keeps the recording running in the background / with the screen
+     * off — see RecordingService. */
+    private fun startRecordingService() {
+        fun granted(permission: String) =
+            ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+        if (RecordingForeground.shouldRequestNotificationPermission(
+                Build.VERSION.SDK_INT, granted(Manifest.permission.POST_NOTIFICATIONS))
+        ) {
+            requestNotificationPermission.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+        }
+        RecordingService.start(
+            this,
+            hasFineLocation = granted(Manifest.permission.ACCESS_FINE_LOCATION),
+            hasCoarseLocation = granted(Manifest.permission.ACCESS_COARSE_LOCATION),
+        )
     }
 
     /** Fires once a real (non-replay) recording stops. Silent no-op unless
@@ -965,6 +992,7 @@ class MainActivity : AppCompatActivity() {
         locationReader.stop()
         model.close()
         devRecorder.stop()
+        RecordingService.stop(this)
         // Same cleanup AuthActivity's own activityScope gets — otherwise a
         // recording-upload coroutine outlives the Activity that started it.
         activityScope.cancel()
