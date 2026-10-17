@@ -182,7 +182,11 @@ object SupabaseAuthClient {
      * session's refresh token for a fresh access token (Supabase's expire
      * after an hour by default). Supabase rotates the refresh token on every
      * use, so the new session is stored straight away; the old refresh token
-     * stops working. Blocking: call from Dispatchers.IO. */
+     * stops working. If GoTrue says the refresh token itself is no longer
+     * valid (revoked, already used, signed out elsewhere), the stored
+     * session is cleared too: it can never work again, and keeping it made
+     * every later upload fail the same way without anything changing.
+     * Blocking: call from Dispatchers.IO. */
     fun refreshSession(context: Context, session: Session): Session {
         val body = JSONObject().apply {
             put("refresh_token", session.refreshToken)
@@ -197,6 +201,14 @@ object SupabaseAuthClient {
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
+                // Only if it's still the stored session, so a newer sign-in
+                // or refresh isn't thrown away.
+                if (isRevokedRefreshToken(response.code, responseBody) &&
+                    getStoredSession(context)?.refreshToken == session.refreshToken
+                ) {
+                    Log.w(TAG, "refresh token rejected, clearing the stored session")
+                    clearStoredSession(context)
+                }
                 throw SupabaseHttpException(response.code, extractErrorMessage(responseBody, response.code))
             }
             val refreshed = parseSession(responseBody)
@@ -340,6 +352,20 @@ object SupabaseAuthClient {
 /** A non-2xx Supabase response, keeping the HTTP status so an expired
  * access token (401) can be told apart from other failures. */
 internal class SupabaseHttpException(val code: Int, message: String) : IOException(message)
+
+/** True when a refresh_token grant failed because the refresh token itself
+ * is dead: HTTP 400/401 with `"error": "invalid_grant"` (older GoTrue) or an
+ * `error_code` saying the refresh token, session or user is gone (newer
+ * GoTrue). Network errors, 5xx and anything else keep the session so a
+ * later refresh can still succeed. */
+internal fun isRevokedRefreshToken(httpCode: Int, responseBody: String): Boolean {
+    if (httpCode != 400 && httpCode != 401) return false
+    val json = runCatching { JSONObject(responseBody) }.getOrNull() ?: return false
+    val errorCode = json.optString("error_code")
+    return json.optString("error") == "invalid_grant" ||
+        errorCode.startsWith("refresh_token_") ||
+        errorCode in setOf("session_not_found", "session_expired", "user_not_found", "user_banned")
+}
 
 /** A GoTrue token response (sign-in or refresh) as a Session. */
 internal fun parseSession(responseBody: String): SupabaseAuthClient.Session {
