@@ -143,6 +143,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var devRecordStatus: TextView
     private lateinit var devShareButton: Button
     private lateinit var devRecorder: DevRecorder
+    private lateinit var accountSignInButton: Button
     private lateinit var prefs: SharedPreferences
 
     // drive_sessions upload (see SUPABASE.md) — tracked alongside
@@ -320,6 +321,7 @@ class MainActivity : AppCompatActivity() {
         devRecordToggle = findViewById(R.id.devRecordToggle)
         devRecordStatus = findViewById(R.id.devRecordStatus)
         devShareButton = findViewById(R.id.devShareButton)
+        accountSignInButton = findViewById(R.id.accountSignInButton)
 
         liveMapContent = findViewById(R.id.liveMapContent)
         sensorsPanel = findViewById(R.id.sensorsPanel)
@@ -378,6 +380,8 @@ class MainActivity : AppCompatActivity() {
         setupDevRecording()
         setupLocationRequiredScreen()
         setupBottomNav()
+        accountSignInButton.setOnClickListener { AuthActivity.launch(this) }
+        updateAccountButton()
 
         val needed = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (needed.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
@@ -933,6 +937,24 @@ class MainActivity : AppCompatActivity() {
         )
         val idx = ((deg / 22.5f) + 0.5f).toInt().mod(16)
         return names[idx]
+    }
+
+    /** The Simulation tab's account button: the only way into AuthActivity.
+     * Once signed in (and the device set up, see
+     * SupabaseAuthClient.isSetupComplete) AuthActivity would just close
+     * again, so the button says so instead. */
+    private fun updateAccountButton() {
+        val signedIn = SupabaseAuthClient.getStoredSession(this) != null &&
+            SupabaseAuthClient.isSetupComplete(this)
+        accountSignInButton.text = getString(if (signedIn) R.string.account_signed_in else R.string.account_sign_in)
+        accountSignInButton.isEnabled = !signedIn
+    }
+
+    // Back from AuthActivity (or anywhere else): the sign-in state may have
+    // changed.
+    override fun onRestart() {
+        super.onRestart()
+        updateAccountButton()
     }
 
     override fun onResume() {
