@@ -16,11 +16,22 @@ export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update -y || sudo yum update -y
 
 # 2. Check and install Docker & Docker Compose if missing
+# get.docker.com doesn't support Amazon Linux; it ships its own docker package.
+IS_AMAZON_LINUX=false
+if grep -q '^ID="\?amzn"\?$' /etc/os-release 2>/dev/null; then
+    IS_AMAZON_LINUX=true
+fi
+
 if ! command -v docker &> /dev/null; then
     echo "[2/6] Docker not found. Installing Docker Engine..."
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sudo sh get-docker.sh
-    rm -f get-docker.sh
+    if [ "$IS_AMAZON_LINUX" = true ]; then
+        sudo dnf install -y docker
+        sudo systemctl enable --now docker
+    else
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sudo sh get-docker.sh
+        rm -f get-docker.sh
+    fi
     sudo usermod -aG docker $USER || true
     echo "Docker installed successfully."
 else
@@ -31,7 +42,16 @@ fi
 echo "[3/6] Verifying Docker Compose..."
 if ! docker compose version &> /dev/null; then
     echo "Installing Docker Compose plugin..."
-    sudo apt-get install -y docker-compose-plugin || sudo yum install -y docker-compose-plugin
+    if [ "$IS_AMAZON_LINUX" = true ]; then
+        # No docker-compose-plugin package in the Amazon Linux repos; install
+        # the release binary as a CLI plugin instead.
+        sudo mkdir -p /usr/local/lib/docker/cli-plugins
+        sudo curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m)" \
+            -o /usr/local/lib/docker/cli-plugins/docker-compose
+        sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+    else
+        sudo apt-get install -y docker-compose-plugin || sudo yum install -y docker-compose-plugin
+    fi
 fi
 
 # 4. Configure Firewall if UFW is active
