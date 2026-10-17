@@ -483,6 +483,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 devShareButton.visibility = View.GONE
                 val file = devRecorder.start("openroute")
+                if (file == null) {
+                    devRecordToggle.isChecked = false
+                    devRecordStatus.text = getString(R.string.dev_record_no_storage)
+                    Toast.makeText(this, R.string.dev_record_no_storage, Toast.LENGTH_LONG).show()
+                    return@setOnCheckedChangeListener
+                }
                 devRecordStatus.text = "Recording to ${file.name}…"
                 recordingSessionStartedAt = Instant.now()
                 recordingSessionStartLat = null
