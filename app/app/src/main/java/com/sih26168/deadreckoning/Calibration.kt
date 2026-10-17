@@ -98,7 +98,10 @@ object Calibration {
     fun estimateYawMisalignment(levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>): Float {
         val diffs = yawAngleDiffs(levelAccelXY, gtHeadingXY)
         if (diffs.isEmpty()) return 0f
-        return diffs.sorted()[diffs.size / 2]
+        // np.median: mean of the two middle values for an even count.
+        val sorted = diffs.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2f
     }
 
     /**
@@ -147,8 +150,16 @@ object Calibration {
      * different sample sets. */
     private fun yawAngleDiffs(levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>): List<Float> {
         val mags = levelAccelXY.map { sqrt((it[0] * it[0] + it[1] * it[1]).toDouble()).toFloat() }
+        if (mags.isEmpty()) return emptyList()
+        // np.percentile(mag, 75)'s default linear interpolation between
+        // the two nearest ranks — not sorted[(n * 0.75).toInt()], which
+        // sits one rank higher and so kept one sample fewer than the
+        // Python reference (none at all for a 4-sample window).
         val sorted = mags.sorted()
-        val p75 = sorted[(sorted.size * 0.75).toInt().coerceIn(0, sorted.size - 1)]
+        val rank = 0.75 * (sorted.size - 1)
+        val lo = rank.toInt()
+        val hi = minOf(lo + 1, sorted.size - 1)
+        val p75 = (sorted[lo] + (rank - lo) * (sorted[hi] - sorted[lo])).toFloat()
         val diffs = mutableListOf<Float>()
         for (i in levelAccelXY.indices) {
             if (mags[i] <= p75) continue
