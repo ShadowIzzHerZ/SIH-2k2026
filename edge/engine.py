@@ -210,20 +210,58 @@ class EdgeEngine:
         self.resampler = make_resampler(resample, model_hz, 6)
         self.gnss_timeout_s = gnss_timeout_s
         self.live_smooth_s = live_smooth_s
-        self.fix: Fix | None = None
+        self._fixes: deque[Fix] = deque()  # recent fixes, oldest first
         self.ticks: list[State] = []        # finalized 10 Hz track
         self.live: State | None = None      # high-rate propagated state (undisplayed)
         self._offset = np.zeros(2)          # display offset being faded out
         self._offset_t0 = 0.0
 
+    @property
+    def fix(self) -> Fix | None:
+        return self._fixes[-1] if self._fixes else None
+
     def push_gnss(self, fix: Fix):
-        self.fix = fix
+        prev = self.fix
+        if prev is not None and fix.t > prev.t and (fix.speed is None or fix.heading is None):
+            # Position-only receiver: take the missing speed / course from
+            # the previous fix over the real time between them. Left to
+            # ModelRateFusion, they would be differenced per 10 Hz tick, and
+            # a 1 Hz fix extrapolated without speed reads 0 m/s for nine
+            # ticks and 10x the true speed on the tenth.
+            dx, dy = fix.x - prev.x, fix.y - prev.y
+            dist = float(np.hypot(dx, dy))
+            speed = fix.speed if fix.speed is not None else dist / (fix.t - prev.t)
+            heading = fix.heading
+            if heading is None:
+                heading = float(np.arctan2(dy, dx)) if dist > 1e-6 else prev.heading
+            fix = Fix(fix.t, fix.x, fix.y, speed, heading)
+        if prev is not None and fix.t < prev.t:  # out of order: keep the list sorted
+            i = len(self._fixes)
+            while i > 0 and self._fixes[i - 1].t > fix.t:
+                i -= 1
+            self._fixes.insert(i, fix)
+        else:
+            self._fixes.append(fix)
+
+    def _drop_fixes_before(self, t: float):
+        """Forget fixes no tick at or after t can need (tick times only grow)."""
+        while len(self._fixes) > 1 and self._fixes[1].t <= t:
+            self._fixes.popleft()
 
     def _fix_at(self, t: float):
-        """The latest fix, extrapolated to t, or None if it is stale. Lets a
-        1-5 Hz GNSS receiver drive the 10 Hz state machine."""
-        f = self.fix
-        if f is None or not (0.0 <= t - f.t <= self.gnss_timeout_s):
+        """The latest fix at or before t, extrapolated to t, or None if it is
+        stale. Lets a 1-5 Hz GNSS receiver drive the 10 Hz state machine.
+
+        Ticks lag the raw stream (a tick is emitted by the first raw sample
+        after it, and an IMU gap emits a run of them at once), so fixes
+        newer than t may already have arrived. Looking only at the newest
+        fix would call such a tick stale and start a spurious blackout."""
+        f = None
+        for cand in reversed(self._fixes):
+            if cand.t <= t:
+                f = cand
+                break
+        if f is None or t - f.t > self.gnss_timeout_s:
             return None
         x, y = f.x, f.y
         if f.speed is not None and f.heading is not None:
@@ -239,6 +277,7 @@ class EdgeEngine:
         finalized = []
         for t_tick, s in self.resampler.push(t, np.concatenate([a, g])):
             finalized += self.core.tick(t_tick, s, self._fix_at(t_tick))
+            self._drop_fixes_before(t_tick)
         if finalized:
             self.ticks += finalized
             self._reanchor(finalized[-1], t)
