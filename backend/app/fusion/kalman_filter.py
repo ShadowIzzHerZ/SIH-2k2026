@@ -198,7 +198,8 @@ class IMUKalmanFilter:
             "P": self.P.tolist(),
             "last_timestamp": self.last_timestamp,
             "movement_state": self.movement_state,
-            "step_count": self.step_count
+            "step_count": self.step_count,
+            "last_step_time": self._last_step_time
         }
 
     @classmethod
@@ -211,4 +212,5 @@ class IMUKalmanFilter:
         kf.last_timestamp = state_dict.get("last_timestamp")
         kf.movement_state = state_dict.get("movement_state", "REST")
         kf.step_count = state_dict.get("step_count", 0)
+        kf._last_step_time = state_dict.get("last_step_time", 0.0)
         return kf
