@@ -60,6 +60,8 @@ train:
 
 eval:
   drift_target_pct: 10.0
+  # The PS's worked examples. Not scored on their own: both are the same
+  # 10% ratio as drift_target_pct (see src/evaluate.py's docstring).
   example_checks:
     - {distance_m: 50,  max_drift_m: 5,  max_time_s: 60}
     - {distance_m: 1000, max_drift_m: 100, speed_kmph: 60}
