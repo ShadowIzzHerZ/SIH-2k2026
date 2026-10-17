@@ -68,6 +68,10 @@ async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Device ID mismatch")
         return
 
+    if authenticated_id == "admin" and device_id != "admin":
+        await _observe_device(websocket, device_id)
+        return
+
     await websocket.accept()
     active_connections[device_id] = websocket
     logger.info(f"WebSocket client connected: {device_id}")
@@ -115,6 +119,46 @@ async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
         if active_connections.get(device_id) is websocket:
             active_connections.pop(device_id, None)
 
+# Admin sockets watching another device's stream. They only receive that device's
+# position updates and never take its slot in active_connections.
+device_observers: Dict[str, set] = {}
+
+async def _observe_device(websocket: WebSocket, device_id: str):
+    """
+    Admin/dashboard socket on another device's path: it receives that device's
+    position updates alongside the device itself. It does not replace the device
+    in active_connections, reset its filter, or inject sensor frames.
+    """
+    await websocket.accept()
+    device_observers.setdefault(device_id, set()).add(websocket)
+    logger.info(f"Admin observer connected to {device_id}")
+    try:
+        while True:
+            raw_text = await websocket.receive_text()
+            try:
+                data = json.loads(raw_text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict) and data.get("type") == "time_sync":
+                await websocket.send_text(json.dumps(TimeSyncManager.process_sync_request(data)))
+    except WebSocketDisconnect:
+        logger.info(f"Admin observer disconnected from {device_id}")
+    except Exception as e:
+        logger.error(f"Error on observer WebSocket for {device_id}: {e}")
+    finally:
+        observers = device_observers.get(device_id)
+        if observers is not None:
+            observers.discard(websocket)
+            if not observers:
+                device_observers.pop(device_id, None)
+
+async def _send_to_observers(device_id: str, text: str):
+    for obs in list(device_observers.get(device_id, ())):
+        try:
+            await obs.send_text(text)
+        except Exception:
+            pass
+
 async def queue_worker():
     """
     Background worker that continuously pulls from the Priority Ingestion Queue.
@@ -157,6 +201,7 @@ async def queue_worker():
                 "is_backlog": is_backlog,
                 "is_verified": True
             }
+            await _send_to_observers(device_id, json.dumps(payload_out))
 
             # 3. Push back to client if currently connected
             ws = active_connections.get(device_id)
