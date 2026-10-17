@@ -70,6 +70,7 @@ When reconnecting after an outage, send buffered data in manageable chunks (max 
   ]
 }
 ```
+Live frames are always processed first, so backlog is usually older than the device's latest fused state. Such frames are stored and echoed back with `"is_verified": false` and the current position, but they are not fused: the live filter never steps backwards in time.
  
 ### 5. Position Feedback Stream (Server $\to$ Client)
 The backend pushes back fused Kalman coordinates:
