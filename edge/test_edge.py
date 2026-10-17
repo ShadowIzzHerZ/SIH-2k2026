@@ -38,6 +38,15 @@ def test_resample():
     v = np.sin(2 * np.pi * 27 * t)[:, None]
     assert np.abs(resample(t, v, 10.0, "mean")[1]).max() < 0.15
     assert np.abs(resample(t, v, 10.0, "interp")[1]).max() > 0.8
+    # IMU dropout 3.0-4.5 s: "mean" bridges the empty bins along the ramp
+    # instead of holding the last bin's mean, and still emits every tick
+    t = np.arange(0, 8, 0.005)
+    t = t[(t < 3.0) | (t >= 4.5)]
+    tk, r = resample(t, np.stack([t, -t], axis=1), 10.0, "mean")
+    assert np.allclose(np.diff(tk), 0.1)
+    centre = tk - 0.05
+    assert np.allclose(r[:, 0], centre, atol=0.01) and np.allclose(r[:, 1], -centre, atol=0.01), \
+        np.abs(r[:, 0] - centre).max()
 
 
 def test_mounting():
@@ -156,6 +165,29 @@ def test_onnx_model():
     assert p.window_size == 50
     out = p(np.tile([0, 0, 9.81, 0, 0, 0], (50, 1)))
     assert out.shape == (50, 2) and np.isfinite(out).all()
+
+
+def test_engine_imu_dropout_mean():
+    """A 2 s IMU dropout inside a blackout while braking ends mid-gap. With
+    "mean" resampling the empty bins used to repeat the braking bin, adding
+    1.5 m/s of phantom deceleration and 28 m of error by the blackout's end."""
+    hz = 200.0
+    t = np.arange(0, 50, 1 / hz)
+    a = np.where((t >= 20) & (t < 26), -1.5, 0.0)
+    v = 15 + np.cumsum(a) / hz
+    x = np.cumsum(v) / hz
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="mean", gnss_timeout_s=0.15)
+    for i in range(len(t)):
+        if 25.0 <= t[i] < 27.0:
+            continue
+        if i % 20 == 0 and not 15 <= t[i] < 45:
+            eng.push_gnss(Fix(t[i], x[i], 0.0, v[i], 0.0))
+        eng.push_imu(t[i], [a[i], 0, 9.81], [0, 0, 0])
+    ticks = eng.finish()
+    assert np.allclose(np.diff([s.t for s in ticks]), 0.1)  # no tick dropped across the gap
+    last = [s for s in ticks if s.mode == BLACKOUT][-1]
+    j = np.searchsorted(t, last.t)
+    assert abs(last.speed - v[j]) < 0.2 and abs(last.x - x[j]) < 2.0, (last.speed, v[j], last.x - x[j])
 
 
 if __name__ == "__main__":
