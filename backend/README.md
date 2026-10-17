@@ -176,4 +176,6 @@ Token checks are **off by default** so the dashboard and local demos keep workin
 
 With `DEVICE_ENROLL_SECRET` unset, any caller can mint a token for any device id and the REST endpoints need no token; the server logs a warning the first time a token is minted that way. `/health` and the dashboard page are always open. The dashboard asks for the enrollment secret when the server requires one.
 
+`tests/simulate_device.py` and `tests/verify_deployment.py` read `DEVICE_ENROLL_SECRET` (or `ADMIN_SECRET`) from the environment or `backend/.env` and send it, plus the Bearer token, when it is set.
+
 Generate secrets with `openssl rand -hex 32`. `SECRET_KEY` (the JWT signing key) is separate and always required.

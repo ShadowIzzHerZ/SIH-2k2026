@@ -12,6 +12,7 @@ import sys
 import time
 import httpx
 import websockets
+from client_auth import token_request_body, bearer_headers
 
 def print_banner(text: str):
     print("\n" + "=" * 65)
@@ -40,7 +41,7 @@ async def test_auth(client: httpx.AsyncClient, base_url: str, device_id: str) ->
     try:
         res = await client.post(
             f"{base_url}/auth/token",
-            json={"device_id": device_id, "expires_minutes": 60},
+            json=token_request_body(device_id, 60),
             timeout=5.0
         )
         assert res.status_code == 200, f"Expected 200, got {res.status_code}"
@@ -102,12 +103,12 @@ async def test_websocket_stream(ws_base: str, device_id: str, token: str) -> boo
         print(f"  --> WebSocket 10Hz Fusion: FAILED ({e})")
         return False
 
-async def test_device_state(client: httpx.AsyncClient, base_url: str, device_id: str) -> bool:
+async def test_device_state(client: httpx.AsyncClient, base_url: str, device_id: str, token: str) -> bool:
     print(f"\n[STEP 4/5] Testing GET /device/{device_id}/state (Persistence & Cache)...")
     try:
         # Give queue worker a brief moment to commit to cache/db
         await asyncio.sleep(0.5)
-        res = await client.get(f"{base_url}/device/{device_id}/state", timeout=5.0)
+        res = await client.get(f"{base_url}/device/{device_id}/state", headers=bearer_headers(token), timeout=5.0)
         assert res.status_code == 200, f"Expected 200, got {res.status_code}"
         data = res.json()
         print(f"  Persisted Position: ({data.get('x')}, {data.get('y')}, {data.get('z')})")
@@ -118,10 +119,10 @@ async def test_device_state(client: httpx.AsyncClient, base_url: str, device_id:
         print(f"  --> Persistence & Cache Check: FAILED ({e})")
         return False
 
-async def test_trajectory_history(client: httpx.AsyncClient, base_url: str, device_id: str) -> bool:
+async def test_trajectory_history(client: httpx.AsyncClient, base_url: str, device_id: str, token: str) -> bool:
     print(f"\n[STEP 5/5] Testing GET /device/{device_id}/trajectory...")
     try:
-        res = await client.get(f"{base_url}/device/{device_id}/trajectory?limit=10", timeout=5.0)
+        res = await client.get(f"{base_url}/device/{device_id}/trajectory?limit=10", headers=bearer_headers(token), timeout=5.0)
         assert res.status_code == 200, f"Expected 200, got {res.status_code}"
         history = res.json()
         print(f"  Retrieved {len(history)} historical trajectory records.")
@@ -154,8 +155,8 @@ async def main():
 
         if token:
             results["WebSocket 10Hz"] = await test_websocket_stream(ws_base, device_id, token)
-            results["State Persistence"] = await test_device_state(client, http_base, device_id)
-            results["Trajectory History"] = await test_trajectory_history(client, http_base, device_id)
+            results["State Persistence"] = await test_device_state(client, http_base, device_id, token)
+            results["Trajectory History"] = await test_trajectory_history(client, http_base, device_id, token)
         else:
             results["WebSocket 10Hz"] = False
             results["State Persistence"] = False
