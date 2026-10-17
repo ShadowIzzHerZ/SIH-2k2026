@@ -95,7 +95,7 @@ ssh ubuntu@<YOUR_VPS_IP>
 ### Step 2: Clone the Repository
 ```bash
 git clone <YOUR_REPO_URL> sih-backend
-cd sih-backend
+cd sih-backend/backend
 ```
 
 ### Step 3: Execute the Automated Deploy Script
