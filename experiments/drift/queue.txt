@@ -26,3 +26,6 @@ ens_speedaware3
 lastepoch
 trainval
 trainval --seed 7
+speedaware --seed 5
+speedaware --seed 13
+ens_all11
