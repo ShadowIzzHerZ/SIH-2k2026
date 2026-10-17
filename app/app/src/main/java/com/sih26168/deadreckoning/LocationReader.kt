@@ -28,6 +28,11 @@ class LocationReader(private val context: Context) : LocationListener {
         private set
     @Volatile var lastFixUptimeMs: Long = 0
         private set
+    // True while lastLocation is only start()'s getLastKnownLocation()
+    // seed: fine for placing the map marker, but it can be minutes or
+    // hours old, so its speed and bearing must not reach fusion or yaw
+    // calibration as a live fix. Cleared by the first real update.
+    @Volatile private var lastIsSeed = false
 
     @SuppressLint("MissingPermission")  // caller (MainActivity) checks permission before start()
     fun start() {
@@ -46,10 +51,14 @@ class LocationReader(private val context: Context) : LocationListener {
         // (almost always network, initially) drives the marker, and GPS
         // naturally takes over once it locks (see onLocationChanged —
         // it just accepts whatever arrives, from either provider).
-        val providers = listOfNotNull(
-            LocationManager.GPS_PROVIDER.takeIf { locationManager.isProviderEnabled(it) },
-            LocationManager.NETWORK_PROVIDER.takeIf { locationManager.isProviderEnabled(it) },
-        )
+        //
+        // Registered even while a provider is switched off (location off in
+        // quick settings): LocationManager then starts delivering as soon
+        // as the user turns it on. Skipping disabled providers here meant
+        // turning location on after launch never produced a fix until the
+        // app was restarted. Only providers the device doesn't have at all
+        // are left out (requesting those throws).
+        val providers = locationProvidersToRequest(locationManager.allProviders)
         if (providers.isEmpty()) return
         for (provider in providers) {
             locationManager.requestLocationUpdates(provider, /* minTimeMs= */ 500L, /* minDistanceM= */ 0f, this)
@@ -62,6 +71,7 @@ class LocationReader(private val context: Context) : LocationListener {
             ?.let {
                 lastLocation = it
                 lastFixUptimeMs = SystemClock.elapsedRealtime()
+                lastIsSeed = true
             }
     }
 
@@ -79,7 +89,8 @@ class LocationReader(private val context: Context) : LocationListener {
      * uses instead. */
     fun hasRecentFix(maxAgeMs: Long = 2000L): Boolean {
         val loc = lastLocation ?: return false
-        return SystemClock.elapsedRealtime() - lastFixUptimeMs < maxAgeMs && loc.hasSpeed() && loc.hasBearing()
+        return !lastIsSeed &&
+            SystemClock.elapsedRealtime() - lastFixUptimeMs < maxAgeMs && loc.hasSpeed() && loc.hasBearing()
     }
 
     /** Weaker than hasRecentFix() — just "do we know roughly where the
@@ -111,6 +122,7 @@ class LocationReader(private val context: Context) : LocationListener {
     override fun onLocationChanged(location: Location) {
         lastLocation = location
         lastFixUptimeMs = SystemClock.elapsedRealtime()
+        lastIsSeed = false
     }
 
     @Deprecated("Deprecated in Java", ReplaceWith(""))
@@ -118,3 +130,9 @@ class LocationReader(private val context: Context) : LocationListener {
     override fun onProviderEnabled(provider: String) {}
     override fun onProviderDisabled(provider: String) {}
 }
+
+/** GPS and network, in that order, minus any this device doesn't have
+ * ([allProviders] is LocationManager.getAllProviders()). Enabled or not
+ * doesn't matter, see LocationReader.start(). */
+internal fun locationProvidersToRequest(allProviders: List<String>): List<String> =
+    listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).filter { it in allProviders }
