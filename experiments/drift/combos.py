@@ -58,6 +58,7 @@ COMBOS = {
     "ens_all11": ("ens", ["moredata", "moredata_s7", "moredata_s3", "moredata_s11", "moredata_s5", "moredata_s13",
                           "speedaware", "speedaware_s7", "speedaware_s3", "speedaware_s5", "speedaware_s13"],
                   "average of every speedaware-family seed: 6 moredata + 5 speedaware"),
+    "ens_lastepoch4": ("ens", ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3"], "average of 4 last-epoch moredata seeds"),
     "ens_round3": ("ens", ["moredata", "moredata_s7", "richaug", "richaug_s7"],
                    "average of moredata and richaug, both seeds"),
     "duo_moredata_slowspec": ("duo", ["moredata", "slowspec"], "moredata above 6 m/s, slow specialist below"),

@@ -25,7 +25,11 @@ duo_ens6_slowspec7
 ens_speedaware3
 lastepoch
 trainval
+lastepoch --seed 7
+lastepoch --seed 11
+lastepoch --seed 3
 trainval --seed 7
 speedaware --seed 5
 speedaware --seed 13
 ens_all11
+ens_lastepoch4
