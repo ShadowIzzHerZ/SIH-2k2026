@@ -131,6 +131,13 @@ class HistNet(torch.nn.Module):
         return self.net(x)[:, -self.T:]
 
 
+class HistSpeedNet(ideas.SpeedAwareNet):
+    """Speed-aware net (current speed as an extra input) over history + window."""
+
+    def forward(self, x):
+        return super().forward(x)[:, -lib.WS:]
+
+
 def hist_splits(hist):
     def make():
         sp = aligned.build_splits()
@@ -175,6 +182,9 @@ EXPERIMENTS = {
                                model=HistNet, splits=hist_splits(100),
                                train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
                                end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
+    "hist10_speedaware": recipe("15 s context + current speed as an input (hist10 + speedaware)",
+                                model=HistSpeedNet, splits=hist_splits(100), set_v0=True,
+                                train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
