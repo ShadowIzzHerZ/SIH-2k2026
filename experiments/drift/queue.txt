@@ -38,3 +38,7 @@ speedaware --seed 5
 speedaware --seed 13
 ens_all11
 ens_lastepoch4
+lastepoch_noextra
+lastepoch_noextra --seed 7
+lastepoch_noextra --seed 3
+ens_lastnoextra3

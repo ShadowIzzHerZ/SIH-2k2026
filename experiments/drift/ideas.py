@@ -467,3 +467,8 @@ EXPERIMENTS["trainval"] = dict(EXPERIMENTS["moredata"],
 EXPERIMENTS["lastepoch"] = dict(EXPERIMENTS["moredata"],
     desc="moredata with the last epoch kept instead of the best-val epoch (control for trainval)",
     train_kw={"keep_last": True})
+
+
+EXPERIMENTS["lastepoch_noextra"] = dict(EXPERIMENTS["speedaware"],
+    desc="speedaware (no recovered drives) with the last epoch kept: checks whether the extra drives help once epoch picking is removed",
+    train_kw={"keep_last": True})
