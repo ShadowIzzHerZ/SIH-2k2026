@@ -3,21 +3,26 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, Index
 from app.db.database import Base
 
+def utc_now() -> datetime:
+    """Naive UTC 'now'. The DateTime columns are TIMESTAMP WITHOUT TIME ZONE and hold UTC;
+    asyncpg rejects timezone-aware values for such columns."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 class DeviceSession(Base):
     __tablename__ = "device_sessions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     device_id = Column(String(64), index=True, nullable=False)
     session_id = Column(String(64), index=True, nullable=False)
-    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_active_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime, default=utc_now)
+    last_active_at = Column(DateTime, default=utc_now)
     calibration_data = Column(Text, nullable=True)
 
 class TrajectoryPoint(Base):
     __tablename__ = "device_trajectories"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    time = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True, nullable=False)
+    time = Column(DateTime, default=utc_now, index=True, nullable=False)
     device_id = Column(String(64), index=True, nullable=False)
     session_id = Column(String(64), index=True, nullable=False, default="default")
     seq_num = Column(Integer, nullable=False, default=0)

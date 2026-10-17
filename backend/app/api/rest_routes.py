@@ -8,7 +8,7 @@ from app.api.deps import get_db_session
 from app.core.auth import create_access_token
 from app.cache.redis_client import cache_manager
 from app.api.websocket import queue_mgr, active_connections, device_kalman_filters
-from app.db.crud import get_trajectory_history, get_last_known_position
+from app.db.crud import get_trajectory_history, get_last_known_position, db_time_to_epoch
 
 router = APIRouter()
 
@@ -92,7 +92,7 @@ async def get_device_trajectory(
     return [
         {
             "seq": p.seq_num,
-            "timestamp": p.time.timestamp(),
+            "timestamp": db_time_to_epoch(p.time),
             "x": p.x,
             "y": p.y,
             "z": p.z,
