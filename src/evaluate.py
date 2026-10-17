@@ -41,12 +41,22 @@ def eval_drift(model, dataset, dt, device, batch_size, target_pct=None):
             speed_pred, pos_pred, speed_gt, pos_gt = forward_pass(model, batch, dt, device)
             all_drift.extend(drift_metric(pos_pred, pos_gt).cpu().numpy().tolist())
     all_drift = np.array(all_drift)
+    if len(all_drift) == 0:
+        # e.g. a per-dataset test split that came out empty: report it as
+        # such instead of np.percentile raising IndexError mid-evaluation.
+        nan = float("nan")
+        report = {"n_windows": 0, "mean_drift_pct": nan, "median_drift_pct": nan,
+                  "p90_drift_pct": nan, "worst_drift_pct": nan}
+        if target_pct is not None:
+            report["target_pct"] = target_pct
+            report["pass_rate_pct"] = nan
+        return report
     report = {
         "n_windows": len(all_drift),
         "mean_drift_pct": float(all_drift.mean()),
         "median_drift_pct": float(np.median(all_drift)),
         "p90_drift_pct": float(np.percentile(all_drift, 90)),
-        "worst_drift_pct": float(all_drift.max()) if len(all_drift) else float("nan"),
+        "worst_drift_pct": float(all_drift.max()),
     }
     if target_pct is not None:
         report["target_pct"] = target_pct
@@ -163,6 +173,10 @@ def main():
     per_dataset = {}
     for key in ("iovnbd_test_only", "comma2k19_test_only", "decimeter_test_only", "ppc_test_only", "pvs_test_only"):
         if key in splits:
+            if len(splits[key]) == 0:
+                print(f"{key}: empty test split, skipped")
+                per_dataset[key] = {"n_windows": 0}
+                continue
             per_dataset[key] = eval_drift(model, splits[key], dt, device, batch_size, target_pct=target)
             ch = chained_drift(model, splits[key], device, dt, window_size=window_size, n_chunks=6, max_chains=None)
             if ch:
