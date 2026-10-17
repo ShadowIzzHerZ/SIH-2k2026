@@ -93,3 +93,15 @@ def test_check_model_rejects_the_wrong_role():
         publish.check_model(ASSETS / "model_fast.onnx", "slow")
     with pytest.raises(SystemExit):
         publish.check_model(ASSETS / "model_slow.onnx", "fast")
+
+
+def test_app_constants_match_the_export_and_publish_script():
+    """The gate, speed scaling and per-role channel counts are written in
+    Kotlin, Python and the publish script; they have to agree."""
+    import re
+    kt = (ROOT / "app/app/src/main/java/com/sih26168/deadreckoning/EnsembleModel.kt").read_text()
+    manifest_kt = (ROOT / "app/app/src/main/java/com/sih26168/deadreckoning/ModelManifest.kt").read_text()
+    assert float(re.search(r"GATE_MPS\s*=\s*([\d.]+)f", kt).group(1)) == 6.0
+    assert float(re.search(r"SPEED_SCALE\s*=\s*([\d.]+)f", kt).group(1)) == SPEED_SCALE
+    roles = dict(re.findall(r'\("(\w+)", "model_\w+\.onnx", (\d+)\)', manifest_kt))
+    assert {k: int(v) for k, v in roles.items()} == {k: v for k, v in publish.CHANNELS.items() if k != "legacy"}
