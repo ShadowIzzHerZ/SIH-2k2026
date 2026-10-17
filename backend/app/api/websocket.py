@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
-from app.core.auth import authenticate_ws
+from app.core.auth import authenticate_ws, ws_accept_subprotocol
 from app.core.time_sync import TimeSyncManager
 from app.core.queue_manager import IngestionQueueManager
 from app.fusion.kalman_filter import IMUKalmanFilter
@@ -68,7 +68,7 @@ async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Device ID mismatch")
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=ws_accept_subprotocol(websocket))
     active_connections[device_id] = websocket
     logger.info(f"WebSocket client connected: {device_id}")
 

@@ -32,18 +32,41 @@ def verify_jwt_token(token: str) -> Optional[Dict[str, Any]]:
     except jwt.PyJWTError:
         return None
 
+# Browsers cannot set headers on a WebSocket, so they offer the token as a
+# subprotocol pair: new WebSocket(url, ["bearer", token]).
+WS_BEARER_SUBPROTOCOL = "bearer"
+
+def ws_token_from_handshake(websocket: WebSocket) -> Optional[str]:
+    """
+    JWT from the WebSocket handshake, in order of preference:
+    'Authorization: Bearer <jwt>', 'Sec-WebSocket-Protocol: bearer, <jwt>',
+    then the legacy ?token=<jwt> query param (kept for existing clients, but
+    URLs end up in proxy access logs).
+    """
+    auth_header = websocket.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        if token:
+            return token
+    offered = websocket.scope.get("subprotocols") or []
+    if WS_BEARER_SUBPROTOCOL in offered:
+        i = offered.index(WS_BEARER_SUBPROTOCOL)
+        if i + 1 < len(offered) and offered[i + 1]:
+            return offered[i + 1]
+    return websocket.query_params.get("token") or None
+
+def ws_accept_subprotocol(websocket: WebSocket) -> Optional[str]:
+    """Subprotocol to echo on accept; browsers drop the socket if an offered one is not echoed."""
+    offered = websocket.scope.get("subprotocols") or []
+    return WS_BEARER_SUBPROTOCOL if WS_BEARER_SUBPROTOCOL in offered else None
+
 async def authenticate_ws(websocket: WebSocket) -> Optional[str]:
     """
     Authenticate WebSocket connection during initial handshake.
-    Checks query params (?token=...) or 'Authorization' header.
+    Token source: see ws_token_from_handshake.
     Returns device_id if authenticated, else None.
     """
-    token = websocket.query_params.get("token")
-    if not token:
-        # Check headers
-        auth_header = websocket.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ", 1)[1]
+    token = ws_token_from_handshake(websocket)
 
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing auth token")
