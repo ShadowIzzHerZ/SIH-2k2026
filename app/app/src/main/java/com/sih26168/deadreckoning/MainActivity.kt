@@ -474,6 +474,12 @@ class MainActivity : AppCompatActivity() {
 
     /** Wires the dev-mode Record/Share controls. */
     private fun setupDevRecording() {
+        // Not restored after the Activity is recreated (by the config
+        // changes the manifest doesn't handle, e.g. a language change):
+        // onDestroy has already closed the recording, and a restored
+        // checked state fired the listener below, silently starting a new
+        // file the user never asked for.
+        devRecordToggle.isSaveEnabled = false
         devRecordToggle.setOnCheckedChangeListener { _, checked ->
             if (checked) {
                 if (replayToggle.isChecked) {
