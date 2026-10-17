@@ -1,0 +1,59 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    name: Python tests (src, edge)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # CPU-only torch keeps the install small; the rest are the packages
+      # tests/ and edge/ import. Tests that need a dataset or network
+      # (IO-VNBD, comma2k19 demo split, OSM download) skip themselves.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy scipy pandas pyarrow pyyaml onnx onnxruntime \
+            osmnx leuvenmapmatching rtree matplotlib tqdm pytest
+
+      - name: Run tests
+        run: python -m pytest -q -rs tests edge/test_edge.py
+
+  android:
+    name: Android unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Run unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-reports
+          path: app/app/build/reports/tests/

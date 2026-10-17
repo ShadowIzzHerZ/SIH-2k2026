@@ -27,8 +27,8 @@ from src.data.io_vnbd_loader import latlon_to_local_xy, load_sequence
 from src.map_matching import download_road_graph, match_trajectory, osmnx_graph_to_inmem_map
 
 # A real ~740m driving segment from S-Vta1a.csv (Leicester, UK area),
-# picked for steady >3 m/s driving (not idle/noisy). Saved as raw
-# coordinates so this test doesn't depend on the full dataset being present.
+# picked for steady >3 m/s driving (not idle/noisy). Read from the IO-VNBD
+# dataset, so the test is skipped when that file isn't present (e.g. in CI).
 _SEG_PATH = "data/IO-VNBD/Synchronised V abd S datasets/Uncategorised IOVNB Dataset/S-Dataset/S-Vta1a.csv"
 _SEG_START, _SEG_LEN = 10200, 300
 
@@ -36,8 +36,11 @@ _SEG_START, _SEG_LEN = 10200, 300
 def _load_test_segment():
     from pathlib import Path
 
+    import pytest
     import yaml
 
+    if not Path(_SEG_PATH).exists():
+        pytest.skip(f"{_SEG_PATH} not found; needs the IO-VNBD dataset (and network for the OSM download)")
     cfg = yaml.safe_load(open("configs/default.yaml"))
     seq = load_sequence(Path(_SEG_PATH), cfg["data"]["column_map"])
     lat = seq.lat[_SEG_START:_SEG_START + _SEG_LEN]
