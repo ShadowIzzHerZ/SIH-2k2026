@@ -428,3 +428,8 @@ EXPERIMENTS["richmore_long"] = dict(EXPERIMENTS["richmore"],
 
 EXPERIMENTS["moredata_long"] = dict(EXPERIMENTS["moredata"],
     desc="moredata with double the training budget (12 single-window + 12 chained epochs)")
+
+
+EXPERIMENTS["slowspec_plain"] = dict(EXPERIMENTS["moredata"],
+    desc="slow specialist with plain bias augmentation (no richer augmentation), windows below 8 m/s, recovered drives",
+    train_ds=lambda model, sp: AugDataset(slow_windows(sp["train"])))

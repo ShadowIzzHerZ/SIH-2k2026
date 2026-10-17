@@ -7,3 +7,6 @@ duo_moredata_slowspec
 duo_ens_slowspec
 moredata --seed 3
 ens_moredata3
+slowspec_plain
+duo_ens_slowplain8
+duo_ens_slowspec7
