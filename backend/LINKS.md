@@ -54,7 +54,7 @@
 | Destination | Purpose | URL Link |
 | :--- | :--- | :--- |
 | **GitHub Repository** | Source code, models, documentation, and configuration | **[https://github.com/manishpathak2407-bot/Sih-Backend](https://github.com/manishpathak2407-bot/Sih-Backend)** |
-| **GitHub Actions / CI-CD** | Automated test verification and Docker build workflows | **[https://github.com/manishpathak2407-bot/Sih-Backend/actions](https://github.com/manishpathak2407-bot/Sih-Backend/actions)** |
+| **GitHub Actions / CI** | Backend tests run as the `backend` job of this repository's root Tests workflow ([`.github/workflows/tests.yml`](../.github/workflows/tests.yml)) | **[https://github.com/ShadowIzzHerZ/SIH-2k2026/actions/workflows/tests.yml](https://github.com/ShadowIzzHerZ/SIH-2k2026/actions/workflows/tests.yml)** |
 | **1-Click Render Deploy** | Deploy stack to Render cloud via Blueprint | **[Deploy to Render](https://render.com/deploy?repo=https://github.com/manishpathak2407-bot/Sih-Backend)** |
 
 ---
