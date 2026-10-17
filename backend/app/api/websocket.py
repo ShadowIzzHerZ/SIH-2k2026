@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import numpy as np
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.core.auth import authenticate_ws
@@ -49,6 +50,9 @@ async def restore_or_init_filter(device_id: str) -> IMUKalmanFilter:
             kf.movement_state = last_pos.get("movement_state", "REST")
             kf.step_count = last_pos.get("step_count", 0)
             kf.last_timestamp = last_pos["timestamp"]
+            cov = last_pos.get("covariance")
+            if cov is not None and np.shape(cov) == (9, 9):
+                kf.P = np.array(cov, dtype=np.float64)
             return kf
 
     # 3. Fresh device session
@@ -159,12 +163,16 @@ async def queue_worker():
                 except Exception:
                     pass
 
+            # 3b. The DB row also carries the 9x9 covariance so the database restore
+            # path can recover P; it is kept out of the 10Hz client push.
+            persist_payload = {**payload_out, "covariance": fused_state["covariance"]}
+
             # 4. Update Redis Live Cache (1-hour TTL)
             state_dict = kf.to_state_dict()
             await cache_manager.set_live_device_state(device_id, state_dict)
 
             # 5. Non-blocking asynchronous persistence to database (prevents I/O lag on 10Hz stream)
-            asyncio.create_task(_persist_point(payload_out))
+            asyncio.create_task(_persist_point(persist_payload))
 
         except Exception as e:
             logger.error(f"Error processing item in queue worker: {e}", exc_info=True)
