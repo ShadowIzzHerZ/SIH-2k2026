@@ -44,14 +44,16 @@ COMBOS = {
                    "average of moredata and richaug, both seeds"),
     "duo_moredata_slowspec": ("duo", ["moredata", "slowspec"], "moredata above 6 m/s, slow specialist below"),
     "duo_ens_slowspec": ("duo", [None, "slowspec"], "moredata seed-average above 6 m/s, slow specialist below"),
+    "duo_ens_slowspec8": ("duo", [None, "slowspec"], "moredata seed-average above 8 m/s, slow specialist below", 8.0),
+    "duo_ens_slowspec10": ("duo", [None, "slowspec"], "moredata seed-average above 10 m/s, slow specialist below", 10.0),
 }
 
 
 def run(name):
-    mode, members, desc = COMBOS[name]
+    mode, members, desc, *sw = COMBOS[name]
     if members[0] is None:
         members = [Mix(["moredata", "moredata_s7"])] + members[1:]
-    m = Mix(members, mode).eval()
+    m = Mix(members, mode, *sw).eval()
     sp = lib.build_splits("fwdfix")  # only val/test are used here
     res = lib.evaluate(m, sp, chain_fn=lib.chained_drift_x, fwd=ideas.speedaware_forward)
     rec = lib.save_result(name, desc, res)
