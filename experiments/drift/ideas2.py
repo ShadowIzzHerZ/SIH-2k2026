@@ -168,6 +168,13 @@ EXPERIMENTS = {
     "hist10": recipe("aligned + network sees the 10 s of IMU before each 5 s window (15 s context)",
                      model=HistNet, splits=hist_splits(100),
                      train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    "hist25": recipe("aligned + network sees the 25 s of IMU before each 5 s window (30 s context)",
+                     model=HistNet, splits=hist_splits(250),
+                     train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    "hist10_endweight": recipe("15 s context + 6-chunk chained fine-tune weighted toward 30 s (hist10 + endweight)",
+                               model=HistNet, splits=hist_splits(100),
+                               train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
+                               end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
