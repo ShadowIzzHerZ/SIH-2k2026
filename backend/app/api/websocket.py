@@ -72,8 +72,12 @@ async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
     active_connections[device_id] = websocket
     logger.info(f"WebSocket client connected: {device_id}")
 
-    # Restore or create Kalman filter
-    device_kalman_filters[device_id] = await restore_or_init_filter(device_id)
+    # Restore or create the Kalman filter only when none is in memory: a reconnect or a
+    # duplicate socket must not replace the running filter (and its step timing and
+    # accel window) with the older cached copy.
+    if device_id not in device_kalman_filters:
+        restored = await restore_or_init_filter(device_id)
+        device_kalman_filters.setdefault(device_id, restored)
 
     try:
         while True:
