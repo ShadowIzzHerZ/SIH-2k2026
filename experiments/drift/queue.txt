@@ -20,3 +20,5 @@ moredata_swa --seed 11
 moredata --seed 5
 moredata --seed 13
 speedaware --seed 3
+ens_moredata6
+duo_ens6_slowspec7
