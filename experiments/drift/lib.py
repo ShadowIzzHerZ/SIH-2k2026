@@ -84,9 +84,13 @@ def calibrate_orig(seq):
 
 
 # ---------------------------------------------------------------- datasets
-def build_splits(calib="orig", stride=10, seq_filter=None):
-    """Returns dict of IOVNBDWindowDataset: train, val, test, test_iovnbd, test_comma."""
+def build_splits(calib="orig", stride=10, seq_filter=None, extra=False):
+    """Returns dict of IOVNBDWindowDataset: train, val, test, test_iovnbd, test_comma.
+    extra=True adds the training-only drives recovered by prep_extra.py."""
     seqs, split = load_sequences()
+    if extra:
+        ex = pickle.load(open(ROOT / "cache" / "extra_sequences.pkl", "rb"))
+        seqs, split = {**seqs, **ex}, {**split, **{k: "train" for k in ex}}
     cal = {"orig": calibrate_orig, "fwdfix": calibrate_fwdfix}[calib] if isinstance(calib, str) else calib
     wins = {"train": [], "val": [], "test_iovnbd": [], "test_comma": []}
     info, cal_seqs = {}, {}

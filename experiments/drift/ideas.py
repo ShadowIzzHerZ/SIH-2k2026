@@ -2,6 +2,7 @@
 top of the v3 recipe (lib.train) so it can be compared row by row."""
 from __future__ import annotations
 
+import math
 import numpy as np
 import torch
 
@@ -357,3 +358,49 @@ EXPERIMENTS["augbias_long"] = {
     "calib": "fwdfix",
     "train_ds": lambda model, sp: AugDataset(sp["train"]),
 }
+
+
+# ------------------------------------------------ round 3: richer sensor-error augmentation
+class RichAugDataset(torch.utils.data.Dataset):
+    """AugDataset plus the other errors a phone mount actually has: per-axis
+    scale error (±3%), a few degrees of leftover yaw misalignment (leaks
+    lateral accel into forward accel), a road-grade gravity leak that ramps
+    across the window (±3% grade), and a random noise level per window."""
+
+    def __init__(self, base, acc_b=0.15, gyro_b=0.01, scale=0.03, yaw_deg=4.0, grade=0.03, noise=(0.01, 0.04)):
+        self.base, self.windows = base, base.windows
+        self.acc_b, self.gyro_b, self.scale, self.yaw, self.grade, self.noise = \
+            acc_b, gyro_b, scale, math.radians(yaw_deg), grade, noise
+
+    def __len__(self):
+        return len(self.base)
+
+    def __getitem__(self, i):
+        it = dict(self.base[i])
+        raw = it["imu_raw"].clone()
+        T = raw.shape[0]
+        psi = float(torch.empty(1).uniform_(-self.yaw, self.yaw))
+        c, s = math.cos(psi), math.sin(psi)
+        for a, b in ((0, 1), (3, 4)):
+            x, y = raw[:, a].clone(), raw[:, b].clone()
+            raw[:, a], raw[:, b] = c * x - s * y, s * x + c * y
+        raw = raw * (1 + torch.empty(6).uniform_(-self.scale, self.scale))
+        g0, g1 = torch.empty(2).uniform_(-self.grade, self.grade)
+        raw[:, 0] += 9.81 * torch.linspace(float(g0), float(g1), T)
+        raw += torch.cat([torch.empty(3).uniform_(-self.acc_b, self.acc_b),
+                          torch.empty(3).uniform_(-self.gyro_b, self.gyro_b)])
+        sd = float(torch.empty(1).uniform_(*self.noise))
+        raw += torch.randn_like(raw) * torch.tensor([sd] * 3 + [sd / 2] * 3)
+        it["imu_raw"] = raw
+        it["imu"] = raw
+        return it
+
+
+EXPERIMENTS["richaug"] = dict(EXPERIMENTS["speedaware"],
+    desc="speedaware + richer augmentation (scale error, yaw misalignment, road-grade leak, varied noise)",
+    train_ds=lambda model, sp: RichAugDataset(sp["train"]))
+
+
+EXPERIMENTS["moredata"] = dict(EXPERIMENTS["speedaware"],
+    desc="speedaware + 18 recovered IO-VNBD training drives (+537 min, prep_extra.py); val/test unchanged",
+    splits=lambda: lib.build_splits("fwdfix", extra=True))
