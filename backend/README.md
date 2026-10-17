@@ -36,6 +36,8 @@ ws://<server_host>:8000/ws/track/{device_id}?token=<jwt_token>
 ```
 *Token can be obtained via `POST /auth/token` with body `{"device_id": "...", "expires_minutes": 60}`.*
 
+Prefer sending the token in a header rather than the URL (URLs end up in proxy access logs): `Authorization: Bearer <jwt_token>`, or, from a browser, the subprotocol pair `new WebSocket(url, ["bearer", token])`. The `?token=` query parameter still works for existing clients.
+
 ### 2. Handshake & NTP Clock Sync
 Immediately after connecting, the client sends:
 ```json

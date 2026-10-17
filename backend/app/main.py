@@ -319,9 +319,10 @@ DASHBOARD_HTML = """
             const token = await fetchToken();
 
             const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const wsUrl = `${proto}//${window.location.host}/ws/track/${deviceId}?token=${token}`;
-            
-            ws = new WebSocket(wsUrl);
+            const wsUrl = `${proto}//${window.location.host}/ws/track/${deviceId}`;
+
+            // Token goes in Sec-WebSocket-Protocol, not the URL, so proxies do not log it
+            ws = new WebSocket(wsUrl, ["bearer", token]);
 
             ws.onopen = () => {
                 badge.textContent = "CONNECTED (10Hz)";
