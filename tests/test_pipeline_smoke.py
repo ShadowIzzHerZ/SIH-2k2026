@@ -72,6 +72,8 @@ def test_physics_only_reconstructs_known_trajectory():
 
 
 def test_gradients_flow_and_loss_decreases():
+    np.random.seed(0)  # unseeded, Adam at lr=1e-2 occasionally ends a 20-step run above where it started
+    torch.manual_seed(0)
     dt = 0.1
     T, B = 50, 8
     batch_accel, batch_gyro, batch_speed, batch_pos = [], [], [], []
