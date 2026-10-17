@@ -63,11 +63,22 @@ def mount_rotation(args, rec, model_hz: float):
         keep = np.ones(len(rec.t_gnss), dtype=bool)
         for a, b in spans:
             keep &= ~((rec.t_gnss >= a) & (rec.t_gnss <= b))
+        # Interpolate between consecutive fixes rather than holding the last
+        # one: a held 1-5 Hz fix differences to zero between fixes and to a
+        # 2-10x spike at each new one, so estimate_mount's central
+        # differences only saw the receiver's real dv/dt at the fixes.
+        # Linear interpolation makes every 10 Hz difference equal the slope
+        # between the two real fixes around it. Pairs further apart than
+        # --gnss-timeout (a blackout or dropout) are left as gaps.
         tg = rec.t_gnss[keep]
-        idx = np.searchsorted(tg, t10, side="right") - 1
-        fresh = (idx >= 0) & (t10 - tg[np.clip(idx, 0, None)] <= args.gnss_timeout)
-        spd[fresh] = rec.gnss_speed[keep][idx[fresh]]
-        crs[fresh] = rec.gnss_course[keep][idx[fresh]]
+        if len(tg) >= 2:
+            idx = np.searchsorted(tg, t10, side="right") - 1
+            inside = (idx >= 0) & (idx < len(tg) - 1)
+            i0 = np.clip(idx, 0, len(tg) - 2)
+            fresh = inside & (tg[i0 + 1] - tg[i0] <= args.gnss_timeout)
+            spd[fresh] = np.interp(t10[fresh], tg, rec.gnss_speed[keep])
+            unwrapped = np.degrees(np.unwrap(np.radians(rec.gnss_course[keep])))
+            crs[fresh] = np.interp(t10[fresh], tg, unwrapped) % 360
     estimate_yaw = info["method"] == "auto" and args.mount_yaw is None
     R, extra = estimate_mount(a10, 1.0 / model_hz, int(args.level_seconds * model_hz), crs, spd, R_pre=R_pre,
                               estimate_yaw=estimate_yaw, min_yaw_samples=int(args.min_yaw_seconds * model_hz))
