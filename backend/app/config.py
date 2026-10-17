@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     REDIS_TTL_LIVE_SEC: int = 3600             # 1 hour for device live position
     REDIS_TTL_CALIBRATION_SEC: int = 86400     # 24 hours for calibration constants
 
+    # Browser origins allowed by CORS, comma-separated (e.g. "https://a.example,https://b.example").
+    # "*" allows any origin but then without credentials (cookies / HTTP auth).
+    CORS_ORIGINS: str = "*"
+
     # Storage Layer (PostgreSQL/TimescaleDB or SQLite fallback)
     DATABASE_URL: str = "sqlite+aiosqlite:///./sih_trajectories.db"
 
