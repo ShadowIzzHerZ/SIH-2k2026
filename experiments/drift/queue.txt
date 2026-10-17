@@ -10,3 +10,6 @@ ens_moredata3
 slowspec_plain
 duo_ens_slowplain8
 duo_ens_slowspec7
+ens_all5
+moredata --seed 11
+ens_moredata4
