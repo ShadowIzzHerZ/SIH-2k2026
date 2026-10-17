@@ -12,9 +12,6 @@
     <string name="demo_5_label">Demo 5 — Jalandhar, Sept 10 · 21:17 (18 min)</string>
     <string name="demo_6_label">Demo 6 — Jalandhar, Sept 10 · 21:42 (14 min)</string>
     <string name="demo_7_label">Demo 7 — comma2k19 highway segment (reference dataset, not ours)</string>
-    <string name="status_gnss">GNSS tracking</string>
-    <string name="status_blackout">GNSS blackout — INS only</string>
-    <string name="status_blend">Reconnecting…</string>
     <string name="recenter">Recenter map</string>
     <string name="legend_gnss">GPS</string>
     <string name="legend_blackout">Blackout</string>
@@ -37,7 +34,6 @@
          replacing what used to be a dead-end status-text swap with no
          way forward. See MainActivity's permission-handling code for the
          three real actions this wires to. -->
-    <string name="location_needed_badge">GPS paused</string>
     <string name="location_needed_title">Location access needed</string>
     <string name="location_needed_body">We need your location to keep track of where you\'re going when GPS drops.</string>
     <string name="location_needed_feature_title">Dead-reckoning fusion</string>
@@ -64,12 +60,8 @@
     <string name="ic_restart_alt">&#xf053;</string>
     <string name="ic_sensors">&#xe51e;</string>
     <string name="ic_signal_disconnected">&#xf239;</string>
-    <string name="ic_flash_off">&#xe3e6;</string>
     <string name="ic_settings">&#xe8b8;</string>
-    <string name="ic_chevron_right">&#xe5cc;</string>
-    <string name="ic_fast_forward">&#xe01f;</string>
     <string name="ic_info">&#xe88e;</string>
-    <string name="ic_history_toggle_off">&#xf17d;</string>
     <string name="ic_rotate_right">&#xe41a;</string>
     <string name="ic_autorenew">&#xe863;</string>
     <string name="ic_expand_more">&#xe5cf;</string>
