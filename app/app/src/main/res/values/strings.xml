@@ -127,6 +127,7 @@
     <string name="auth_error_empty_fields">Enter both an email and a password</string>
     <string name="auth_confirmation_sent">Check your email to confirm your account, then sign in.</string>
     <string name="auth_signed_in">Signed in.</string>
+    <string name="auth_error_setup_failed">Signed in, but couldn\'t finish setting up this device (%1$s). Try again.</string>
 
     <!-- PrivacyConsentActivity — shown once, before MainActivity ever
          requests the OS location permission, not folded into the
