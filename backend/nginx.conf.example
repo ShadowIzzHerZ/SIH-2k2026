@@ -49,8 +49,14 @@ server {
 
     # 2. REST Endpoints, Dashboard UI, and OpenAPI Docs
     location / {
+        # Apply the api_limit zone defined above (short bursts allowed, excess gets 429)
+        limit_req zone=api_limit burst=100 nodelay;
+        limit_req_status 429;
+
         proxy_pass http://sih_backend_cluster;
+        # HTTP/1.1 with an empty Connection header lets the upstream keepalive pool reuse connections
         proxy_http_version 1.1;
+        proxy_set_header Connection "";
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
