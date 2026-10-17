@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str  # required, set in .env (see .env.example)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    # Token minting secrets. Both empty (default) keeps the open demo behaviour.
+    # DEVICE_ENROLL_SECRET set: /auth/token needs it for device tokens and the REST
+    # data endpoints need a Bearer token. ADMIN_SECRET: the only way to mint "admin".
+    DEVICE_ENROLL_SECRET: str = ""
+    ADMIN_SECRET: str = ""
 
     # Caching Layer (Redis with in-memory fallback)
     REDIS_URL: str = "redis://localhost:6379/0"
