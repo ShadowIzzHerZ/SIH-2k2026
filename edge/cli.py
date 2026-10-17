@@ -28,7 +28,7 @@ import time
 import numpy as np
 
 from .engine import BLACKOUT, EdgeEngine, Fix, OnnxPredictor, ZeroPredictor
-from .io import compass_to_math, load_csv, math_to_compass, write_csv, xy_to_latlon
+from .io import TIME_UNITS, compass_to_math, load_csv, math_to_compass, write_csv, xy_to_latlon
 from .mounting import estimate_mount, rotation_from_axes, rotation_from_rpy
 from .resample import resample
 
@@ -132,7 +132,7 @@ def score(ticks, rec, spans):
 
 
 def cmd_run(args):
-    rec = load_csv(args.input, args.accel_unit, args.gyro_unit)
+    rec = load_csv(args.input, args.accel_unit, args.gyro_unit, args.time_unit)
     if len(rec.t_imu) < 2:
         raise SystemExit("no IMU rows in input")
     imu_hz = (len(rec.t_imu) - 1) / (rec.t_imu[-1] - rec.t_imu[0])
@@ -249,6 +249,7 @@ def build_parser():
     r.add_argument("--model-highway", default=None, help="optional second ONNX model used at >= 6 m/s (duo mode)")
     r.add_argument("--accel-unit", choices=["m/s2", "g"], default="m/s2")
     r.add_argument("--gyro-unit", choices=["rad/s", "deg/s"], default="rad/s")
+    r.add_argument("--time-unit", choices=list(TIME_UNITS), default="s", help="unit of the t column")
     g = r.add_mutually_exclusive_group()
     g.add_argument("--axes", help='fixed mount as an axis remap, e.g. "x,-y,-z" (vehicle fwd,left,up in sensor axes)')
     g.add_argument("--mount-rpy", help="fixed mount as roll,pitch,yaw degrees")
