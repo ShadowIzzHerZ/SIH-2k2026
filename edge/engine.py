@@ -224,8 +224,46 @@ class EdgeEngine:
         self._offset_t0 = 0.0
         self._pre_tick: State | None = None  # last fix shown before the first 10 Hz tick
 
+    @property
+    def fix(self) -> Fix | None:
+        return self.fixes[-1] if self.fixes else None
+
     def push_gnss(self, fix: Fix):
-        self.fixes.append(fix)
+        prev = self.fix
+        if prev is not None and fix.t > prev.t and (fix.speed is None or fix.heading is None):
+            # Position-only receiver: take the missing speed / course from
+            # the previous fix over the real time between them. Left to
+            # ModelRateFusion, they would be differenced per 10 Hz tick, and
+            # a 1 Hz fix extrapolated without speed reads 0 m/s for nine
+            # ticks and 10x the true speed on the tenth.
+            dx, dy = fix.x - prev.x, fix.y - prev.y
+            dist = float(np.hypot(dx, dy))
+            speed = fix.speed if fix.speed is not None else dist / (fix.t - prev.t)
+            heading = fix.heading
+            if heading is None:
+                heading = float(np.arctan2(dy, dx)) if dist > 1e-6 else prev.heading
+            fix = Fix(fix.t, fix.x, fix.y, speed, heading)
+        # A late fix is put back in time order. A jump back by more than
+        # clock_reset_s is a clock restart, not a late fix: it goes last, so
+        # _clock_reset can tell the fixes on the new clock from the old ones.
+        if prev is None or fix.t >= prev.t or fix.t < prev.t - self.clock_reset_s:
+            self.fixes.append(fix)
+            return
+        if len(self.fixes) == self.fixes.maxlen:
+            # deque.insert raises on a full deque, so evict the oldest first
+            # (what append would do); a fix older than all of them is dropped.
+            if fix.t < self.fixes[0].t:
+                return
+            self.fixes.popleft()
+        i = len(self.fixes)
+        while i > 0 and self.fixes[i - 1].t > fix.t:
+            i -= 1
+        self.fixes.insert(i, fix)
+
+    def _drop_fixes_before(self, t: float):
+        """Forget fixes no tick at or after t can need (tick times only grow)."""
+        while len(self.fixes) > 1 and self.fixes[1].t <= t:
+            self.fixes.popleft()
 
     def _fix_at(self, t: float):
         """The newest fix taken at or before t, extrapolated to t, or None if
@@ -256,6 +294,7 @@ class EdgeEngine:
         finalized = []
         for t_tick, s in self.resampler.push(t, np.concatenate([a, g])):
             finalized += self.core.tick(t_tick, s, self._fix_at(t_tick))
+            self._drop_fixes_before(t_tick)
         if finalized:
             self.ticks += finalized
             self._reanchor(finalized[-1], t)
