@@ -316,11 +316,17 @@ class EdgeEngine:
         sample until the new clock caught up with the old one."""
         t_old = self._t_max
         n_ticks = len(self.ticks)
+        # Fixes already on the new clock (pushed just before this sample) are
+        # the ones stamped well before the old clock's time; push_gnss sorted
+        # them in at the front. Set them aside while the old clock closes:
+        # its last ticks would otherwise pick one up (its t is <= theirs),
+        # find it stale and turn GNSS ticks into a spurious blackout.
+        cut = t_old - self.clock_reset_s
+        fresh = [f for f in self.fixes if f.t < cut]
+        self.fixes = deque((f for f in self.fixes if f.t >= cut), maxlen=self.fixes.maxlen)
         self.finish()
         self.resampler = make_resampler(self._resample, self._model_hz, 6)
-        # Fixes already on the new clock (pushed just before this sample) stay.
-        # push_gnss sorted them in ahead of the old clock's fixes.
-        self.fixes = deque((f for f in self.fixes if t - self.gnss_timeout_s <= f.t <= t), maxlen=self.fixes.maxlen)
+        self.fixes = deque((f for f in fresh if f.t >= t - self.gnss_timeout_s), maxlen=self.fixes.maxlen)
         self._pre_tick = None
         if len(self.ticks) > n_ticks:  # closing the old clock resolved a chunk
             st = self.ticks[-1]
@@ -376,7 +382,9 @@ class EdgeEngine:
     def _shown(self, t: float) -> State:
         L = self.live
         if self._fade_s > 0:
-            w = max(0.0, 1.0 - (t - self._offset_t0) / self._fade_s)
+            # Capped at 1: a sample stamped just before _offset_t0 (jitter)
+            # must not overshoot the offset.
+            w = min(1.0, max(0.0, 1.0 - (t - self._offset_t0) / self._fade_s))
         else:
             w = 0.0
         return State(t, L.x + w * self._offset[0], L.y + w * self._offset[1], L.heading, L.speed, L.mode)

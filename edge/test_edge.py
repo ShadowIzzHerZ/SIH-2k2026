@@ -20,7 +20,7 @@ import os
 
 import numpy as np
 
-from edge.engine import BLACKOUT, EdgeEngine, Fix, ModelRateFusion, OnnxPredictor, ZeroPredictor
+from edge.engine import BLACKOUT, GNSS, EdgeEngine, Fix, ModelRateFusion, OnnxPredictor, ZeroPredictor
 from edge.mounting import estimate_mount, level, rotation_from_axes
 from edge.resample import resample
 
@@ -162,12 +162,17 @@ def test_first_tick_does_not_jump():
 
 
 def test_clock_reset():
+    for resample in ("interp", "mean"):
+        _check_clock_reset(resample)
+
+
+def _check_clock_reset(resample):
     """The sensor clock restarts at 0 halfway through (a logger restart).
     The engine must notice, keep its position and carry on, instead of
     ignoring every sample until the new clock passes the old one."""
     t, xy, th, accel, gyro = _drive()
     t_rep = np.where(t < 30.0, t, t - 30.0)
-    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp", gnss_timeout_s=0.15)
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample=resample, gnss_timeout_s=0.15)
     live = []
     for i in range(len(t)):
         if i % 20 == 0 and not 40.0 <= t[i] < 50.0:  # blackout after the restart
@@ -177,7 +182,11 @@ def test_clock_reset():
     assert eng.clock_resets == 1
     assert len(ticks) > 590, len(ticks)
     bo = [s for s in ticks if s.mode == BLACKOUT]
-    assert 95 <= len(bo) <= 100, len(bo)
+    assert 95 <= len(bo) <= 100, (resample, len(bo))
+    # GNSS never drops across the restart itself: only the 40-50 s blackout
+    # may run the model, and no tick before it is a blackout or a blend.
+    assert eng.core.model_calls == 2, (resample, eng.core.model_calls)
+    assert all(s.mode == GNSS for s in ticks if s.t < 9.5 and s is not ticks[0]), resample
     true = xy[np.searchsorted(t_rep[t >= 30.0], bo[-1].t) + int((t < 30.0).sum())]
     assert np.hypot(bo[-1].x - true[0], bo[-1].y - true[1]) < 1.5
     pts = np.array([[s.x, s.y] for s in live])
