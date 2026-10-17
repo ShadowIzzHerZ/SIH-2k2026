@@ -161,8 +161,10 @@ class ModelRateFusion:
         if self.blend_remaining > 0:
             w = 1.0 - self.blend_remaining / self.blend_samples
             b = self.blend_from
+            # Blend heading along the shorter arc: a plain weighted average of
+            # e.g. 3.13 and -3.13 rad (both ~due west) would swing through east.
             st = State(t, (1 - w) * b.x + w * x, (1 - w) * b.y + w * y,
-                       _wrap((1 - w) * b.heading + w * heading), (1 - w) * b.speed + w * speed, BLEND)
+                       _wrap(b.heading + w * _wrap(heading - b.heading)), (1 - w) * b.speed + w * speed, BLEND)
             self.blend_remaining -= 1
         else:
             st = State(t, x, y, heading, speed, GNSS)

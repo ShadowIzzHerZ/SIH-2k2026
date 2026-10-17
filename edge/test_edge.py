@@ -12,7 +12,8 @@ Checks for the edge engine, in the same plain-assert style as tests/.
    output never jumps.
 4. Parity with src/fusion.py: same chunks, same anchors, same output, for a
    blackout that is a whole number of chunks. Needs torch; skipped without.
-5. The shipped ONNX model loads and has the shape the engine expects.
+5. GNSS reconnect blends heading along the shorter arc across +/-pi.
+6. The shipped ONNX model loads and has the shape the engine expects.
 """
 from __future__ import annotations
 
@@ -145,6 +146,22 @@ def test_parity_with_src_fusion():
     got = np.array([[s.x, s.y] for s in ticks])
     assert np.allclose(got, ref.position, atol=1e-3), np.abs(got - ref.position).max()
     assert [s.mode for s in ticks] == [m.value for m in ref.mode]
+
+
+def test_blend_heading_short_arc():
+    """GNSS returns heading due west from the other side of +/-pi: the blended
+    heading must stay near west, not swing round through east."""
+    core = ModelRateFusion(ZeroPredictor(), dt=0.1)
+    s = np.array([0.0, 0.0, 9.81, 0.0, 0.0, 0.0])
+    for i in range(60):  # fill the window, then one blackout chunk heading ~west
+        core.tick(i * 0.1, s, (-10.0 * i, 0.0, 10.0, np.pi - 0.01) if i < 10 else None)
+    ticks = []
+    for i in range(60, 90):
+        ticks += core.tick(i * 0.1, s, (-10.0 * i, 0.0, 10.0, -np.pi + 0.01))
+    ticks += core.flush()
+    hdg = np.array([st.heading for st in ticks])
+    off_west = np.abs(np.angle(np.exp(1j * (hdg - np.pi))))
+    assert off_west.max() < 0.05, f"blended heading strayed {off_west.max():.2f} rad from west"
 
 
 def test_onnx_model():
