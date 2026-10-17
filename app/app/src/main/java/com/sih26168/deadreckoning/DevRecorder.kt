@@ -4,7 +4,6 @@ import android.content.Context
 import java.io.File
 import java.io.FileWriter
 import java.io.IOException
-import java.io.Writer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -121,7 +120,7 @@ internal fun formatRecordingRow(
  * returns once that is done. A failed write stops further writes to this
  * file (it would have a hole in it anyway) instead of crashing the app;
  * [failure] keeps the error. */
-internal class BackgroundRowWriter(private val out: Writer) {
+internal class BackgroundRowWriter(private val out: java.io.Writer) {
     private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "dev-recorder-writer") }
 
     @Volatile var failure: IOException? = null
