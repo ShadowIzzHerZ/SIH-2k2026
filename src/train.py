@@ -441,7 +441,18 @@ def main():
         return window_drift + chain.get("chain_median", 0.0)
 
     epoch_offset = 0
+    prev_history = []
     if args.resume:
+        # Back up whatever the previous run left behind before this run
+        # overwrites best.pt / train_history.json — resuming should never
+        # silently destroy the checkpoint/history it started from. Done
+        # before the load below: if that fails, the cold start it falls back
+        # to overwrites both just the same.
+        best_path = ckpt_dir / best_name
+        if best_path.exists():
+            shutil.copyfile(best_path, ckpt_dir / f"best{suffix}_prev.pt")
+        if history_path.exists():
+            shutil.copyfile(history_path, results_dir / f"train_history{suffix}_prev.json")
         print(f"resuming from {args.resume}")
         try:
             model.load_state_dict(torch.load(args.resume, map_location=device))
@@ -457,16 +468,8 @@ def main():
             args.resume = None  # so the loop below knows this run is effectively a cold start
 
     if args.resume:
-        # Back up whatever the previous run left behind before this run
-        # overwrites best.pt / train_history.json — resuming should never
-        # silently destroy the checkpoint/history it started from.
-        best_path = ckpt_dir / best_name
-        if best_path.exists():
-            shutil.copyfile(best_path, ckpt_dir / f"best{suffix}_prev.pt")
-        prev_history = []
         if history_path.exists():
             prev_history = json.load(open(history_path))
-            shutil.copyfile(history_path, results_dir / f"train_history{suffix}_prev.json")
             epoch_offset = (prev_history[-1]["epoch"] + 1) if prev_history else 0
 
         # Measure the loaded weights' actual val drift before training so
@@ -494,7 +497,6 @@ def main():
               + (f" | chained {args.chain_chunks * 5}s median {base_chain['chain_median']:.2f}% "
                  f"(n={base_chain['chain_n']})" if base_chain else ""))
     else:
-        prev_history = []
         baseline = None
 
     opt = torch.optim.AdamW(model.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
