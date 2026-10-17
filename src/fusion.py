@@ -349,7 +349,11 @@ def blackout_drift_pct(result: FusionResult, gnss_xy: np.ndarray, gnss_available
     blackout_idxs = np.where(gnss_available == False)[0]  # noqa: E712
     if len(blackout_idxs) == 0:
         return None
-    start, end = blackout_idxs[0], blackout_idxs[-1]
+    end = blackout_idxs[-1]
+    # Start of the last contiguous span, not the first blackout sample:
+    # with several blackouts, distance must not include the tracked gaps.
+    gaps = np.where(np.diff(blackout_idxs) > 1)[0]
+    start = blackout_idxs[gaps[-1] + 1] if len(gaps) else blackout_idxs[0]
     true_path = gnss_xy[start:end + 1]
     step_dist = np.linalg.norm(np.diff(true_path, axis=0), axis=1)
     distance_travelled = max(step_dist.sum(), 1e-6)
