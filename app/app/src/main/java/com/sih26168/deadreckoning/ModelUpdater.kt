@@ -136,6 +136,8 @@ object ModelUpdater {
             }
             result
         } catch (e: Exception) {
+            // Cancellation isn't a failed check: let it reach the caller.
+            if (e is kotlin.coroutines.cancellation.CancellationException) throw e
             Log.w(TAG, "update check failed: $e")
             Result.Failed(e.toString())
         }
