@@ -19,7 +19,7 @@ download) and running it over all 18k+ test windows would be slow for what
 is fundamentally a validation/demo run, not a production evaluation loop.
 
 Run:
-    python -m src.evaluate_with_mapmatching --config configs/default.yaml --checkpoint checkpoints/best.pt
+    python -m src.evaluate_with_mapmatching --config configs/default.yaml --checkpoint checkpoints/best_v3chain.pt
 """
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def xy_to_latlon(xy: np.ndarray, lat0: float, lon0: float) -> np.ndarray:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
-    parser.add_argument("--checkpoint", default="checkpoints/best.pt")
+    parser.add_argument("--checkpoint", default="checkpoints/best_v3chain.pt")  # the shipped model, see checkpoints/README.md
     parser.add_argument("--n_windows", type=int, default=20)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--min_request_gap", type=float, default=5.0,
