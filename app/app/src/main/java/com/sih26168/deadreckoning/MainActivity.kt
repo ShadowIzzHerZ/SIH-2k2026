@@ -229,14 +229,23 @@ class MainActivity : AppCompatActivity() {
 
     private val requestPermissions = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
-    ) { granted ->
-        if (granted.values.all { it }) {
+    ) { _ ->
+        // Checked against the real permission state, not the result map:
+        // a cancelled request (e.g. the activity was recreated while the
+        // dialog was up) returns an empty map, and `all { it }` on an
+        // empty map is true, which used to start the pipeline with no
+        // location access and no explanation.
+        if (locationPermissionGranted()) {
             locationRequiredCard.visibility = View.GONE
             startPipeline()
         } else {
             locationRequiredCard.visibility = View.VISIBLE
         }
     }
+
+    private fun locationPermissionGranted(): Boolean =
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            .all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -938,6 +947,14 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         roadMapView.onResume()
+        // Back from "Open settings" (or anywhere else) with location now
+        // granted: nothing else re-checks, so the location-required card
+        // would stay up until the app was restarted. The card is only
+        // showing while the pipeline hasn't been started.
+        if (locationRequiredCard.visibility == View.VISIBLE && locationPermissionGranted()) {
+            locationRequiredCard.visibility = View.GONE
+            startPipeline()
+        }
     }
 
     override fun onPause() {
