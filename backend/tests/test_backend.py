@@ -218,6 +218,14 @@ class TestFastAPIRoutes(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res.status_code, 200)
             self.assertEqual(res.json()["status"], "applied")
 
+            res = await client.post("/device/test_bot_01/mode", json={"mode": "flying"})
+            self.assertEqual(res.status_code, 400)
+
+            # Out-of-range or null token lifetimes are rejected instead of crashing / minting expired tokens
+            for bad in (0, -5, None, 10**12):
+                res = await client.post("/auth/token", json={"device_id": "test_bot_01", "expires_minutes": bad})
+                self.assertEqual(res.status_code, 422, bad)
+
             # 5. Trajectory
             res = await client.get("/device/test_bot_01/trajectory")
             self.assertEqual(res.status_code, 200)

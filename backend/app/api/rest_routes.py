@@ -1,7 +1,7 @@
 # 10Hz Dead Reckoning Backend Engine - SIH 2026
 from typing import List, Optional
 from datetime import timedelta
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db_session
@@ -14,7 +14,8 @@ router = APIRouter()
 
 class TokenRequest(BaseModel):
     device_id: str = Field(..., description="Unique hardware or app UUID")
-    expires_minutes: Optional[int] = Field(default=60 * 24 * 7, description="Token lifetime in minutes")
+    # Bounded: 0/negative minted already-expired tokens, null or huge values raised a 500
+    expires_minutes: int = Field(default=60 * 24 * 7, ge=1, le=60 * 24 * 30, description="Token lifetime in minutes")
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -175,7 +176,7 @@ async def set_device_mode(device_id: str, req: SetModeRequest):
     valid_modes = {"stationary", "moving", "adaptive"}
     mode_clean = req.mode.lower().strip()
     if mode_clean not in valid_modes:
-        return {"error": f"Invalid mode '{req.mode}'. Choose from: {list(valid_modes)}"}
+        raise HTTPException(status_code=400, detail=f"Invalid mode '{req.mode}'. Choose from: {sorted(valid_modes)}")
     
     kf = device_kalman_filters.get(device_id)
     if kf:
