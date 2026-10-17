@@ -281,9 +281,19 @@ DASHBOARD_HTML = """
             ctx.stroke();
         }
 
+        // Page load and the mode buttons both call this. Reuse an open, opening or
+        // in-flight connection so overlapping calls never leave a second socket
+        // for the same device id behind.
+        let connectPromise = null;
         async function connectWebSocket() {
-            if (ws && ws.readyState === WebSocket.OPEN) return;
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+            if (!connectPromise) {
+                connectPromise = openWebSocket().finally(() => { connectPromise = null; });
+            }
+            return connectPromise;
+        }
 
+        async function openWebSocket() {
             const res = await fetch("/auth/token", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
