@@ -112,6 +112,21 @@ class EnsembleModel(
     @Volatile var fallbackCount: Int = 0
         private set
 
+    /** Chunks answered by each role, and by neither (zeros). For the
+     * on-device self-check (DriveSelfCheck). */
+    @Volatile var slowChunks: Int = 0
+        private set
+    @Volatile var fastChunks: Int = 0
+        private set
+    @Volatile var zeroChunks: Int = 0
+        private set
+
+    /** The start speed the last chunk was gated on. */
+    @Volatile var lastStartSpeed: Float = 0f
+        private set
+
+    val chunks: Int get() = slowChunks + fastChunks + zeroChunks
+
     val hasSlow: Boolean get() = slow != null
     val hasFast: Boolean get() = fast != null
 
@@ -119,6 +134,7 @@ class EnsembleModel(
     override fun predict(window: Array<FloatArray>): Array<FloatArray> = predict(window, 0f)
 
     override fun predict(window: Array<FloatArray>, startSpeed: Float): Array<FloatArray> {
+        lastStartSpeed = startSpeed
         val preferred = if (SpeedGate.useFast(startSpeed)) ModelRole.FAST else ModelRole.SLOW
         val order = if (preferred == ModelRole.FAST) listOf(ModelRole.FAST, ModelRole.SLOW)
         else listOf(ModelRole.SLOW, ModelRole.FAST)
@@ -126,10 +142,12 @@ class EnsembleModel(
             val out = run(role, window, startSpeed) ?: continue
             if (role != preferred) fallbackCount++
             lastUsed = role
+            if (role == ModelRole.FAST) fastChunks++ else slowChunks++
             return out
         }
         fallbackCount++
         lastUsed = null
+        zeroChunks++
         return Array(window.size) { FloatArray(2) }
     }
 
