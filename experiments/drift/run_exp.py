@@ -15,6 +15,10 @@ ap.add_argument("--stage2", type=int, default=6)
 ap.add_argument("--seed", type=int, default=42)
 args = ap.parse_args()
 
+from experiments.drift import combos
+if args.name in combos.COMBOS:  # checkpoint combination, no training
+    combos.run(args.name)
+    raise SystemExit
 spec = ideas.EXPERIMENTS[args.name]
 t0 = time.time()
 splits = spec.get("splits", lambda: lib.build_splits(spec.get("calib", "orig")))()
