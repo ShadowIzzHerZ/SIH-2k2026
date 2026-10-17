@@ -5,8 +5,13 @@
      - device_identity_prefs: DeviceIdentity's per-install ID. Restored
        onto a new phone, two installs would share one devices.device_id.
      - supabase_session_prefs: the Supabase access/refresh tokens. A
-       restore shouldn't sign another device into the account. -->
+       restore shouldn't sign another device into the account.
+     - recordings/: DevRecorder's CSVs (external files dir, or internal
+       files dir as a fallback). They grow by MBs per drive and would use
+       up the 25 MB Auto Backup quota; Share exports them instead. -->
 <full-backup-content>
     <exclude domain="sharedpref" path="device_identity_prefs.xml" />
     <exclude domain="sharedpref" path="supabase_session_prefs.xml" />
+    <exclude domain="external" path="recordings/" />
+    <exclude domain="file" path="recordings/" />
 </full-backup-content>
