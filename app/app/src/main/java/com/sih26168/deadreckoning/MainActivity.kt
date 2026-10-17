@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -208,6 +209,9 @@ class MainActivity : AppCompatActivity() {
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickIntervalMs = 100L  // 10Hz — matches configs/default.yaml's sample_rate_hz
     private var ticking = false
+    // Which model ran and how far each blackout drifted, to logcat
+    // (`adb logcat -s DriveSelfCheck`). Reset with the fusion engine.
+    private var selfCheck = newSelfCheck()
 
     // How long calibration can run before we tell the user it's taking a
     // while. NOT 2s: leveling alone (CalibrationManager's levelSamples=20
@@ -441,6 +445,7 @@ class MainActivity : AppCompatActivity() {
      * filter" button semantics exactly, just also reachable from the nav. */
     private fun performResetFilter() {
         fusion.reset()
+        selfCheck = newSelfCheck()
         mapMatcher.reset()
         roadMapView.clear()
         previousFusionMode = null
@@ -608,6 +613,7 @@ class MainActivity : AppCompatActivity() {
         if (usingReplay != wasReplaying || (usingReplay && demo != wasDemo)) {
             calibration = CalibrationManager()
             fusion.reset()
+            selfCheck = newSelfCheck()
             mapMatcher.reset()
             roadMapView.clear()
             replayIndex = 0
@@ -745,6 +751,11 @@ class MainActivity : AppCompatActivity() {
         )
 
         val s = fusion.state
+        // The real fix, when there is one, in fusion's local frame: during
+        // a demo blackout or a replay GNSS is still there, so the
+        // self-check can score the drift live.
+        val truth = if (sample.hasFix) fusion.latLonToLocalXY(sample.lat, sample.lon) else null
+        selfCheck.tick(s.mode, floatArrayOf(s.x, s.y), truth, model)
         fusion.localXYToLatLon(s.x, s.y)?.let { (lat, lon) ->
             roadMapView.addPoint(lat, lon, s.mode)
             mapMatcher.match(lat, lon, s.heading)?.let { m ->
@@ -970,4 +981,6 @@ class MainActivity : AppCompatActivity() {
         // recording-upload coroutine outlives the Activity that started it.
         activityScope.cancel()
     }
+
+    private fun newSelfCheck() = DriveSelfCheck({ Log.i("DriveSelfCheck", it) })
 }
