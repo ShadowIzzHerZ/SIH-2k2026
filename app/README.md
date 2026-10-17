@@ -14,9 +14,10 @@ BLEND — but driven by live sensor/location ticks instead of a recorded
 trace, with a **"Simulate GNSS blackout" toggle** for demoing on stage
 without needing to physically walk into a real tunnel on cue. A
 **"Replay real recorded drive" toggle** swaps the live sensor/GPS data
-source for a real, previously-validated comma2k19 segment bundled as an
-asset (the one that measured 2.9% drift in the offline evaluation) — for
-demoing indoors with no GPS reception and no room to drive, using real
+source for one of seven real drives bundled as assets, picked with the
+Demo 1-7 buttons: six Jalandhar drives recorded with the app's Developer
+mode, and the comma2k19 highway segment that measured 2.9% drift in the
+offline evaluation (Demo 7) — for demoing indoors with no GPS reception and no room to drive, using real
 data instead of idealized synthetic motion. It's also how the app's own
 bugs were actually found and fixed on a real device (see FusionEngine.kt's
 docstring).

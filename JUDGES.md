@@ -197,7 +197,7 @@ python tests/simulate_device.py   # simulates a phone streaming to it
 | [results/](results) | Every real eval report/training curve, nothing hand-edited — see [results/README.md](results/README.md) for the full index |
 | [configs/](configs) | `default.yaml` — the one real config (dataset paths, model architecture, training hyperparameters, the PS's own drift/example-check targets) |
 | [tests/](tests) | Deterministic regression tests — several exist specifically because a real bug was found and fixed, then a test written to prove the fix is load-bearing (reverted the fix, confirmed the test fails, restored it) |
-| [scripts/](scripts) | `train_until_target*.sh` (unattended training loops), `build_colab_notebook.py` (generates a Colab notebook for GPU training) |
+| [scripts/](scripts) | `train_until_target*.sh` (unattended training loops), `build_colab_notebook.py` (generates a Colab notebook for GPU training), `publish_model.py` (checks an ONNX model and publishes it to Supabase Storage so the app can update its model without a new APK) |
 | [docs/sih.md](docs/sih.md) | The original strategy doc — why this PS was picked, the exact official problem text, deliverable requirements |
 | [docs/understanding.md](docs/understanding.md) | **Read this next** — the full judge-facing pitch: every component explained with a "say it like this" line, the honest results story, every real bug found and fixed with evidence, known limitations, and pre-answered hard questions |
 | [notebooks/](notebooks) | The Colab training notebook (GPU training away from a local machine) |
