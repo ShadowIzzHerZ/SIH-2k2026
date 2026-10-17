@@ -136,13 +136,17 @@ run_windows.bat
 ```
 
 ### Local Python Run (Cross-Platform):
+Run from the `backend/` directory. `SECRET_KEY` is required, so create `.env` first
+(`copy .env.example .env` on Windows) and replace the placeholder secret:
 ```powershell
+cp .env.example .env
 pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 *(Automatically falls back to SQLite and in-memory LRU cache if Redis/Postgres are not installed).*
 
 ### Run Test Suite:
+From the `backend/` directory (the tests supply a throwaway `SECRET_KEY` if none is set):
 ```powershell
 python -m unittest tests/test_backend.py
 ```
