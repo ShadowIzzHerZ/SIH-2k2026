@@ -108,13 +108,13 @@ async def save_trajectory_batch(db: AsyncSession, points_data: List[Dict[str, An
     return len(points)
 
 async def get_trajectory_history(db: AsyncSession, device_id: str, limit: int = 500) -> List[TrajectoryPoint]:
-    """Fetch recent trajectory history for a device."""
+    """Fetch the most recent `limit` trajectory points for a device, oldest first."""
     stmt = (
         select(TrajectoryPoint)
         .where(TrajectoryPoint.device_id == device_id)
-        .order_by(TrajectoryPoint.time.asc())
+        .order_by(desc(TrajectoryPoint.time))
         .limit(limit)
     )
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    return list(reversed(result.scalars().all()))
 
