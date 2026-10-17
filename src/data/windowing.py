@@ -183,7 +183,9 @@ def build_windows(seq: ImuSequence, window_size: int, stride: int, dt: float,
         speed_gt = None
 
     windows = []
-    for start in range(0, n - window_size, stride):
+    # + 1 so the last window that fits exactly (end == n) is kept, and a
+    # sequence of exactly window_size samples still gives one window.
+    for start in range(0, n - window_size + 1, stride):
         end = start + window_size
         w_accel = seq.accel[start:end]
         w_gyro = seq.gyro[start:end]
