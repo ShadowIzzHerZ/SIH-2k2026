@@ -70,6 +70,9 @@ class MainActivity : AppCompatActivity() {
         R.id.demo4Radio, R.id.demo5Radio, R.id.demo6Radio, R.id.demo7Radio,
     )
     private var replayIndex = 0
+    // True on the tick that read replay row 0, i.e. right after the replay
+    // looped from its last row back to its first.
+    private var replayRestarted = false
 
     private var calibration = CalibrationManager()
     private lateinit var model: BiasCorrectionModel
@@ -212,12 +215,13 @@ class MainActivity : AppCompatActivity() {
     // while. NOT 2s: leveling alone (CalibrationManager's levelSamples=20
     // @ 10Hz) needs 2.0s minimum just to collect its stillness window, so a
     // 2s trigger would fire on essentially every real calibration, not just
-    // stuck ones. Yaw alignment on top of that needs minConfidentSamples
-    // (30) valid GPS-backed samples, which under ordinary driving takes
-    // several seconds more. 10s gives a normal calibration room to finish
-    // while still catching real stalls (phone not held still, no GPS fix,
-    // vehicle stationary) with a clear, actionable notice.
-    private val calibrationSlowNoticeMs = 10_000L
+    // stuck ones. Yaw alignment on top of that needs 100 usable samples
+    // above 3 m/s plus three agreeing checkpoints (CalibrationManager's
+    // minYawSamples), so at least ~12 s of driving. 20s gives a normal
+    // calibration room to finish while still catching real stalls (phone
+    // not held still, no GPS fix, vehicle stationary) before the 30 s
+    // wait cap ends calibration anyway.
+    private val calibrationSlowNoticeMs = 20_000L
 
     // Real "location access needed" screen (Zen Civic restyle) — replaces
     // the old dead-end status-text swap on denial with three real actions.
@@ -580,6 +584,7 @@ class MainActivity : AppCompatActivity() {
     private fun readSample(usingReplay: Boolean, demo: Int): Sample {
         if (usingReplay) {
             val replayData = replaySources[demo - 1]
+            replayRestarted = replayIndex == 0
             val row = replayData.rows[replayIndex]
             replayIndex = (replayIndex + 1) % replayData.rows.size
             return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad, true)
@@ -704,6 +709,9 @@ class MainActivity : AppCompatActivity() {
         // Only while GNSS is really available to the pipeline: during a
         // demo blackout the real fix must not leak into the calibration.
         if (available) {
+            // A looping replay jumps from its last row to its first: no
+            // dv/dt may be taken across that.
+            if (usingReplay && replayRestarted) calibration.yawStretchBreak()
             calibration.addYawSample(sample.rawAccel, sample.rawGyro, sample.speed)
         } else {
             calibration.yawGnssLost()
