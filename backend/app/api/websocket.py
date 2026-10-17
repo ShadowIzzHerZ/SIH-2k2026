@@ -82,6 +82,10 @@ async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
                 data = json.loads(raw_text)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(data, dict):
+                # Valid JSON but not an object (e.g. a list or number): ignore it
+                # instead of letting data.get() raise and drop the connection.
+                continue
 
             msg_type = data.get("type", "live")
 
@@ -106,7 +110,10 @@ async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
     except Exception as e:
         logger.error(f"Error on WebSocket for {device_id}: {e}")
     finally:
-        active_connections.pop(device_id, None)
+        # Only remove our own entry: if the device already reconnected, the
+        # newer socket owns this slot and must keep receiving updates.
+        if active_connections.get(device_id) is websocket:
+            active_connections.pop(device_id, None)
 
 async def queue_worker():
     """
