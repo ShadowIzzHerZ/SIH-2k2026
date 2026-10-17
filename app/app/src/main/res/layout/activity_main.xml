@@ -1205,6 +1205,7 @@
         </FrameLayout>
 
         <TextView
+            android:id="@+id/locationNeededTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
@@ -1213,6 +1214,7 @@
             style="@style/Text.HeadlineLg" />
 
         <TextView
+            android:id="@+id/locationNeededBody"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
@@ -1306,6 +1308,7 @@
                     style="@style/Text.LabelMd" />
 
                 <TextView
+                    android:id="@+id/locationSettingsBody"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/location_needed_settings_body"

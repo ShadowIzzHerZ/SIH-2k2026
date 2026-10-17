@@ -46,6 +46,10 @@
     <string name="location_needed_settings_title">Open app settings</string>
     <string name="location_needed_settings_body">If location was previously denied in OS permissions</string>
     <string name="location_needed_demo_link">Continue in demo mode</string>
+    <!-- Shown instead when only approximate location (Android 12+) is allowed. -->
+    <string name="location_precise_needed_title">Precise location needed</string>
+    <string name="location_precise_needed_body">Only approximate location is allowed. Dead reckoning needs precise location: it uses the GPS speed and direction of travel, which approximate location doesn\'t provide.</string>
+    <string name="location_precise_needed_settings_body">Turn on \"Use precise location\" under Permissions, Location</string>
     <string name="missing_sensors_title">Motion sensors unavailable</string>
     <string name="missing_sensors_body">This device is missing an accelerometer or gyroscope — dead reckoning needs both and can\'t run without them.</string>
 
