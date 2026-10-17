@@ -699,13 +699,17 @@ class MainActivity : AppCompatActivity() {
         val demoBlackout = blackoutToggle.isChecked
         val available = sample.hasFix && !demoBlackout
 
+        // Forward-axis calibration reads GNSS speed, before lock-in and
+        // after (it keeps refining over the drive — see CalibrationManager).
+        // Only while GNSS is really available to the pipeline: during a
+        // demo blackout the real fix must not leak into the calibration.
+        if (available) {
+            calibration.addYawSample(sample.rawAccel, sample.rawGyro, sample.speed)
+        } else {
+            calibration.yawGnssLost()
+        }
+
         if (!calibration.isReady) {
-            // hasBearing() too, not just hasFix — see minHeadingLockSpeedMps's
-            // doc: without it a rough/stationary fix's stale or default
-            // bearing could get fed into yaw alignment as if it were real.
-            if (sample.hasFix && sample.hasBearing) {
-                calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
-            }
             showCalibrating(
                 getString(
                     if (usingReplay) R.string.calib_yaw_replay else R.string.calib_yaw_live

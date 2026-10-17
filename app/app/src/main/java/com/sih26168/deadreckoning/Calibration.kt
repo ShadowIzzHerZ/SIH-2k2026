@@ -94,6 +94,10 @@ object Calibration {
      * calibration.py's estimate_yaw_misalignment (median of angle diffs
      * over the highest-magnitude samples, not a full least-squares fit —
      * robust to the low-magnitude samples where direction is ill-defined).
+     *
+     * No longer used by CalibrationManager: it compares phone-frame accel
+     * angles with world compass headings, so its answer includes the
+     * drive's compass heading. See [estimateForwardAxis].
      */
     fun estimateYawMisalignment(levelAccelXY: List<FloatArray>, gtHeadingXY: List<FloatArray>): Float {
         val diffs = yawAngleDiffs(levelAccelXY, gtHeadingXY)
@@ -236,4 +240,208 @@ object Calibration {
             m[6] * v[0] + m[7] * v[1] + m[8] * v[2],
         )
     }
+
+    // ---------------------------------------------------- forward axis
+
+    /**
+     * Forward axis (yaw offset) from what GNSS says the vehicle did — the
+     * fix from the drift experiments (experiments/drift/lib.py's
+     * calibrate_fwdfix, drift-experiments branch), which the ensemble
+     * models were trained on. In the leveled frame, horizontal accel
+     * rotated by psi should equal [dv/dt, v * yaw_rate] (longitudinal,
+     * centripetal), so with both as complex numbers
+     *
+     *     psi = angle(sum(conj(ax + i*ay) * (dv/dt + i*v*wz)))
+     *
+     * over samples above [minSpeed], every signal smoothed with
+     * [smoothEdgeNormalized]. Unlike [estimateYawMisalignment] it never
+     * compares phone-frame angles with compass headings, which mixed the
+     * drive's mean compass heading into the estimate.
+     *
+     * levelAccel/levelGyro are leveled (R_level applied) samples, speed is
+     * GNSS speed, all at a fixed [dt]. Returns null below [minSamples]
+     * usable samples, where calibrate_fwdfix falls back to 0.
+     */
+    fun estimateForwardAxis(
+        levelAccel: List<FloatArray>,
+        levelGyro: List<FloatArray>,
+        speed: FloatArray,
+        dt: Float = 0.1f,
+        minSpeed: Float = FORWARD_AXIS_MIN_SPEED,
+        minSamples: Int = FORWARD_AXIS_MIN_SAMPLES,
+    ): ForwardAxisFit? {
+        val n = speed.size
+        require(levelAccel.size == n && levelGyro.size == n) { "accel, gyro and speed must be the same length" }
+        val v = DoubleArray(n) { speed[it].toDouble() }
+        val vs = smoothEdgeNormalized(v)
+        val dvdt = gradient(vs, dt.toDouble())
+        val wz = smoothEdgeNormalized(DoubleArray(n) { levelGyro[it][2].toDouble() })
+        val ax = smoothEdgeNormalized(DoubleArray(n) { levelAccel[it][0].toDouble() })
+        val ay = smoothEdgeNormalized(DoubleArray(n) { levelAccel[it][1].toDouble() })
+        val acc = ForwardAxisSum()
+        for (i in 0 until n) {
+            if (v[i] > minSpeed) acc.add(ax[i], ay[i], dvdt[i], vs[i] * wz[i])
+        }
+        return if (acc.count > minSamples) acc.fit() else null
+    }
+
+    /** numpy's convolve(x, ones(k), "same") / convolve(ones, ones(k),
+     * "same"): a k-sample moving average (window [i - k/2, i + k/2 - 1]
+     * for even k) that averages over only the samples that exist at the
+     * ends, instead of pulling them toward zero. */
+    fun smoothEdgeNormalized(x: DoubleArray, k: Int = FORWARD_AXIS_SMOOTH): DoubleArray {
+        val n = x.size
+        val lo = k / 2
+        val hi = k - 1 - lo
+        return DoubleArray(n) { i ->
+            var sum = 0.0
+            var count = 0
+            for (j in maxOf(0, i - lo)..minOf(n - 1, i + hi)) {
+                sum += x[j]; count++
+            }
+            sum / count
+        }
+    }
+
+    /** numpy.gradient: central differences inside, one-sided at the ends. */
+    fun gradient(x: DoubleArray, dt: Double): DoubleArray {
+        val n = x.size
+        if (n < 2) return DoubleArray(n)
+        return DoubleArray(n) { i ->
+            when (i) {
+                0 -> (x[1] - x[0]) / dt
+                n - 1 -> (x[n - 1] - x[n - 2]) / dt
+                else -> (x[i + 1] - x[i - 1]) / (2 * dt)
+            }
+        }
+    }
+
+    const val FORWARD_AXIS_MIN_SPEED = 3f
+    const val FORWARD_AXIS_MIN_SAMPLES = 100
+    const val FORWARD_AXIS_SMOOTH = 10
+}
+
+/** A forward-axis estimate: [psi] in radians, from [samples] usable
+ * samples. [coherence] is |sum| / sum(|term|), 1 when every sample agrees
+ * on the direction and near 0 for noise — a real drive measures ~0.9,
+ * pure sensor noise ~0.05. */
+data class ForwardAxisFit(val psi: Float, val samples: Int, val coherence: Float)
+
+/** The running complex sum behind [Calibration.estimateForwardAxis]. */
+class ForwardAxisSum {
+    private var re = 0.0
+    private var im = 0.0
+    private var absSum = 0.0
+    var count = 0
+        private set
+
+    /** One sample: smoothed leveled accel (ax, ay) and the target
+     * (dv/dt, v * yaw_rate). Adds conj(ax + i*ay) * (lon + i*lat). */
+    fun add(ax: Double, ay: Double, lon: Double, lat: Double) {
+        val pr = ax * lon + ay * lat
+        val pi = ax * lat - ay * lon
+        if (!pr.isFinite() || !pi.isFinite()) return
+        re += pr
+        im += pi
+        absSum += sqrt(pr * pr + pi * pi)
+        count++
+    }
+
+    fun fit(): ForwardAxisFit = ForwardAxisFit(
+        psi = atan2(im, re).toFloat(),
+        samples = count,
+        coherence = if (absSum > 0) (sqrt(re * re + im * im) / absSum).toFloat() else 0f,
+    )
+}
+
+/**
+ * The same estimate fed one sample at a time, for live calibration, in
+ * the raw phone frame so the leveling can keep improving while the drive
+ * goes on (see CalibrationManager): the sum the fit needs is bilinear in
+ * the leveling rotation, so it is kept as a 3-vector P = sum(a * dv/dt)
+ * and a 3x3 Q = sum(a * (v * w)^T) over smoothed raw accel a and raw gyro
+ * w, and [fit] applies whichever R_level is current. With R_level
+ * x/y/z rows r0, r1, r2:
+ *
+ *     re = r0.P + r1 Q r2,   im = r0 Q r2 - r1.P
+ *
+ * Each sample is processed once the samples it needs on both sides have
+ * arrived (smoothing needs FORWARD_AXIS_SMOOTH / 2 ahead, dv/dt one more),
+ * so the sum always covers the whole drive so far. [gap] ends a
+ * contiguous stretch (GNSS lost): samples are never smoothed across it,
+ * and the few at its edges are dropped instead of edge-normalised, the
+ * only difference from the batch version.
+ */
+class ForwardAxisEstimator(
+    private val dt: Float = 0.1f,
+    private val minSpeed: Float = Calibration.FORWARD_AXIS_MIN_SPEED,
+    private val k: Int = Calibration.FORWARD_AXIS_SMOOTH,
+) {
+    private val p = DoubleArray(3)
+    private val q = DoubleArray(9)
+    // sum(|term|) for the coherence, under the leveling current when each
+    // sample was added (not bilinear, so it can't be re-leveled).
+    private var absSum = 0.0
+    var samples = 0
+        private set
+
+    // [ax, ay, az, gx, gy, gz, v] per raw sample, the last `need` of them.
+    private val buf = ArrayDeque<DoubleArray>()
+    private val lo = k / 2
+    private val hi = k - 1 - lo
+    // Center sample c needs smoothed v at c-1 and c+1, so raw samples
+    // c-1-lo .. c+1+hi.
+    private val need = lo + hi + 3
+
+    /** [rLevel] only weighs this sample's share of the coherence. */
+    fun add(rawAccel: FloatArray, rawGyro: FloatArray, speed: Float, rLevel: FloatArray) {
+        buf.addLast(
+            doubleArrayOf(
+                rawAccel[0].toDouble(), rawAccel[1].toDouble(), rawAccel[2].toDouble(),
+                rawGyro[0].toDouble(), rawGyro[1].toDouble(), rawGyro[2].toDouble(), speed.toDouble(),
+            )
+        )
+        if (buf.size > need) buf.removeFirst()
+        if (buf.size < need) return
+        val c = lo + 1  // index of the center sample within buf
+        fun mean(col: Int, center: Int): Double {
+            var s = 0.0
+            for (j in center - lo..center + hi) s += buf[j][col]
+            return s / k
+        }
+        if (buf[c][6] <= minSpeed) return
+        val vs = mean(6, c)
+        val dvdt = (mean(6, c + 1) - mean(6, c - 1)) / (2 * dt)
+        val a = DoubleArray(3) { mean(it, c) }
+        val l = DoubleArray(3) { vs * mean(3 + it, c) }
+        if (!(a.all(Double::isFinite) && l.all(Double::isFinite) && dvdt.isFinite())) return
+        for (i in 0 until 3) {
+            p[i] += a[i] * dvdt
+            for (j in 0 until 3) q[i * 3 + j] += a[i] * l[j]
+        }
+        val ax = dot(rLevel, 0, a); val ay = dot(rLevel, 1, a); val lat = dot(rLevel, 2, l)
+        val pr = ax * dvdt + ay * lat
+        val pi = ax * lat - ay * dvdt
+        absSum += sqrt(pr * pr + pi * pi)
+        samples++
+    }
+
+    fun gap() = buf.clear()
+
+    /** Null until more than [minSamples] samples have counted. */
+    fun fit(rLevel: FloatArray, minSamples: Int = Calibration.FORWARD_AXIS_MIN_SAMPLES): ForwardAxisFit? {
+        if (samples <= minSamples) return null
+        val qr2 = DoubleArray(3) { i -> (0 until 3).sumOf { j -> q[i * 3 + j] * rLevel[6 + j] } }
+        val re = dot(rLevel, 0, p) + dot(rLevel, 1, qr2)
+        val im = dot(rLevel, 0, qr2) - dot(rLevel, 1, p)
+        val mag = sqrt(re * re + im * im)
+        return ForwardAxisFit(
+            psi = atan2(im, re).toFloat(),
+            samples = samples,
+            coherence = if (absSum > 0) minOf(1.0, mag / absSum).toFloat() else 0f,
+        )
+    }
+
+    private fun dot(r: FloatArray, row: Int, v: DoubleArray) =
+        r[row * 3] * v[0] + r[row * 3 + 1] * v[1] + r[row * 3 + 2] * v[2]
 }

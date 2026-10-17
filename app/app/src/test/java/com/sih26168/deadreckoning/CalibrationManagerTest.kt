@@ -107,97 +107,174 @@ class CalibrationManagerTest {
         assertFalse("...but must report itself as a degraded estimate", cal.levelConverged)
     }
 
-    /** Feeds yaw samples for a vehicle accelerating along `headingRad`
-     * with the phone's own frame rotated by `trueYawOffset` from it. */
-    private fun feedYaw(cal: CalibrationManager, n: Int, headingRad: Float, trueYawOffset: Float, noise: Float = 0.05f) {
-        repeat(n) {
-            // Forward accel in the vehicle frame, expressed in the
-            // (leveled) phone frame by rotating back through the offset.
-            val a = 2.0f
-            val phoneAng = headingRad - trueYawOffset
-            val ax = a * cos(phoneAng.toDouble()).toFloat() + rng.nextFloat().minus(0.5f) * noise
-            val ay = a * sin(phoneAng.toDouble()).toFloat() + rng.nextFloat().minus(0.5f) * noise
-            cal.addYawSample(floatArrayOf(ax, ay, g), gpsSpeed = 15f, gpsHeadingRad = headingRad)
+    /**
+     * Feeds a physically consistent drive to the yaw stage: the vehicle's
+     * speed follows [speedAt] and it turns at [yawRateAt]; the phone lies
+     * flat (so leveling is the identity) rotated [trueYawOffset] from the
+     * vehicle's forward axis. Leveled horizontal accel is then the
+     * vehicle-frame [dv/dt, v * yaw_rate] rotated back by the offset —
+     * exactly the relation Calibration.estimateForwardAxis fits.
+     */
+    private fun feedDrive(
+        cal: CalibrationManager,
+        n: Int,
+        trueYawOffset: Float,
+        startTick: Int = 0,
+        noise: Float = 0.1f,
+        speedAt: (Int) -> Float = { t -> 12f + 4f * sin(t * 0.05).toFloat() },
+        yawRateAt: (Int) -> Float = { t -> 0.15f * sin(t * 0.021).toFloat() },
+    ) {
+        val dt = 0.1f
+        for (i in 0 until n) {
+            val t = startTick + i
+            val v = speedAt(t)
+            val lon = (speedAt(t + 1) - speedAt(t - 1)) / (2 * dt)
+            val wz = yawRateAt(t)
+            val lat = v * wz
+            // vehicle = Rz(offset) * leveled  =>  leveled = Rz(-offset) * vehicle
+            val c = cos(-trueYawOffset.toDouble()).toFloat()
+            val sn = sin(-trueYawOffset.toDouble()).toFloat()
+            val ax = c * lon - sn * lat + rng.nextFloat().minus(0.5f) * 2 * noise
+            val ay = sn * lon + c * lat + rng.nextFloat().minus(0.5f) * 2 * noise
+            cal.addYawSample(floatArrayOf(ax, ay, g), floatArrayOf(0f, 0f, wz), v)
         }
     }
 
     private fun leveledManager(
-        minConfidentSamples: Int = 30,
-        maxConfidentSamples: Int = 90,
-        yawWindowSamples: Int = 60,
+        maxYawSamples: Int = 600,
+        maxYawWaitTicks: Int = 100_000,
     ): CalibrationManager {
-        val cal = CalibrationManager(
-            minConfidentSamples = minConfidentSamples,
-            maxConfidentSamples = maxConfidentSamples,
-            yawWindowSamples = yawWindowSamples,
-        )
+        val cal = CalibrationManager(maxYawSamples = maxYawSamples, maxYawWaitTicks = maxYawWaitTicks)
         repeat(25) { cal.addLevelSample(restingSample()) }
         require(cal.isLeveled)
         return cal
     }
 
-    @Test
-    fun `yaw locks in on a consistent straight-line stretch`() {
-        val cal = leveledManager()
-        val trueOffset = 0.6f  // phone mounted ~34 degrees off the vehicle's forward axis
-
-        feedYaw(cal, n = 60, headingRad = 1.0f, trueYawOffset = trueOffset)
-
-        assertTrue("a clean straight-line stretch should lock yaw in", cal.isReady)
-        assertTrue("...and report itself converged", cal.yawConverged)
-        assertEquals("recovered yaw offset should match the one baked into the samples", trueOffset, cal.psiYaw, 0.15f)
+    private fun angleDiff(a: Float, b: Float): Float {
+        var d = (a - b).toDouble()
+        while (d > Math.PI) d -= 2 * Math.PI
+        while (d < -Math.PI) d += 2 * Math.PI
+        return kotlin.math.abs(d).toFloat()
     }
 
     @Test
-    fun `a real turn during the confident stretch delays lock-in past the naive early window`() {
-        // A realistic case, not an adversarial infinite oscillation: the
-        // vehicle turns once during the collection window (a real
-        // driveway-to-road turn, e.g.), then drives straight. A fixed
-        // minConfidentSamples cutoff would lock in mid-turn; settledness
-        // should make it wait for the post-turn stretch to actually
-        // settle instead.
-        val cal = leveledManager(minConfidentSamples = 20, maxConfidentSamples = 200, yawWindowSamples = 25)
-        feedYaw(cal, n = 20, headingRad = 0.2f, trueYawOffset = 0.6f)  // pre-turn, would satisfy minConfidentSamples alone
-        feedYaw(cal, n = 90, headingRad = 2.4f, trueYawOffset = -0.9f) // turn, then enough of a real straight stretch to fully flush the pre-turn window
-
-        assertTrue(cal.isReady)
-        assertEquals(
-            "should settle on the post-turn straight stretch's true offset, not something blended with the pre-turn value",
-            -0.9f, cal.psiYaw, 0.2f,
-        )
-    }
-
-    @Test
-    fun `yaw falls back to best-effort at the safety cap rather than stalling`() {
-        val cal = leveledManager(minConfidentSamples = 20, maxConfidentSamples = 50)
-        // A turn that doesn't resolve into any lasting straight stretch
-        // before the safety cap — must still commit to something rather
-        // than stall the demo, but must own up to being degraded.
-        feedYaw(cal, n = 20, headingRad = 0.2f, trueYawOffset = 0.6f)
-        feedYaw(cal, n = 20, headingRad = 1.6f, trueYawOffset = -0.3f)
-        feedYaw(cal, n = 20, headingRad = 3.0f, trueYawOffset = 0.9f)
-
-        assertTrue("yaw must eventually commit rather than stall the demo forever", cal.isReady)
-        assertFalse("...but must report itself as a degraded estimate", cal.yawConverged)
-        assertTrue("degraded calibration should be surfaceable to the UI", cal.isRoughCalibration)
-    }
-
-    @Test
-    fun `a clean calibration is not flagged as rough`() {
-        val cal = leveledManager()
-        feedYaw(cal, n = 60, headingRad = 1.0f, trueYawOffset = 0.6f)
-
-        assertTrue(cal.isReady)
-        assertFalse("a fully converged calibration must not be labelled rough", cal.isRoughCalibration)
-    }
-
-    @Test
-    fun `yaw ignores samples below the confident speed threshold`() {
-        val cal = leveledManager()
-        // Stopped at a light: GPS heading is meaningless, accel is noise.
-        repeat(100) {
-            cal.addYawSample(floatArrayOf(0.01f, 0.01f, g), gpsSpeed = 0.3f, gpsHeadingRad = 2.0f)
+    fun `yaw recovers the mounting offset from speed changes and turns`() {
+        for (offset in listOf(0f, 0.6f, -1.2f, 2.5f, 3.1f, -2.9f)) {
+            val cal = leveledManager()
+            feedDrive(cal, n = 400, trueYawOffset = offset)
+            assertTrue("offset $offset: a real drive should lock yaw in", cal.isReady)
+            assertTrue("offset $offset: ...and report it converged", cal.yawConverged)
+            assertTrue(
+                "offset $offset: recovered ${cal.psiYaw}",
+                angleDiff(offset, cal.psiYaw) < 0.05f,
+            )
         }
-        assertFalse("stationary samples must not count toward yaw alignment", cal.isReady)
+    }
+
+    @Test
+    fun `yaw does not depend on which way the vehicle is heading`() {
+        // The old estimate compared phone-frame accel with compass
+        // headings, so the same mounting gave a different answer on a
+        // north-bound and an east-bound road. The new one never reads a
+        // heading at all, so the same drive in any direction gives the
+        // same psi by construction; this pins that the API has no heading.
+        val a = leveledManager(); feedDrive(a, n = 300, trueYawOffset = 0.8f)
+        val b = leveledManager(); feedDrive(b, n = 300, trueYawOffset = 0.8f)
+        assertEquals(a.psiYaw, b.psiYaw, 0.05f)
+    }
+
+    @Test
+    fun `yaw needs the offline fit's 100 usable samples before locking`() {
+        val cal = leveledManager()
+        feedDrive(cal, n = 90, trueYawOffset = 0.6f)
+        assertFalse(cal.isReady)
+        assertTrue(cal.progressPercent in 50..99)
+    }
+
+    @Test
+    fun `a steady straight cruise does not lock in on noise`() {
+        // Nothing to fit: constant speed, no turning, only sensor noise.
+        val cal = leveledManager(maxYawSamples = 300)
+        feedDrive(cal, n = 250, trueYawOffset = 0.6f, noise = 0.3f, speedAt = { 20f }, yawRateAt = { 0f })
+        assertFalse("pure noise must not be accepted as a converged forward axis", cal.isReady)
+        feedDrive(cal, n = 100, trueYawOffset = 0.6f, noise = 0.3f, speedAt = { 20f }, yawRateAt = { 0f })
+        assertTrue("...but the safety cap still ends calibration", cal.isReady)
+        assertFalse(cal.yawConverged)
+        assertTrue(cal.isRoughCalibration)
+        assertTrue("an incoherent fit is not trusted at all", cal.yawFit!!.coherence < 0.5f)
+    }
+
+    @Test
+    fun `a walk finishes calibration after the wait cap instead of stalling`() {
+        // Every bundled demo replay is a walk under 2 m/s: no sample ever
+        // counts toward the forward axis.
+        val cal = leveledManager(maxYawWaitTicks = 300)
+        feedDrive(cal, n = 299, trueYawOffset = 0.6f, speedAt = { 1.3f })
+        assertFalse(cal.isReady)
+        feedDrive(cal, n = 1, trueYawOffset = 0.6f, speedAt = { 1.3f })
+        assertTrue("calibration must not sit at 'calibrating' forever on a walk", cal.isReady)
+        assertEquals(0f, cal.psiYaw)
+        assertTrue(cal.isRoughCalibration)
+    }
+
+    @Test
+    fun `ticks without GNSS count toward the wait cap too`() {
+        val cal = leveledManager(maxYawWaitTicks = 50)
+        repeat(50) { cal.yawGnssLost() }
+        assertTrue(cal.isReady)
+        assertTrue(cal.isRoughCalibration)
+    }
+
+    @Test
+    fun `after a rough start, a real drive refines yaw and clears the rough flag`() {
+        val cal = leveledManager(maxYawWaitTicks = 300)
+        feedDrive(cal, n = 300, trueYawOffset = -1.0f, speedAt = { 1.3f })  // walk out to the car
+        assertTrue(cal.isReady && cal.isRoughCalibration)
+        feedDrive(cal, n = 400, trueYawOffset = -1.0f, startTick = 300)
+        assertTrue("psi ${cal.psiYaw} should follow the drive", angleDiff(-1.0f, cal.psiYaw) < 0.05f)
+        assertFalse("a coherent whole-drive estimate upgrades the calibration", cal.isRoughCalibration)
+    }
+
+    @Test
+    fun `yaw keeps refining after lock-in`() {
+        val cal = leveledManager()
+        // Lock in on a short, noisy start, then keep driving cleanly.
+        feedDrive(cal, n = 140, trueYawOffset = 1.4f, noise = 0.6f)
+        assertTrue(cal.isReady)
+        val early = angleDiff(1.4f, cal.psiYaw)
+        feedDrive(cal, n = 2000, trueYawOffset = 1.4f, startTick = 140, noise = 0.1f)
+        val late = angleDiff(1.4f, cal.psiYaw)
+        assertTrue("late $late should be at least as good as early $early", late <= early + 0.01f)
+        assertTrue(late < 0.03f)
+    }
+
+    @Test
+    fun `no derivative is taken across a GNSS gap`() {
+        val cal = leveledManager()
+        feedDrive(cal, n = 200, trueYawOffset = 0.6f)
+        val before = cal.yawFit!!.psi
+        cal.yawGnssLost()
+        // GNSS returns 15 m/s faster than it left (the car accelerated in
+        // a tunnel). Across the gap that would read as a huge dv/dt.
+        feedDrive(cal, n = 30, trueYawOffset = 0.6f, startTick = 200, speedAt = { 27f }, yawRateAt = { 0f })
+        assertTrue(angleDiff(before, cal.psiYaw) < 0.05f)
+        assertTrue(angleDiff(0.6f, cal.psiYaw) < 0.05f)
+    }
+
+    @Test
+    fun `yaw samples are ignored before leveling`() {
+        val cal = CalibrationManager()
+        repeat(500) { cal.addYawSample(floatArrayOf(1f, 0f, g), floatArrayOf(0f, 0f, 0.1f), 15f) }
+        assertFalse(cal.isLeveled)
+        assertFalse(cal.isReady)
+    }
+
+    @Test
+    fun `a non-finite speed is treated as a gap`() {
+        val cal = leveledManager()
+        feedDrive(cal, n = 200, trueYawOffset = 0.6f)
+        cal.addYawSample(floatArrayOf(0f, 0f, g), floatArrayOf(0f, 0f, 0f), Float.NaN)
+        feedDrive(cal, n = 200, trueYawOffset = 0.6f, startTick = 200)
+        assertTrue(angleDiff(0.6f, cal.psiYaw) < 0.05f)
     }
 }
