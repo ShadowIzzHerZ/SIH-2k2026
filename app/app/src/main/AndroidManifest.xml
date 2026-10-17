@@ -14,6 +14,16 @@
         android:maxSdkVersion="18" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- RecordingService: keeps a dev-mode recording (which logs GPS, hence
+         the "location" type) running with the app in the background or the
+         screen off. FOREGROUND_SERVICE_LOCATION is required for that type
+         from targetSdk 34; POST_NOTIFICATIONS (runtime, API 33+) lets its
+         ongoing notification actually show. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="true" />
     <uses-feature android:name="android.hardware.sensor.gyroscope" android:required="true" />
 
@@ -55,6 +65,14 @@
             android:name=".PrivacyConsentActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
+
+        <!-- See RecordingService.kt. stopWithTask: swiping the app away
+             ends the recording rather than leaving the service orphaned. -->
+        <service
+            android:name=".RecordingService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="location" />
 
         <!-- Lets DevRecorder's saved CSVs be shared via the normal Android
              share sheet (e.g. straight to a laptop over Drive/email)

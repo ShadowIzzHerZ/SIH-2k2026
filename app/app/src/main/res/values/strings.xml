@@ -32,6 +32,11 @@
     <string name="dev_mode_off_toast">Developer mode hidden</string>
     <string name="dev_record_blocked_replay">Turn off Replay first — recording replay data would just duplicate existing training data</string>
     <string name="dev_skip_calibration_button">Skip calibration (testing)</string>
+    <!-- RecordingService's foreground notification, shown while a dev-mode
+         recording is running so it keeps going with the screen off. -->
+    <string name="recording_channel_name">Recording</string>
+    <string name="recording_notification_title">Recording sensor data</string>
+    <string name="recording_notification_text">Keeps logging with the screen off. Stop it from the Simulation tab.</string>
 
     <!-- Location-access-needed screen (Zen Civic restyle) — a real screen
          replacing what used to be a dead-end status-text swap with no
