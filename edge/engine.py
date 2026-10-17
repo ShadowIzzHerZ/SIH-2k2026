@@ -268,7 +268,9 @@ class EdgeEngine:
         L.heading = _wrap(L.heading + g[2] * dt)
         L.x += L.speed * np.cos(L.heading) * dt
         L.y += L.speed * np.sin(L.heading) * dt
-        L.t = t
+        # A late (out-of-order) sample adds nothing and must not wind the
+        # clock back, or the next sample integrates the same time again.
+        L.t = max(L.t, t)
         if L.mode != BLEND:  # a blend lasts until the next 10 Hz tick says otherwise
             L.mode = mode
         return self._shown(t)
