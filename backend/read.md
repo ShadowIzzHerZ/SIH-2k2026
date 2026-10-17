@@ -150,8 +150,8 @@ python -m unittest tests/test_backend.py
 ### Production VPS / Cloud VM Deployment (AWS, DigitalOcean, Azure):
 On your remote Ubuntu/Debian server, run:
 ```bash
-git clone https://github.com/manishpathak2407-bot/Sih-Backend.git
-cd Sih-Backend
+git clone https://github.com/ShadowIzzHerZ/SIH-2k2026.git
+cd SIH-2k2026/backend
 chmod +x deploy.sh
 ./deploy.sh
 ```
