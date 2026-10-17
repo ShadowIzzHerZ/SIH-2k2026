@@ -71,6 +71,26 @@ def test_mounting():
     assert np.allclose(R @ a_sensor[50], a_vehicle[50], atol=0.05)
 
 
+def test_cli_auto_yaw_1hz_gnss():
+    """edge.cli's auto yaw with a 1 Hz receiver. Holding each fix for ten
+    10 Hz samples differenced speed and course to zero between fixes, which
+    left 166 usable samples on this drive (under the 300 needed) and no yaw."""
+    import tempfile
+    import types
+
+    from edge import cli, synth
+    from edge.io import load_csv
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "drive.csv")
+        synth.generate(path, gnss_hz=1.0, mount_axes=rotation_from_axes("y,-x,z"))
+        rec = load_csv(path, "m/s2", "rad/s")
+    args = types.SimpleNamespace(axes=None, mount_rpy=None, no_level=False, resample="interp", blackout=None,
+                                 gnss_timeout=1.5, mount_yaw=None, level_seconds=2.0, min_yaw_seconds=30.0)
+    _, info = cli.mount_rotation(args, rec, 10.0)
+    assert info["yaw_samples"] >= 300 and abs(info["yaw_deg"] + 90) < 2.0, info
+
+
 def _drive(imu_hz=200.0, duration=60.0, speed=12.0, yaw_rate=0.05):
     dt = 1.0 / imu_hz
     t = np.arange(0, duration, dt)
