@@ -251,6 +251,13 @@ class FusionEngine(
 
     private fun wrapAngle(a: Float): Float = atan2(sin(a.toDouble()), cos(a.toDouble())).toFloat()
 
+    /** Interpolates from heading `from` to `to` along the shorter arc.
+     * A plain (1-w)*from + w*to in raw radians goes the long way round
+     * whenever the two straddle the +-pi seam (e.g. 3.0 -> -3.0 swept
+     * through 0, spinning a west-facing heading east mid-blend). */
+    private fun lerpAngle(from: Float, to: Float, w: Float): Float =
+        wrapAngle(from + w * wrapAngle(to - from))
+
     /** Inverse of toLocalXY — lets a caller (e.g. MapMatcher, which works
      * in real lat/lon) convert the fused local position back to a real
      * coordinate, using this engine's own reference fix. Returns null
@@ -364,7 +371,7 @@ class FusionEngine(
                     FusionMode.BLEND,
                     (1 - w) * blendFrom.x + w * gnssState.x,
                     (1 - w) * blendFrom.y + w * gnssState.y,
-                    wrapAngle((1 - w) * blendFrom.heading + w * gnssState.heading),
+                    lerpAngle(blendFrom.heading, gnssState.heading, w),
                     (1 - w) * blendFrom.speed + w * gnssState.speed,
                 )
             } else {
@@ -386,7 +393,7 @@ class FusionEngine(
                     FusionMode.BLACKOUT,
                     (1 - w) * chunkBlendFrom.x + w * chunkAnchor.x,
                     (1 - w) * chunkBlendFrom.y + w * chunkAnchor.y,
-                    wrapAngle((1 - w) * chunkBlendFrom.heading + w * chunkAnchor.heading),
+                    lerpAngle(chunkBlendFrom.heading, chunkAnchor.heading, w),
                     (1 - w) * chunkBlendFrom.speed + w * chunkAnchor.speed,
                 )
             } else {
