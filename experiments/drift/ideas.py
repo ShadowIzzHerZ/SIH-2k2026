@@ -472,3 +472,8 @@ EXPERIMENTS["lastepoch"] = dict(EXPERIMENTS["moredata"],
 EXPERIMENTS["lastepoch_noextra"] = dict(EXPERIMENTS["speedaware"],
     desc="speedaware (no recovered drives) with the last epoch kept: checks whether the extra drives help once epoch picking is removed",
     train_kw={"keep_last": True})
+
+
+EXPERIMENTS["lastepoch_chain6"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3",
+    train_kw={"keep_last": True, "chunks": 6, "max_chains": 6000})
