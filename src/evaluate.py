@@ -5,9 +5,9 @@ Evaluate a trained model against the actual SIH26168 benchmark criteria
     - example checks: <5m drift over 50m in <1min; <100m drift over 1km @60kmph
 
 Reports both the aggregate drift-% (same metric trained on) and the two
-named example scenarios, on the held-out test split, sequence by sequence
-so you can see which trip types the model struggles on (tight turns are
-usually the failure mode for heading-rate errors) before the demo.
+named example scenarios (eval.example_checks in the config, scored as
+chained blackouts by src/chain_eval.py's example_checks), on the held-out
+test split, overall and per dataset.
 
 Run:
     python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
@@ -26,7 +26,7 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from src.chain_eval import chained_drift
+from src.chain_eval import chained_drift, example_checks
 from src.data.windowing import load_combined_dataset_splits
 from src.models.bias_correction_net import BiasCorrectionNet
 from src.train import forward_pass, pick_device
@@ -144,6 +144,9 @@ def main():
     if chain_all:
         report["chained_30s"] = chain_all
         chain_report["all"] = chain_all
+    checks = cfg["eval"].get("example_checks") or []
+    if checks:
+        report["example_checks"] = example_checks(model, splits["test"], device, dt, checks, window_size=window_size)
 
     print(json.dumps(report, indent=2))
     json.dump(report, open(f"results/eval_report{suffix}.json", "w"), indent=2)
@@ -167,6 +170,9 @@ def main():
             ch = chained_drift(model, splits[key], device, dt, window_size=window_size, n_chunks=6, max_chains=None)
             if ch:
                 per_dataset[key]["chained_30s"] = ch
+            if checks:
+                per_dataset[key]["example_checks"] = example_checks(model, splits[key], device, dt, checks,
+                                                                    window_size=window_size)
     if per_dataset:
         print("\n--- breakdown by dataset (same checkpoint) ---")
         print(json.dumps(per_dataset, indent=2))
