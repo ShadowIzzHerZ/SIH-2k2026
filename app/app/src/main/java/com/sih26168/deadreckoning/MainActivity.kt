@@ -210,6 +210,8 @@ class MainActivity : AppCompatActivity() {
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickIntervalMs = 100L  // 10Hz — matches configs/default.yaml's sample_rate_hz
     private var ticking = false
+    // Live ticks since the calibration prior was last saved.
+    private var ticksSincePriorSave = 0
 
     // How long calibration can run before we tell the user it's taking a
     // while. NOT 2s: leveling alone (CalibrationManager's levelSamples=20
@@ -343,6 +345,7 @@ class MainActivity : AppCompatActivity() {
         continueDemoLink = findViewById(R.id.continueDemoLink)
 
         sensorReader = SensorReader(this)
+        calibration = newCalibration(usingReplay = false)
         locationReader = LocationReader(this)
         replaySources = listOf(
             ReplayDataSource(this, "replay_demo1.json"),
@@ -610,7 +613,8 @@ class MainActivity : AppCompatActivity() {
         // rather than an invalid replaySources[-1] index.
         val demo = (demoRadioIds.indexOf(demoSelector.checkedRadioButtonId) + 1).coerceAtLeast(1)
         if (usingReplay != wasReplaying || (usingReplay && demo != wasDemo)) {
-            calibration = CalibrationManager()
+            saveCalibrationPrior()
+            calibration = newCalibration(usingReplay)
             fusion.reset()
             mapMatcher.reset()
             roadMapView.clear()
@@ -726,6 +730,10 @@ class MainActivity : AppCompatActivity() {
             tickHandler.postDelayed(::tick, tickIntervalMs)
             return
         }
+
+        // Save this drive's mount for the next app start's warm start (see
+        // CalibrationManager's prior), every 30 s and on pause.
+        if (!usingReplay && ++ticksSincePriorSave >= PRIOR_SAVE_TICKS) saveCalibrationPrior()
 
         if (!calibrationUiSwitched) {
             calibrationUiSwitched = true
@@ -955,6 +963,18 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         roadMapView.onPause()
+        if (::sensorReader.isInitialized && !wasReplaying) saveCalibrationPrior()
+    }
+
+    /** Live sensors start from the last live drive's mount; replays never
+     * do (other phones, other mounts). */
+    private fun newCalibration(usingReplay: Boolean) =
+        CalibrationManager(prior = if (usingReplay) null else CalibrationPriorStore.load(this))
+
+    private fun saveCalibrationPrior() {
+        ticksSincePriorSave = 0
+        if (wasReplaying) return
+        calibration.currentPrior()?.let { CalibrationPriorStore.save(this, it) }
     }
 
     override fun onDestroy() {
@@ -980,5 +1000,9 @@ class MainActivity : AppCompatActivity() {
         // Same cleanup AuthActivity's own activityScope gets — otherwise a
         // recording-upload coroutine outlives the Activity that started it.
         activityScope.cancel()
+    }
+
+    companion object {
+        private const val PRIOR_SAVE_TICKS = 300  // 30 s at 10 Hz
     }
 }

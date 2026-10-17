@@ -166,6 +166,9 @@ object Calibration {
 
     private fun wrap(a: Float): Float = atan2(sin(a.toDouble()), cos(a.toDouble())).toFloat()
 
+    /** An angle wrapped to (-pi, pi]. */
+    fun wrapAngle(a: Float): Float = wrap(a)
+
     /** Apply the full phone->vehicle rotation to one raw IMU sample. */
     fun calibrateSample(raw: FloatArray, rLevel: FloatArray, psiYaw: Float): FloatArray {
         val r = matmul3x3(yawRotation(psiYaw), rLevel)
