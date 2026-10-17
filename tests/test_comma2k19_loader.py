@@ -21,9 +21,10 @@ from src.data.windowing import build_windows, calibrate_sequence
 def test_loads_and_windows_cleanly():
     paths = sorted(glob.glob("data/comma2k19_demo/data/*.parquet"))
     if not paths:
-        print("SKIPPED: data/comma2k19_demo/data/*.parquet not found — "
-              "download the demo split first (see comma2k19_loader.py docstring)")
-        return
+        import pytest
+
+        pytest.skip("data/comma2k19_demo/data/*.parquet not found — "
+                    "download the demo split first (see comma2k19_loader.py docstring)")
 
     seqs = load_all_segments(paths)
     assert len(seqs) > 0, "loaded zero segments — check the parquet files aren't corrupt"
