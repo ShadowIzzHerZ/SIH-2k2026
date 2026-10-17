@@ -9,14 +9,12 @@ import kotlin.math.sqrt
  * calibration.py's module docstring: leveling first (assumes the phone is
  * roughly still for the first `levelSamples` readings, e.g. mounted before
  * pulling off), then yaw alignment once during an initial confident
- * (moving, GPS-available) stretch, locked in after that — "leveling
- * happens continuously, yaw-alignment happens once at trip start", per
- * that module's own reasoning, which applies just as much live as offline.
+ * (moving, GPS-available) stretch, then refined for the rest of the
+ * drive while GNSS is available.
  *
- * minConfidentSamples is far smaller than calibrate_sequence's offline
- * default (3000, meant for a whole recorded file) — a live app can't make
- * the user drive confidently for 5 minutes before showing anything; ~3s of
- * real motion is enough to lock in a reasonable estimate for a demo.
+ * minYawSamples is the offline fit's own floor (100 samples above 3 m/s,
+ * 10 s at 10 Hz); a live app can't make the user drive for minutes before
+ * showing anything, and the estimate keeps improving after lock-in anyway.
  *
  * Both stages are *gated on the data actually being usable*, rather than
  * on a sample count alone — the difference between offline calibration
@@ -32,36 +30,30 @@ import kotlin.math.sqrt
  *     accel/gyro sample — and nothing downstream can tell that happened.
  *     A sliding window + steadiness check means "hold the phone still"
  *     is verified rather than assumed, and self-corrects (keeps sliding)
- *     if the user is still fumbling with it. Steadiness of direction
+ *     if the user is still fumbling with it. That window is only the
+ *     starting point: while GNSS is available the gravity estimate keeps
+ *     averaging over the whole drive (see relevel), as the offline
+ *     calibration the models were trained on does. Steadiness of direction
  *     rather than of |accel|, so a phone already mounted in a moving
  *     vehicle levels immediately instead of waiting out the timeout.
- *   - Yaw lock-in waits for the estimate to *settle* — two checkpoints
- *     ~1s apart agreeing — instead of locking in on whatever
- *     `minConfidentSamples` happens to produce first. The estimate
- *     assumes an initial straight-line stretch (see
- *     estimate_yaw_misalignment); a stretch containing a turn, a lane
- *     change, or stop-and-go traffic makes the raw median swing wildly
- *     as more samples arrive, and settledness catches that directly.
+ *   - Yaw comes from what GNSS says the vehicle did (speed change and
+ *     turning, see Calibration.estimateForwardAxis — the fixed
+ *     alignment the ensemble models were trained on), accumulated over
+ *     the whole drive so far. It locks in once the estimate has settled
+ *     — [yawRequiredAgreements] checkpoints in a row agreeing — and the
+ *     samples behind it agree with each other (coherence at least
+ *     [minYawCoherence]): a steady straight cruise has nothing to fit
+ *     and must not lock in on noise. After lock-in the sum keeps growing
+ *     while GNSS is available and psiYaw follows it, so the live
+ *     estimate converges on the same whole-drive answer the offline
+ *     calibration gives.
  *
- *     Tried circular variance of the underlying angle diffs first (do
- *     the *samples* agree with each other, not just the estimate) — it's
- *     the theoretically cleaner check, and synthetic tests confirmed it
- *     rejects an alternating-heading stretch correctly. But measuring it
- *     against this app's own bundled real recorded drive (see
- *     ReplayDataSource) found real accel-vs-GPS-heading noise is louder
- *     than that synthetic test assumed: circular variance swung from
- *     0.14 to 0.84 across different windows of the *same* validated
- *     drive, with no threshold separating "real noisy driving" from "an
- *     actual turn" — so gating on it made every real calibration run out
- *     the safety cap and get flagged degraded, on data that was fine.
- *     Checkpoint settledness alone turned out to already reject the
- *     synthetic alternating-heading case just as well (each checkpoint's
- *     median swings between the two headings' respective values, which
- *     is exactly what settledness checks for) — so it's the one gate
- *     doing real work; circular variance is kept as a much looser,
- *     informational-only signal (see [yawSpreadThresh]'s doc).
+ *     The earlier yaw estimate (Calibration.estimateYawMisalignment)
+ *     compared accel angles in the phone frame with compass headings,
+ *     which only works if the leveled phone frame happens to point
+ *     north; its "forward" axis was close to arbitrary.
  *
- * Both gates have a hard safety cap (maxLevelSamples / maxConfidentSamples):
+ * Both gates have a hard safety cap (maxLevelSamples / maxYawSamples):
  * a genuinely noisy environment — road vibration through a mount, a
  * stop-start city start — must degrade to a best-effort estimate, never
  * to a demo stuck forever on "Calibrating…". Bounded-wait, not
@@ -69,9 +61,20 @@ import kotlin.math.sqrt
  */
 class CalibrationManager(
     private val levelSamples: Int = 20,
-    private val minConfidentSamples: Int = 30,
-    private val maxConfidentSamples: Int = 90,
-    private val minSpeedMps: Float = 2.0f,
+    // Usable forward-axis samples (above Calibration.FORWARD_AXIS_MIN_SPEED,
+    // 10 Hz) before the first estimate: the offline fit's own floor.
+    private val minYawSamples: Int = Calibration.FORWARD_AXIS_MIN_SAMPLES,
+    // Safety cap: past this many usable samples, lock in whatever the
+    // estimate is, flagged rough (see class doc). 60 s of driving.
+    private val maxYawSamples: Int = 600,
+    // Wall-clock cap on the yaw stage, in ticks with or without GNSS
+    // (10 Hz, so 30 s). The sample caps above only count samples above
+    // 3 m/s, so a phone that never moves that fast (a walk — every
+    // bundled demo replay tops out under 2 m/s — a desk, a parked car)
+    // would otherwise sit at "calibrating" forever. Past this, yaw locks
+    // in best-effort, flagged rough, and keeps refining (see class doc)
+    // so a later real drive still fixes it.
+    private val maxYawWaitTicks: Int = 300,
     // Min orientation steadiness (0-1) for a leveling window to be
     // trusted — see orientationSteadiness. A resting phone scores
     // ~0.9999; a real car driving, braking and cornering still scores
@@ -80,44 +83,41 @@ class CalibrationManager(
     private val steadyOrientationMinR: Float = 0.99f,
     private val maxLevelSamples: Int = 150,
     // Two yaw estimates this far apart (radians) still count as agreeing.
-    // ~8.6 degrees — comfortably inside the accuracy this estimate has
-    // anyway, while still rejecting a mid-turn estimate that swings tens
-    // of degrees between checkpoints.
+    // ~8.6 degrees.
     private val yawStabilityThreshRad: Float = 0.15f,
-    // Informational only (see class doc) — not part of the isReady gate.
-    // Only flags isRoughCalibration for near-total incoherence (real
-    // validated driving data measured up to 0.84; this sits well above
-    // that so it doesn't cry wolf on real noisy-but-fine driving).
-    private val yawSpreadThresh: Float = 0.95f,
+    // Min ForwardAxisFit.coherence to lock in as converged. The bundled
+    // real drive (replay_drive.json) measures 0.86-0.96 from its first
+    // 100 usable samples on; pure sensor noise ~0.05.
+    private val minYawCoherence: Float = 0.5f,
+    // Usable samples between checkpoints (1 s at 10 Hz).
     private val yawCheckpointGap: Int = 10,
-    // Consecutive checkpoints (each yawCheckpointGap raw ticks apart) that
-    // must all agree before locking in — not just the latest two. A
-    // median over a small filtered subset can land close to a previous
-    // checkpoint's value by pure chance even from genuinely inconsistent
-    // data (measured directly: a synthetic 50/50 random-mix stretch with
-    // no real consistent direction still passed a 2-checkpoint agreement
-    // check on a single draw). Three independent agreements in a row is
-    // far less likely to be coincidence.
+    // Consecutive checkpoints that must all agree before locking in. On
+    // the bundled real drive the estimate is still 22 degrees off at 100
+    // samples and within 5 of its final value from 150 on.
     private val yawRequiredAgreements: Int = 3,
-    // Sliding window, not an ever-growing buffer: an early turn must not
-    // permanently contaminate every later estimate for the rest of the
-    // session. Caught in review — a scenario with a turn in the first 20
-    // samples followed by 60 samples of a real straight stretch still
-    // locked in on the pre-turn offset, because the original samples
-    // never left the buffer. ~2x minConfidentSamples by default: enough
-    // history for a stable estimate, short enough to actually recover
-    // after a turn within one confident-collection window.
-    private val yawWindowSamples: Int = 60,
+    private val dt: Float = 0.1f,
+    // Samples whose accel direction is further than this from the current
+    // gravity estimate stay out of the drive-long gravity mean (see
+    // addYawSample). A car's own acceleration tilts the measured vector by
+    // under ~17 degrees even at 0.3 g; a phone picked up or re-mounted
+    // turns it much further.
+    private val gravityGateRad: Float = 0.52f,
 ) {
     private val levelBuf = ArrayList<FloatArray>(levelSamples)
-    private val yawAccelBuf = ArrayList<FloatArray>()
-    private val yawHeadingBuf = ArrayList<FloatArray>()
+    private val forwardAxis = ForwardAxisEstimator(dt)
+    // Running sum of raw accel for the drive-long gravity estimate.
+    private val gravitySum = DoubleArray(3)
+    private var gravityCount = 0
 
     private var levelSamplesSeen = 0
-    private var yawSamplesSeen = 0
     private var lastYawEstimate: Float? = null
-    private var lastYawCheckpointSize = 0
+    private var lastYawCheckpointSamples = 0
     private var yawAgreementStreak = 0
+    private var yawWaitTicks = 0
+
+    /** The latest forward-axis fit, null until there is one. */
+    var yawFit: ForwardAxisFit? = null
+        private set
 
     var rLevel: FloatArray? = null
         private set
@@ -156,7 +156,10 @@ class CalibrationManager(
      * itself. */
     val progressPercent: Int get() = when {
         isReady -> 100
-        isLeveled -> 50 + (50 * yawSamplesSeen / minConfidentSamples).coerceIn(0, 50)
+        isLeveled -> 50 + maxOf(
+            50 * forwardAxis.samples / minYawSamples,
+            50 * yawWaitTicks / maxYawWaitTicks,
+        ).coerceIn(0, 49)  // 100 only once isReady
         else -> (50 * levelSamplesSeen / levelSamples).coerceIn(0, 50)
     }
 
@@ -178,67 +181,140 @@ class CalibrationManager(
         if (stationary || giveUp) {
             rLevel = Calibration.levelingRotation(Calibration.estimateGravityVector(levelBuf))
             levelConverged = stationary
+            for (a in levelBuf) addGravity(a)
         }
     }
 
-    /** Feed one (leveled accel, GPS speed, GPS heading) sample while yaw
-     * hasn't locked in yet — only call once isLeveled and GNSS is
-     * available with speed > minSpeedMps. Locks in once two estimates
-     * `yawCheckpointGap` samples apart agree, or at maxConfidentSamples,
-     * whichever comes first — see class doc. */
-    fun addYawSample(rawAccel: FloatArray, gpsSpeed: Float, gpsHeadingRad: Float) {
-        if (!isLeveled || isReady || gpsSpeed <= minSpeedMps) return
-        val leveled = Calibration.matVec3(rLevel!!, rawAccel)
-        yawAccelBuf.add(floatArrayOf(leveled[0], leveled[1]))
-        yawHeadingBuf.add(
-            floatArrayOf(
-                kotlin.math.cos(gpsHeadingRad.toDouble()).toFloat(),
-                kotlin.math.sin(gpsHeadingRad.toDouble()).toFloat(),
-            )
-        )
-        if (yawAccelBuf.size > yawWindowSamples) {
-            yawAccelBuf.removeAt(0)
-            yawHeadingBuf.removeAt(0)
-        }
-
-        yawSamplesSeen++
-        val n = yawSamplesSeen
-        // n counts total samples seen (for the minConfidentSamples/
-        // maxConfidentSamples/checkpoint-gap bookkeeping below), decoupled
-        // from yawAccelBuf.size (the windowed buffer actually fed to the
-        // estimator) now that the buffer can shrink.
-        if (n < minConfidentSamples) return
-        if (n - lastYawCheckpointSize < yawCheckpointGap && lastYawEstimate != null) return
-
-        val estimate = Calibration.estimateYawMisalignment(yawAccelBuf, yawHeadingBuf)
-        // The load-bearing check: has the estimate stopped moving across
-        // yawRequiredAgreements checkpoints in a row? See class doc for
-        // why circular variance didn't add anything real data didn't
-        // already fail cleanly, and this streak's own doc for why two
-        // checkpoints agreeing isn't enough on its own.
-        val agreesWithLast = lastYawEstimate?.let { angleDiff(estimate, it) < yawStabilityThreshRad } == true
-        yawAgreementStreak = if (agreesWithLast) yawAgreementStreak + 1 else 0
-        val settled = yawAgreementStreak >= yawRequiredAgreements - 1
-        val giveUp = n >= maxConfidentSamples
-
-        if (settled || giveUp) {
-            psiYaw = estimate
-            // Near-total incoherence even in a settled estimate is still
-            // worth flagging — see yawSpreadThresh's doc.
-            val incoherent = Calibration.yawMisalignmentSpread(yawAccelBuf, yawHeadingBuf) >= yawSpreadThresh
-            yawConverged = settled && !incoherent
-            isReady = true
+    /** Feed one raw (accel, gyro) sample with its GNSS speed, every tick
+     * GNSS has a fix, once isLeveled — before and after isReady, at any
+     * speed (the estimator itself only counts samples above
+     * Calibration.FORWARD_AXIS_MIN_SPEED, but needs the slower ones
+     * around them for dv/dt). Call [yawGnssLost] on a tick without a fix
+     * so no derivative is taken across the gap. See class doc for when
+     * yaw locks in and how it keeps refining after that. */
+    fun addYawSample(rawAccel: FloatArray, rawGyro: FloatArray, gpsSpeed: Float) {
+        val r = rLevel ?: return
+        if (!gpsSpeed.isFinite()) {
+            yawGnssLost()
             return
         }
-        lastYawEstimate = estimate
-        lastYawCheckpointSize = n
+        if (gravityCount == 0 || withinGravityGate(rawAccel)) addGravity(rawAccel)
+        forwardAxis.add(rawAccel, rawGyro, gpsSpeed, r)
+        if (countYawWait()) return
+
+        val n = forwardAxis.samples
+        if (n < minYawSamples || n - lastYawCheckpointSamples < yawCheckpointGap) return
+        lastYawCheckpointSamples = n
+        val previousLevel = rLevel
+        relevel()
+        val fit = forwardAxis.fit(rLevel!!, minSamples = minYawSamples - 1)
+        if (fit == null) {
+            if (isReady) rLevel = previousLevel
+            return
+        }
+        yawFit = fit
+        val coherent = fit.coherence >= minYawCoherence
+
+        if (isReady) {
+            // Refining: follow the whole-drive estimate, and upgrade a
+            // rough lock once the data supports it. Never downgrade —
+            // the UI has already shown this calibration as good.
+            if (coherent) {
+                psiYaw = fit.psi
+                yawConverged = true
+            } else {
+                // psiYaw stays as it was, so the leveling it was fitted
+                // under has to stay too: a small tilt change moves the
+                // forward axis a lot (see relevel).
+                rLevel = previousLevel
+            }
+            return
+        }
+
+        val agreesWithLast = lastYawEstimate?.let { angleDiff(fit.psi, it) < yawStabilityThreshRad } == true
+        yawAgreementStreak = if (agreesWithLast) yawAgreementStreak + 1 else 0
+        lastYawEstimate = fit.psi
+        val settled = yawAgreementStreak >= yawRequiredAgreements - 1 && coherent
+        val giveUp = n >= maxYawSamples
+        if (settled || giveUp) {
+            psiYaw = fit.psi
+            yawConverged = settled
+            isReady = true
+        }
+    }
+
+    /**
+     * Leveling over the drive, as the offline calibration does it: gravity
+     * is the mean of every raw accel sample so far (the steady window
+     * leveling started from, then each GNSS tick), not just the first
+     * two seconds. A car's acceleration averages out over a drive but not
+     * over a 2 s window, and on the bundled real drive 1.5 degrees of
+     * window tilt moved the forward axis by 13. Re-leveled at each yaw
+     * checkpoint (once a second at most), only while GNSS is available.
+     */
+    private fun relevel() {
+        if (gravityCount == 0) return
+        val g = floatArrayOf(
+            (gravitySum[0] / gravityCount).toFloat(),
+            (gravitySum[1] / gravityCount).toFloat(),
+            (gravitySum[2] / gravityCount).toFloat(),
+        )
+        val norm = sqrt((g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).toDouble())
+        if (norm < 1e-6) return
+        rLevel = Calibration.levelingRotation(g)
+    }
+
+    private fun addGravity(a: FloatArray) {
+        if (!(a[0].isFinite() && a[1].isFinite() && a[2].isFinite())) return
+        for (i in 0 until 3) gravitySum[i] = gravitySum[i] + a[i].toDouble()
+        gravityCount++
+    }
+
+    private fun withinGravityGate(a: FloatArray): Boolean {
+        val gx = gravitySum[0]; val gy = gravitySum[1]; val gz = gravitySum[2]
+        val gn = sqrt(gx * gx + gy * gy + gz * gz)
+        val an = sqrt((a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).toDouble())
+        if (gn < 1e-9 || an < 1e-6) return false
+        val cosAng = (gx * a[0] + gy * a[1] + gz * a[2]) / (gn * an)
+        return cosAng >= kotlin.math.cos(gravityGateRad.toDouble())
+    }
+
+    /** The input jumps between two unrelated samples (a replay looping
+     * back to its first row): ends the current contiguous stretch
+     * without counting a tick toward the wait cap. */
+    fun yawStretchBreak() {
+        if (isLeveled) forwardAxis.gap()
+    }
+
+    /** GNSS has no fix this tick: ends the current contiguous stretch. */
+    fun yawGnssLost() {
+        if (!isLeveled) return
+        forwardAxis.gap()
+        countYawWait()
+    }
+
+    /** One more tick of the yaw stage; true if that hit maxYawWaitTicks
+     * and ended it best-effort. */
+    private fun countYawWait(): Boolean {
+        if (isReady) return false
+        yawWaitTicks++
+        if (yawWaitTicks < maxYawWaitTicks) return false
+        relevel()
+        val fit = forwardAxis.fit(rLevel!!, minSamples = 0)
+        // Below minYawSamples the smoothed samples are too few and too
+        // correlated for coherence to mean anything: keep the neutral 0.
+        psiYaw = if (fit != null && fit.samples >= minYawSamples && fit.coherence >= minYawCoherence) fit.psi else 0f
+        yawFit = fit
+        yawConverged = false
+        isReady = true
+        return true
     }
 
     /**
      * Force both stages done with an identity/zero estimate — for the
      * hidden Developer Mode's "Skip calibration" testing control ONLY,
      * never on the real calibration path. Real calibration deliberately
-     * waits for the phone to actually be moving above minSpeedMps (see
+     * waits for the phone to actually be moving above 3 m/s (see
      * class doc) — there's no way to make that genuinely fast without
      * weakening the checks this class exists for, and several of them
      * (settledness, the agreement streak) were added after real bugs a
@@ -266,6 +342,7 @@ class CalibrationManager(
             // for) gives a real best-effort gravity direction instead;
             // only an empty buffer falls back to identity.
             rLevel = if (levelBuf.isNotEmpty()) {
+                for (a in levelBuf) addGravity(a)
                 Calibration.levelingRotation(Calibration.estimateGravityVector(levelBuf))
             } else {
                 floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
