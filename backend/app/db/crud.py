@@ -39,8 +39,32 @@ async def get_last_known_position(db: AsyncSession, device_id: str) -> Optional[
         "movement_state": point.movement_state or "REST",
         "step_count": point.step_count or 0,
         "is_verified": point.is_verified,
-        "covariance": json.loads(point.covariance_json) if point.covariance_json else None
+        "covariance": json.loads(point.covariance_json) if point.covariance_json else None,
+        "last_step_age_sec": await _last_step_age_sec(db, point)
     }
+
+async def _last_step_age_sec(db: AsyncSession, point: TrajectoryPoint) -> Optional[float]:
+    """
+    Seconds between the device's last detected step and `point`, or None with no steps.
+    A step increments step_count on the sample it is detected on, so the step happened at
+    the earliest fused row that already carries the final count. Rows not fused
+    (is_verified false) are skipped.
+    """
+    if not point.step_count:
+        return None
+    stmt = (
+        select(TrajectoryPoint.time)
+        .where(TrajectoryPoint.device_id == point.device_id)
+        .where(TrajectoryPoint.step_count == point.step_count)
+        .where(TrajectoryPoint.is_verified.is_(True))
+        .where(TrajectoryPoint.time <= point.time)
+        .order_by(TrajectoryPoint.time)
+        .limit(1)
+    )
+    step_time = (await db.execute(stmt)).scalar_one_or_none()
+    if step_time is None:
+        return None
+    return (point.time - step_time).total_seconds()
 
 async def save_trajectory_point(db: AsyncSession, point_data: Dict[str, Any]) -> TrajectoryPoint:
     """Insert a single verified trajectory point."""
