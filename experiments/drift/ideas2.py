@@ -1,0 +1,173 @@
+"""Second round of drift ideas (drift-search-2). Same split, recipe and
+metric as ideas.py; each entry is one change on top of augbias (calibfix +
+bias/noise augmentation), the best single-model recipe from round 1."""
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import torch
+
+from experiments.drift import aligned, ideas, lib
+
+
+# ------------------------------------------------ test time: ensembles
+class RotEnsemble(torch.nn.Module):
+    """Runs the base net on copies of the IMU rotated by small mounting
+    errors (yaw about vertical, pitch about lateral) and averages the
+    *effective* forward accel and yaw rate the copies imply. Returned as a
+    correction relative to the unrotated input, so every eval path that adds
+    corrections to imu_raw works unchanged. Needs net input == imu_raw
+    (true here: no normalisation)."""
+
+    def __init__(self, base, yaw_deg=(0.0,), pitch_deg=(0.0,)):
+        super().__init__()
+        self.base = base
+        self.rots = [(math.radians(y), math.radians(p)) for y in yaw_deg for p in pitch_deg]
+
+    @staticmethod
+    def _rot(x, yaw, pitch):
+        cy, sy, cp, sp = math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch)
+        Rz = torch.tensor([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]], dtype=x.dtype)
+        Ry = torch.tensor([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]], dtype=x.dtype)
+        R = Ry @ Rz
+        return torch.cat([x[..., :3] @ R.T, x[..., 3:6] @ R.T, x[..., 6:]], -1)
+
+    def forward(self, x):
+        acc, yaw = 0.0, 0.0
+        for y, p in self.rots:
+            xr = self._rot(x, y, p)
+            if hasattr(self.base, "cur_v0"):
+                self.base.cur_v0 = self.cur_v0
+            c = self.base(xr)
+            acc = acc + xr[..., 0] + c[..., 0]
+            yaw = yaw + xr[..., 5] + c[..., 1]
+        n = len(self.rots)
+        return torch.stack([acc / n - x[..., 0], yaw / n - x[..., 5]], -1)
+
+
+class MeanEnsemble(torch.nn.Module):
+    """Average of several nets' corrections (e.g. two seeds of one recipe)."""
+
+    def __init__(self, nets):
+        super().__init__()
+        self.nets = torch.nn.ModuleList(nets)
+        self.cur_v0 = torch.zeros(1)
+
+    def forward(self, x):
+        out = 0.0
+        for n in self.nets:
+            if hasattr(n, "cur_v0"):
+                n.cur_v0 = self.cur_v0
+            out = out + n(x)
+        return out / len(self.nets)
+
+
+# ------------------------------------------------ idea: speed as an auxiliary task
+class SpeedHeadNet(torch.nn.Module):
+    """Base net with a 3rd output head read as absolute speed (m/s). Unlike
+    round 1's anchor, the head is NOT used by the integrator: it is only an
+    extra training target, so the shared CNN/GRU features have to encode how
+    fast the car is going (the dominant error source). At inference the
+    model is exactly the 2-output base net."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = lib.new_model(output_dim=3)
+        self.aux = None
+
+    def forward(self, x):
+        c = self.net(x)
+        self.aux = torch.nn.functional.softplus(c[..., 2]) * 10.0
+        return c[..., :2]
+
+
+# ------------------------------------------------ idea: longer IMU context
+class HistDataset(torch.utils.data.Dataset):
+    """Network input = the H samples of IMU BEFORE the window plus the window
+    itself (IMU keeps running during a GPS blackout, so this history is
+    always available in the app). imu_raw / targets stay the 5 s window.
+    Windows too close to the drive start get edge-padded history. The same
+    random bias/noise as AugDataset is applied to history and window."""
+
+    def __init__(self, base, seqs, hist=100, aug=True, acc_b=0.15, gyro_b=0.01, noise=0.02):
+        self.base, self.seqs, self.hist, self.aug = base, seqs, hist, aug
+        self.acc_b, self.gyro_b, self.noise = acc_b, gyro_b, noise
+        self.windows = base.windows
+
+    def __len__(self):
+        return len(self.base)
+
+    def __getitem__(self, i):
+        it = dict(self.base[i])
+        w = self.windows[i]
+        s = self.seqs[w.src]
+        a0 = w.start - self.hist
+        h = np.concatenate([s.accel[max(a0, 0):w.start], s.gyro[max(a0, 0):w.start]], 1).astype(np.float32)
+        if a0 < 0:
+            pad = np.repeat(it["imu_raw"][:1].numpy(), -a0, 0) if len(h) == 0 else np.repeat(h[:1], -a0, 0)
+            h = np.concatenate([pad, h], 0)
+        raw = it["imu_raw"]
+        full = torch.cat([torch.from_numpy(h), raw], 0)
+        if self.aug:
+            b = torch.cat([torch.empty(3).uniform_(-self.acc_b, self.acc_b),
+                           torch.empty(3).uniform_(-self.gyro_b, self.gyro_b)])
+            full = full + b + self.noise * torch.randn_like(full)
+            raw = full[self.hist:]
+        it["imu_raw"] = raw.contiguous()
+        it["imu"] = full
+        return it
+
+
+class HistNet(torch.nn.Module):
+    """Base net run over history + window; only the window's corrections are used."""
+
+    def __init__(self, T=lib.WS):
+        super().__init__()
+        self.net = lib.new_model()
+        self.T = T
+
+    def forward(self, x):
+        return self.net(x)[:, -self.T:]
+
+
+def hist_splits(hist):
+    def make():
+        sp = aligned.build_splits()
+        for k in ("val", "test", "test_iovnbd", "test_comma"):
+            sp[k] = HistDataset(sp[k], sp["_seqs"], hist=hist, aug=False)
+        sp["_hist"] = hist
+        return sp
+    return make
+
+
+def _aug_train(model, sp):
+    return ideas.AugDataset(sp["train"])
+
+
+def recipe(desc, model=lib.new_model, splits=aligned.build_splits, train_ds=_aug_train, set_v0=False,
+           aux_w=0.0, end_w=None, **train_kw):
+    """augbias recipe with the aligned (off-by-one fixed) integration in every
+    loss and every evaluation."""
+    return {
+        "desc": desc, "model": model, "splits": splits, "train_ds": train_ds,
+        "fwd": aligned.make_fwd(set_v0),
+        "loss_fn": lambda m, sp: aligned.make_loss(m, set_v0=set_v0, aux_w=aux_w),
+        "chain_loss_fn": lambda m, sp: aligned.make_chain_loss(m, end_w=end_w, aux_w=aux_w, set_v0=set_v0),
+        "chain_fn": lambda m, sp: aligned.chained_drift,
+        "train_kw": train_kw,
+    }
+
+
+EXPERIMENTS = {
+    "aligned": recipe("augbias recipe with prediction and truth aligned (off-by-one fix) in training and scoring"),
+    "aligned_speedaware": recipe("speedaware recipe (current speed as input), aligned", model=ideas.SpeedAwareNet,
+                                 set_v0=True),
+    "speedhead": recipe("aligned + auxiliary absolute-speed head (multi-task; not used by the integrator)",
+                        model=SpeedHeadNet, aux_w=0.5),
+    "hist10": recipe("aligned + network sees the 10 s of IMU before each 5 s window (15 s context)",
+                     model=HistNet, splits=hist_splits(100),
+                     train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
+                        end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
+}
