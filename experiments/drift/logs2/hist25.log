@@ -1,3 +1,16 @@
 /home/claude/SIH-2k2026/experiments/drift/lib.py:231: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
 Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
   tot += float(loss)
+[hist25] ep 0 single loss 60.29 | val 5s med 11.79 30s med 39.91 | score 51.70 | 940s
+[hist25] ep 1 single loss 57.12 | val 5s med 11.17 30s med 35.78 | score 46.95 | 511s
+[hist25] ep 2 single loss 55.65 | val 5s med 18.73 30s med 57.51 | score 76.24 | 387s
+[hist25] ep 3 single loss 54.66 | val 5s med 13.46 30s med 42.03 | score 55.50 | 364s
+[hist25] ep 4 single loss 53.22 | val 5s med 10.99 30s med 32.08 | score 43.07 | 374s
+[hist25] ep 5 single loss 51.84 | val 5s med 11.31 30s med 32.19 | score 43.50 | 352s
+[hist25] ep 6 chain loss 100.18 | val 5s med 10.91 30s med 26.36 | score 37.27 | 626s
+[hist25] ep 7 chain loss 95.82 | val 5s med 10.77 30s med 27.48 | score 38.25 | 651s
+[hist25] ep 8 chain loss 93.79 | val 5s med 10.96 30s med 25.50 | score 36.46 | 668s
+[hist25] ep 9 chain loss 90.95 | val 5s med 10.60 30s med 22.26 | score 32.86 | 644s
+[hist25] ep 10 chain loss 89.00 | val 5s med 10.93 30s med 22.08 | score 33.01 | 623s
+[hist25] ep 11 chain loss 87.95 | val 5s med 10.77 30s med 21.97 | score 32.74 | 641s
+RESULT hist25: io_5s   6.3 | io_30s  14.0 | io_60s  19.5 | io_30s_slow  40.7 | io_30s_fast  12.7 | comma_5s   3.7 | comma_30s  14.8  (118 min)
