@@ -69,10 +69,10 @@ def resample_uniform(seq: ImuSequence, target_hz: float) -> ImuSequence:
     the vehicle stream may differ, so this makes both trainable with the
     same window logic."""
     t0, t1 = seq.time[0], seq.time[-1]
-    n = int((t1 - t0) * target_hz)
+    n = int(np.floor((t1 - t0) * target_hz + 1e-6)) + 1  # samples at exactly 1/target_hz, both ends inside [t0, t1]
     if n < 2:
         return seq
-    t_new = np.linspace(t0, t1, n)
+    t_new = t0 + np.arange(n) / target_hz
 
     def interp(arr):
         if arr is None:
