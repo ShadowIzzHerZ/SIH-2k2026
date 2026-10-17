@@ -404,3 +404,8 @@ EXPERIMENTS["richaug"] = dict(EXPERIMENTS["speedaware"],
 EXPERIMENTS["moredata"] = dict(EXPERIMENTS["speedaware"],
     desc="speedaware + 18 recovered IO-VNBD training drives (+537 min, prep_extra.py); val/test unchanged",
     splits=lambda: lib.build_splits("fwdfix", extra=True))
+
+
+EXPERIMENTS["richmore"] = dict(EXPERIMENTS["moredata"],
+    desc="speedaware + richer augmentation + 18 recovered training drives",
+    train_ds=lambda model, sp: RichAugDataset(sp["train"]))
