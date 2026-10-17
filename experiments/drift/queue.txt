@@ -1,7 +1,9 @@
 richmore
 richmore --seed 7
 slowspec
-richmore_long --stage1 12 --stage2 12
+moredata_long --stage1 12 --stage2 12
 ens_round3
 duo_moredata_slowspec
 duo_ens_slowspec
+moredata --seed 3
+ens_moredata3

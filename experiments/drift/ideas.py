@@ -424,3 +424,7 @@ EXPERIMENTS["slowspec"] = dict(EXPERIMENTS["moredata"],
 
 EXPERIMENTS["richmore_long"] = dict(EXPERIMENTS["richmore"],
     desc="richmore with double the training budget (12 single-window + 12 chained epochs)")
+
+
+EXPERIMENTS["moredata_long"] = dict(EXPERIMENTS["moredata"],
+    desc="moredata with double the training budget (12 single-window + 12 chained epochs)")

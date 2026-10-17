@@ -39,6 +39,7 @@ class Mix(torch.nn.Module):
 
 COMBOS = {
     "ens_moredata": ("ens", ["moredata", "moredata_s7"], "average of moredata seeds 42 and 7"),
+    "ens_moredata3": ("ens", ["moredata", "moredata_s7", "moredata_s3"], "average of moredata seeds 42, 7 and 3"),
     "ens_round3": ("ens", ["moredata", "moredata_s7", "richaug", "richaug_s7"],
                    "average of moredata and richaug, both seeds"),
     "duo_moredata_slowspec": ("duo", ["moredata", "slowspec"], "moredata above 6 m/s, slow specialist below"),
