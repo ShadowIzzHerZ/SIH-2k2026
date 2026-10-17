@@ -113,8 +113,34 @@ def test_reconnect_is_smooth_not_a_jump():
     print(f"test_reconnect_is_smooth_not_a_jump: OK (jump {jump:.4f}m)")
 
 
+def test_blend_heading_takes_short_way_across_pi():
+    # Heading ~due west, where the angle wraps: the INS carries 3.13 rad
+    # through the blackout and GNSS comes back reporting -3.13 rad. The two
+    # differ by ~0.02 rad, so the blended heading must stay near +-pi.
+    dt = 0.1
+    n = 200
+    speed = 10.0
+    accel = np.zeros((n, 3), dtype=np.float32)
+    accel[:, 2] = 9.81
+    gyro = np.zeros((n, 3), dtype=np.float32)
+    pos = np.stack([-speed * np.arange(n) * dt, np.zeros(n)], axis=1)
+    available = np.ones(n, dtype=bool)
+    available[50:100] = False
+    gnss_speed = np.full(n, speed)
+    gnss_heading = np.where(np.arange(n) < 50, np.pi - 0.01, -np.pi + 0.01)
+
+    result = run_fusion(accel, gyro, pos, available, dt, ZeroCorrectionModel(), window_size=50,
+                        blend_seconds=2.0, gnss_speed=gnss_speed, gnss_heading=gnss_heading)
+
+    blend = [t for t, m in enumerate(result.mode) if m.value == "blend"]
+    assert blend
+    off_west = np.abs(np.arctan2(np.sin(result.heading[blend] - np.pi), np.cos(result.heading[blend] - np.pi)))
+    assert off_west.max() < 0.05, f"blended heading swung {off_west.max():.2f} rad away from due west"
+
+
 if __name__ == "__main__":
     test_gnss_always_available_passes_through()
     test_blackout_reconstructs_straight_line()
     test_reconnect_is_smooth_not_a_jump()
+    test_blend_heading_takes_short_way_across_pi()
     print("\n✅ fusion smoke tests passed")
