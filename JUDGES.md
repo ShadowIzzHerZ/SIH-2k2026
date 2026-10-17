@@ -78,7 +78,7 @@ predicted trajectory ──► loss = per-step speed error + end-to-end drift %
 | [src/data/io_vnbd_loader.py](src/data/io_vnbd_loader.py) | Parses the PS's official [IO-VNBD](https://github.com/onyekpeu/IO-VNBD) dataset (40hrs/1,300km vehicle + 58hrs/4,400km smartphone, UK/Nigeria/France), fuzzy-matching real header variants |
 | [src/data/windowing.py](src/data/windowing.py) | Builds train/val/test windows, split at the *trip/file* level (not window level) to avoid leakage; also mixes in `data/comma2k19_demo/` and `data/own_recordings/` when asked |
 | [src/data/comma2k19_loader.py](src/data/comma2k19_loader.py) | Loads [comma2k19](https://huggingface.co/datasets/commaai/comma2k19) — a second, independent real dataset (US highway, different device/country) used as a generalization check, never trained on by default |
-| [src/train.py](src/train.py) | The training loop — `python -m src.train --resume checkpoints/best.pt` |
+| [src/train.py](src/train.py) | The training loop — `python -m src.train --resume checkpoints/best_v3chain.pt --run_name v3chain` (continues the shipped checkpoint, saving back to it only if the run beats it) |
 | [src/evaluate.py](src/evaluate.py) | Benchmarks a checkpoint against the PS's own `<10%` drift target |
 | [src/evaluate_comma2k19.py](src/evaluate_comma2k19.py) | Runs the IO-VNBD-trained model on comma2k19 with zero retraining — the generalization check |
 | [src/diagnose_drift.py](src/diagnose_drift.py) | Per-window drift diagnostics — why urban low-speed driving is harder (broad underfitting, not one fixable bug) |

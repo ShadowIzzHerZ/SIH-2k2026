@@ -289,15 +289,16 @@ python src/data/inspect_dataset.py
 # 2. train (cold start)
 python -m src.train --config configs/default.yaml
 
-# 2b. or resume/warm-restart from the current best checkpoint instead of
-# random init — measures the loaded weights' real val drift first so
-# checkpoints/best.pt only gets overwritten if this run actually beats it.
-# Backs up the previous checkpoints/best.pt -> best_prev.pt and
-# results/train_history.json -> train_history_prev.json before it starts.
-python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
+# 2b. or resume/warm-restart from the shipped checkpoint (best_v3chain.pt)
+# instead of random init — measures the loaded weights' real val drift first
+# so checkpoints/best_v3chain.pt only gets overwritten if this run actually
+# beats it. --run_name v3chain makes it save there instead of best.pt. Backs
+# up the previous checkpoints/best_v3chain.pt -> best_v3chain_prev.pt and
+# results/train_history_v3chain.json -> train_history_v3chain_prev.json first.
+python -m src.train --config configs/default.yaml --resume checkpoints/best_v3chain.pt --run_name v3chain
 
 # 3. evaluate against the PS's <10% drift benchmark
-python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
+python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best_v3chain.pt
 
 # 4. export for the mobile app
 python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints/best.pt
@@ -316,7 +317,7 @@ python -m src.simulate_blackout --dataset iovnbd --blackout_duration_s 45
 python -m tests.test_map_matching
 
 # measure map-matching's real improvement on the trained model's predictions
-python -m src.evaluate_with_mapmatching --config configs/default.yaml --checkpoint checkpoints/best.pt
+python -m src.evaluate_with_mapmatching --config configs/default.yaml --checkpoint checkpoints/best_v3chain.pt
 ```
 
 ### Training on Colab

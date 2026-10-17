@@ -84,7 +84,7 @@ code the project's real numbers come from. The actual workflow: record
 on a walk/drive, pull the CSV into `data/own_recordings/`, then really
 retrain with the existing, validated pipeline:
 ```bash
-python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
+python -m src.train --config configs/default.yaml --resume checkpoints/best_v3chain.pt --run_name v3chain
 ```
 
 The app module's `syncModel` Gradle task copies `checkpoints/dead_reckoning_model.onnx`
