@@ -277,4 +277,17 @@ class CalibrationManagerTest {
         feedDrive(cal, n = 200, trueYawOffset = 0.6f, startTick = 200)
         assertTrue(angleDiff(0.6f, cal.psiYaw) < 0.05f)
     }
+
+    @Test
+    fun `progress keeps moving during the yaw wait and reads 100 only when ready`() {
+        // From the calibration-fix change: a full ring that keeps waiting
+        // reads as a hang.
+        val cal = leveledManager(maxYawWaitTicks = 300)
+        feedDrive(cal, n = 299, trueYawOffset = 0f, speedAt = { 0f })
+        assertFalse(cal.isReady)
+        assertTrue("progress should keep moving while it waits", cal.progressPercent in 91..99)
+        feedDrive(cal, n = 1, trueYawOffset = 0f, speedAt = { 0f })
+        assertTrue(cal.isReady)
+        assertEquals(100, cal.progressPercent)
+    }
 }
