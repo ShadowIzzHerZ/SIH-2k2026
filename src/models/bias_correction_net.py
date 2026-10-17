@@ -52,6 +52,10 @@ class BiasCorrectionNet(nn.Module):
     ):
         super().__init__()
         cnn_channels = cnn_channels or [32, 64, 64]
+        if cnn_kernel_size < 1 or cnn_kernel_size % 2 == 0:
+            # padding=k//2 only keeps the output T samples long for odd k; an
+            # even k adds one sample per layer and breaks forward()'s contract.
+            raise ValueError(f"cnn_kernel_size must be a positive odd integer, got {cnn_kernel_size}")
 
         conv_layers = []
         in_ch = input_channels

@@ -150,6 +150,23 @@ def compute_loss(speed_pred, pos_pred, speed_gt, pos_gt, weights: dict):
     return total, metrics
 
 
+def validate_config(cfg: dict) -> None:
+    """Reject config values that can never work, before any data is loaded,
+    instead of letting them surface later as a confusing shape error or
+    IndexError mid-training."""
+    k = cfg["model"]["cnn_kernel_size"]
+    if k < 1 or k % 2 == 0:
+        raise ValueError(f"model.cnn_kernel_size must be a positive odd integer (an even kernel "
+                         f"makes the corrections longer than the window), got {k}")
+    weights = cfg["train"]["loss_weights"]
+    if weights.get("heading_end", 0.0) > 0:
+        T = cfg["data"]["window_size"]
+        steps = int(weights.get("heading_end_steps", 10))
+        if not 1 <= steps <= T - 1:
+            raise ValueError(f"train.loss_weights.heading_end_steps must be in [1, window_size-1] = "
+                             f"[1, {T - 1}], got {steps}")
+
+
 def chain_loss(model, batch, dt: float, device, weights: dict):
     """Chained-chunk training loss over K back-to-back windows.
 
@@ -346,6 +363,7 @@ def main():
     if args.heading_end_weight is not None:
         cfg["train"]["loss_weights"]["heading_end"] = args.heading_end_weight
         print(f"--heading_end_weight: overriding loss_weights.heading_end -> {args.heading_end_weight}")
+    validate_config(cfg)
     device = pick_device(cfg["train"]["device"])
     print(f"device: {device}")
 
