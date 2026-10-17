@@ -179,6 +179,16 @@ class EnsembleModelTest {
     }
 
     @Test
+    fun `a window the speed channel rejects falls back instead of throwing`() {
+        val s = Returning { n -> Array(n) { slowAnswer.copyOf() } }
+        val e = EnsembleModel(s, fast())
+        val wide = Array(50) { FloatArray(7) }
+        assertArrayEquals(slowAnswer, e.predict(wide, 20f)[0], 0f)
+        assertEquals(ModelRole.SLOW, e.lastUsed)
+        assertEquals(1, e.fallbackCount)
+    }
+
+    @Test
     fun `when both models fail the chunk gets zero corrections, not a crash`() {
         val e = EnsembleModel(Throwing(), Throwing())
         val out = e.predict(window(), 10f)
