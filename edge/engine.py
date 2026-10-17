@@ -204,26 +204,40 @@ class ModelRateFusion:
 
 class EdgeEngine:
     def __init__(self, predictor, R_mount: np.ndarray, model_hz: float = 10.0, resample: str = "mean",
-                 gnss_timeout_s: float = 1.5, live_smooth_s: float = 1.0, **fusion_kwargs):
+                 gnss_timeout_s: float = 1.5, live_smooth_s: float = 1.0, live_fade_max_mps: float = 5.0,
+                 clock_reset_s: float = 1.0, **fusion_kwargs):
         self.R = np.asarray(R_mount, dtype=np.float64)
         self.core = ModelRateFusion(predictor, dt=1.0 / model_hz, **fusion_kwargs)
+        self._resample, self._model_hz = resample, model_hz
         self.resampler = make_resampler(resample, model_hz, 6)
         self.gnss_timeout_s = gnss_timeout_s
         self.live_smooth_s = live_smooth_s
-        self.fix: Fix | None = None
+        self.live_fade_max_mps = live_fade_max_mps
+        self.clock_reset_s = clock_reset_s
+        self.clock_resets = 0
+        self._t_max: float | None = None
+        self._fade_s = live_smooth_s
+        self.fixes: deque[Fix] = deque(maxlen=256)  # recent fixes, oldest first
         self.ticks: list[State] = []        # finalized 10 Hz track
         self.live: State | None = None      # high-rate propagated state (undisplayed)
         self._offset = np.zeros(2)          # display offset being faded out
         self._offset_t0 = 0.0
+        self._pre_tick: State | None = None  # last fix shown before the first 10 Hz tick
 
     def push_gnss(self, fix: Fix):
-        self.fix = fix
+        self.fixes.append(fix)
 
     def _fix_at(self, t: float):
-        """The latest fix, extrapolated to t, or None if it is stale. Lets a
-        1-5 Hz GNSS receiver drive the 10 Hz state machine."""
-        f = self.fix
-        if f is None or not (0.0 <= t - f.t <= self.gnss_timeout_s):
+        """The newest fix taken at or before t, extrapolated to t, or None if
+        it is stale. Lets a 1-5 Hz GNSS receiver drive the 10 Hz state machine.
+
+        Not simply the newest fix: a 10 Hz tick is only emitted once an IMU
+        sample after it arrives, and after an IMU dropout that can be well
+        after the tick, when fixes newer than the tick have already been
+        pushed. Using those would make the tick look like a blackout and
+        start a spurious model chunk and blend."""
+        f = next((f for f in reversed(self.fixes) if f.t <= t), None)
+        if f is None or t - f.t > self.gnss_timeout_s:
             return None
         x, y = f.x, f.y
         if f.speed is not None and f.heading is not None:
@@ -234,6 +248,9 @@ class EdgeEngine:
 
     def push_imu(self, t: float, accel: np.ndarray, gyro: np.ndarray) -> State:
         """One raw sample, sensor frame, SI units. Returns the high-rate state."""
+        if self._t_max is not None and t < self._t_max - self.clock_reset_s:
+            self._clock_reset(t)
+        self._t_max = t if self._t_max is None else max(self._t_max, t)
         a = self.R @ np.asarray(accel, dtype=np.float64)
         g = self.R @ np.asarray(gyro, dtype=np.float64)
         finalized = []
@@ -250,17 +267,64 @@ class EdgeEngine:
         self.ticks += self.core.flush()
         return self.ticks
 
-    def _reanchor(self, st: State, t_now: float):
+    def _clock_reset(self, t: float):
+        """The sensor clock jumped back by more than clock_reset_s (a sensor or
+        logger restart). Jitter never does that. Close everything on the old
+        clock, then carry on from the last position on the new one: the
+        resampler and the fix history start over, the model history and the
+        position are kept. Without this the resampler would ignore every
+        sample until the new clock caught up with the old one."""
+        t_old = self._t_max
+        n_ticks = len(self.ticks)
+        # Fixes already on the new clock (pushed just before this sample) are
+        # the newest ones stamped well before the old clock's time. Set them
+        # aside while the old clock closes: its last ticks would otherwise
+        # pick one up (its t is <= theirs), find it stale and turn GNSS
+        # ticks into a spurious blackout.
+        fresh = []
+        while self.fixes and self.fixes[-1].t < t_old - self.clock_reset_s:
+            fresh.append(self.fixes.pop())
+        self.finish()
+        self.resampler = make_resampler(self._resample, self._model_hz, 6)
+        self.fixes = deque(reversed(fresh), maxlen=self.fixes.maxlen)
+        self._pre_tick = None
+        if len(self.ticks) > n_ticks:  # closing the old clock resolved a chunk
+            st = self.ticks[-1]
+            self._reanchor(st, t_old)
+            L = self.live
+            dt = max(0.0, t_old - st.t)  # bring it up to the last old-clock sample
+            adv = np.array([np.cos(L.heading), np.sin(L.heading)]) * L.speed * dt
+            L.x, L.y = L.x + adv[0], L.y + adv[1]
+            self._offset -= adv
         if self.live is not None:
-            shown = self._shown(t_now)
+            self.live.t = t
+            self._offset_t0 += t - t_old  # keep fading on the new clock
+        self.clock_resets += 1
+        self._t_max = None
+
+    def _reanchor(self, st: State, t_now: float):
+        shown = self._shown(t_now) if self.live is not None else self._pre_tick
+        if shown is not None:
             self._offset = np.array([shown.x - st.x, shown.y - st.y])
             self._offset_t0 = t_now
+            # A 5 s blackout chunk can move the estimate by tens of metres.
+            # Faded over a fixed second, the live output would briefly run at
+            # several times vehicle speed; stretch the fade instead so the
+            # correction itself moves at most live_fade_max_mps.
+            self._fade_s = self.live_smooth_s
+            if self.live_smooth_s > 0 and self.live_fade_max_mps > 0:
+                self._fade_s = max(self.live_smooth_s, float(np.linalg.norm(self._offset)) / self.live_fade_max_mps)
         self.live = State(st.t, st.x, st.y, st.heading, st.speed, st.mode)
 
     def _propagate(self, t: float, a: np.ndarray, g: np.ndarray) -> State:
-        mode = GNSS if self._fix_at(t) is not None else BLACKOUT
-        if self.live is None:  # before the first 10 Hz tick
-            return State(t, 0.0, 0.0, 0.0, 0.0, mode)
+        fix = self._fix_at(t)
+        mode = GNSS if fix is not None else BLACKOUT
+        if self.live is None:  # before the first 10 Hz tick: show the fix, not the origin
+            if fix is None:
+                return State(t, 0.0, 0.0, 0.0, 0.0, mode)
+            x, y, spd, hdg = fix
+            self._pre_tick = State(t, x, y, hdg or 0.0, spd or 0.0, mode)
+            return self._pre_tick
         L = self.live
         dt = max(0.0, t - L.t)
         if mode == BLACKOUT:  # raw strapdown until the next model result
@@ -268,15 +332,19 @@ class EdgeEngine:
         L.heading = _wrap(L.heading + g[2] * dt)
         L.x += L.speed * np.cos(L.heading) * dt
         L.y += L.speed * np.sin(L.heading) * dt
-        L.t = t
+        # Host timestamps jitter and can step backwards. Never move the clock
+        # back, or the next sample integrates the same interval twice.
+        L.t = max(L.t, t)
         if L.mode != BLEND:  # a blend lasts until the next 10 Hz tick says otherwise
             L.mode = mode
         return self._shown(t)
 
     def _shown(self, t: float) -> State:
         L = self.live
-        if self.live_smooth_s > 0:
-            w = max(0.0, 1.0 - (t - self._offset_t0) / self.live_smooth_s)
+        if self._fade_s > 0:
+            # Capped at 1: a sample stamped just before _offset_t0 (jitter)
+            # must not overshoot the offset.
+            w = min(1.0, max(0.0, 1.0 - (t - self._offset_t0) / self._fade_s))
         else:
             w = 0.0
         return State(t, L.x + w * self._offset[0], L.y + w * self._offset[1], L.heading, L.speed, L.mode)
