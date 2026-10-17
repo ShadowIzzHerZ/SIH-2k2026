@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader
 from src.chain_eval import ChainTrainDataset, build_chains, chained_drift
 from src.data.windowing import load_combined_dataset_splits
 from src.models.bias_correction_net import BiasCorrectionNet
-from src.models.strapdown_ins import dead_reckon_position, drift_metric, integrate_heading, integrate_speed
+from src.models.strapdown_ins import dead_reckon_position, drift_metric, integrate_heading, integrate_speed, path_length
 
 
 def pick_device(requested: str) -> torch.device:
@@ -188,7 +188,7 @@ def chain_loss(model, batch, dt: float, device, weights: dict):
         loss_j, m = compute_loss(speed, pos, speed_gt[:, j], pos_gt[:, j], weights)
         p_cum = p_cum + pos[:, -1]
         gt_cum = gt_cum + pos_gt[:, j, -1]
-        dist = dist + torch.linalg.norm(pos_gt[:, j, 1:] - pos_gt[:, j, :-1], dim=-1).sum(dim=1)
+        dist = dist + path_length(pos_gt[:, j])
         cd = 100.0 * torch.linalg.norm(p_cum - gt_cum, dim=-1) / dist.clamp(min=1e-6)
         total = total + loss_j + chain_w * cd.mean()
         for k, val in m.items():

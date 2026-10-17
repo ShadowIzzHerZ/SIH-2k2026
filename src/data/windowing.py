@@ -13,7 +13,7 @@ Each window carries everything the training loop needs:
     (network input's physical counterpart, so the residual correction has
     something to be a residual *of*)
   - GT speed at each step (supervises the per-step loss)
-  - GT position relative to the window's start (supervises the drift loss)
+  - GT position relative to the sample just before the window (supervises the drift loss)
   - v0 / theta0: the vehicle's true starting speed and heading for this
     window. A window is a random 5s slice of a drive — the vehicle is
     essentially never stopped and facing due-east right at the slice
@@ -50,10 +50,11 @@ class Window:
     accel: np.ndarray       # (T, 3) calibrated, vehicle frame
     gyro: np.ndarray        # (T, 3) calibrated, vehicle frame
     speed_gt: np.ndarray    # (T,)
-    pos_gt: np.ndarray      # (T, 2) relative to window start
-    v0: float                # true starting speed, m/s
-    theta0: float            # true starting heading, rad (world frame, matches pos_gt's axes)
-    lat0: float               # true starting lat/lon — lets a predicted local-xy trajectory be
+    pos_gt: np.ndarray      # (T, 2) relative to the anchor (the sample before accel[0]);
+                            # pos_gt[k] is where integrating accel/gyro[0..k] should land
+    v0: float                # true speed at the anchor, m/s
+    theta0: float            # true heading at the anchor, rad (world frame, matches pos_gt's axes)
+    lat0: float               # true lat/lon at the anchor — lets a predicted local-xy trajectory be
     lon0: float               # converted back to real coordinates for map-matching against OSM
     dt: float
     # Where this window came from, so chain_eval.py can stitch back-to-back
@@ -183,17 +184,31 @@ def build_windows(seq: ImuSequence, window_size: int, stride: int, dt: float,
         speed_gt = None
 
     windows = []
-    for start in range(0, n - window_size, stride):
+    # Ground truth is aligned with the integrator (strapdown_ins's cumsum,
+    # FusionEngine.kt, edge/engine.py, fusion.run_fusion): from a state at
+    # sample `start - 1`, integrating IMU sample `start + k` gives the state
+    # at sample `start + k`. So the anchor (v0, theta0, origin, lat0/lon0)
+    # is the sample BEFORE the window's first IMU sample, and pos_gt[k] /
+    # speed_gt[k] are the truth at the sample whose IMU reading was just
+    # integrated. (Before this, pos_gt was relative to the window's own
+    # first sample, one step behind the prediction: a perfect constant-
+    # velocity prediction scored ~2% drift at T=50, and chained windows
+    # dropped one true step per chunk boundary.)
+    for start in range(1, n - window_size, stride):
         end = start + window_size
+        anchor = start - 1
         w_accel = seq.accel[start:end]
         w_gyro = seq.gyro[start:end]
         w_speed = speed_gt[start:end] if speed_gt is not None else None
-        w_pos = (xy[start:end] - xy[start]) if xy is not None else None
+        # path[0] is the anchor (origin), path[1:] the T integrated samples
+        path = (xy[anchor:end] - xy[anchor]) if xy is not None else None
+        w_pos = path[1:] if path is not None else None
 
         if w_speed is None or w_pos is None:
             continue  # can't supervise this window without GT — skip
 
-        if not np.isfinite(w_speed).all() or not np.isfinite(w_pos).all():
+        v_anchor = speed_gt[anchor]
+        if not np.isfinite(w_speed).all() or not np.isfinite(path).all() or not np.isfinite(v_anchor):
             # Window overlaps a real GPS blackout gap (blank lat/lon/speed
             # fields -> NaN, see io_vnbd_loader.load_sequence) — no ground
             # truth to supervise it. Found the hard way: NaN comparisons
@@ -208,32 +223,32 @@ def build_windows(seq: ImuSequence, window_size: int, stride: int, dt: float,
             # useful per that folder's README) got mixed into training.
             continue
 
-        step_dist = np.linalg.norm(np.diff(w_pos, axis=0), axis=1)
+        step_dist = np.linalg.norm(np.diff(path, axis=0), axis=1)
         if step_dist.sum() < min_distance_m:
             continue  # essentially stationary — see docstring
 
-        v0 = float(w_speed[0])
+        v0 = float(v_anchor)
         # true starting heading: prefer the GPS-orientation field (GPS
         # chip's own course-over-ground, confirmed smooth — see
-        # calibrate_sequence) at the window's start sample when the
+        # calibrate_sequence) at the anchor sample when the
         # vehicle's actually moving there. Falls back to bearing from the
         # position track's own first ~1s (short lookahead approximates
         # instantaneous direction of travel; the full window's endpoint
         # would blend in whatever turning happens later in the window,
         # which isn't "starting" heading) if heading_gt isn't available or
         # the window happens to start from a near-stop.
-        if seq.heading_gt is not None and w_speed[0] > 1.0:
-            unit = compass_deg_to_xy_unit(seq.heading_gt[start])
+        if seq.heading_gt is not None and v_anchor > 1.0:
+            unit = compass_deg_to_xy_unit(seq.heading_gt[anchor])
             theta0 = float(np.arctan2(unit[1], unit[0]))
         else:
-            lookahead = min(10, window_size - 1)
-            d = w_pos[lookahead] - w_pos[0]
+            lookahead = min(10, window_size)
+            d = path[lookahead] - path[0]
             if np.linalg.norm(d) < 0.5:  # too little motion in that short a span — widen it
-                d = w_pos[-1] - w_pos[0]
+                d = path[-1] - path[0]
             theta0 = float(np.arctan2(d[1], d[0]))
 
-        lat0 = float(seq.lat[start]) if seq.lat is not None else float("nan")
-        lon0 = float(seq.lon[start]) if seq.lon is not None else float("nan")
+        lat0 = float(seq.lat[anchor]) if seq.lat is not None else float("nan")
+        lon0 = float(seq.lon[anchor]) if seq.lon is not None else float("nan")
 
         windows.append(Window(accel=w_accel, gyro=w_gyro, speed_gt=w_speed, pos_gt=w_pos,
                                v0=v0, theta0=theta0, lat0=lat0, lon0=lon0, dt=dt,
