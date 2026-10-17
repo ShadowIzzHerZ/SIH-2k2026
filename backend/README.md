@@ -162,3 +162,18 @@ chmod +x deploy.sh
 python tests/simulate_device.py
 ```
 
+
+---
+
+## 7. Authentication Settings
+
+Token checks are **off by default** so the dashboard and local demos keep working. Turn them on by setting these environment variables (in `.env` or the service environment):
+
+| Variable | Default | Effect when set |
+| :--- | :--- | :--- |
+| `DEVICE_ENROLL_SECRET` | empty | `POST /auth/token` needs `"secret": "<DEVICE_ENROLL_SECRET>"` in the body to mint a device token. `POST /sensor-data`, `GET /device/{id}/state`, `GET /device/{id}/trajectory` and `POST /device/{id}/mode` then need `Authorization: Bearer <token>` for that device (or an admin token). |
+| `ADMIN_SECRET` | empty | The only way to mint an `admin` token: `{"device_id": "admin", "secret": "<ADMIN_SECRET>"}`. It also works as the secret for device tokens. While `DEVICE_ENROLL_SECRET` is set and `ADMIN_SECRET` is not, admin tokens cannot be minted at all. |
+
+With `DEVICE_ENROLL_SECRET` unset, any caller can mint a token for any device id and the REST endpoints need no token; the server logs a warning the first time a token is minted that way. `/health` and the dashboard page are always open. The dashboard asks for the enrollment secret when the server requires one.
+
+Generate secrets with `openssl rand -hex 32`. `SECRET_KEY` (the JWT signing key) is separate and always required.

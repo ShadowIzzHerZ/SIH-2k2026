@@ -293,14 +293,30 @@ DASHBOARD_HTML = """
             return connectPromise;
         }
 
-        async function openWebSocket() {
-            const res = await fetch("/auth/token", {
+        // Token for the socket and the REST calls. A server with DEVICE_ENROLL_SECRET
+        // set answers 403 without it, so ask for the secret once and retry.
+        let authToken = null;
+        async function fetchToken() {
+            const body = { device_id: deviceId, expires_minutes: 60 };
+            const post = () => fetch("/auth/token", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ device_id: deviceId, expires_minutes: 60 })
+                body: JSON.stringify(body)
             });
-            const authData = await res.json();
-            const token = authData.access_token;
+            let res = await post();
+            if (res.status === 403) {
+                const secret = window.prompt("This server needs its device enrollment secret (DEVICE_ENROLL_SECRET):");
+                if (!secret) throw new Error("Enrollment secret required");
+                body.secret = secret;
+                res = await post();
+            }
+            if (!res.ok) throw new Error(`Token request failed (HTTP ${res.status})`);
+            authToken = (await res.json()).access_token;
+            return authToken;
+        }
+
+        async function openWebSocket() {
+            const token = await fetchToken();
 
             const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
             const wsUrl = `${proto}//${window.location.host}/ws/track/${deviceId}?token=${token}`;
@@ -451,7 +467,10 @@ DASHBOARD_HTML = """
 
         async function fetchLatestDbState() {
             log("Querying database for latest stored trajectory point & state...", "log-info");
-            const res = await fetch(`/device/${deviceId}/trajectory?limit=5`);
+            if (!authToken) await fetchToken();
+            const res = await fetch(`/device/${deviceId}/trajectory?limit=5`, {
+                headers: { Authorization: `Bearer ${authToken}` }
+            });
             const history = await res.json();
             if (history && history.length > 0) {
                 const latest = history[history.length - 1];
