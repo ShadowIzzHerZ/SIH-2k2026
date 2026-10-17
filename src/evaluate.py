@@ -2,12 +2,15 @@
 Evaluate a trained model against the actual SIH26168 benchmark criteria
 (doc §2 / §5):
     - positional drift < 10% of distance travelled during GNSS blackout
-    - example checks: <5m drift over 50m in <1min; <100m drift over 1km @60kmph
 
-Reports both the aggregate drift-% (same metric trained on) and the two
-named example scenarios, on the held-out test split, sequence by sequence
-so you can see which trip types the model struggles on (tight turns are
-usually the failure mode for heading-rate errors) before the demo.
+Reports the aggregate drift-% (same metric trained on) per 5 s test window
+and over chained 30 s blackouts, overall and per dataset.
+
+The PS's two example checks (<5 m over 50 m in under a minute, <100 m over
+1 km at 60 km/h; eval.example_checks in the config) are not scored
+separately: both are the same 10% ratio as drift_target_pct, and neither
+distance lines up with a 5 s window or a 30 s chain (1 km at 60 km/h is a
+60 s blackout). tests/test_eval_config.py checks the ratio stays covered.
 
 Run:
     python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
