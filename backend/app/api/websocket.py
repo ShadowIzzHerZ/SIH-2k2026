@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import math
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.core.auth import authenticate_ws
@@ -55,6 +56,20 @@ async def restore_or_init_filter(device_id: str) -> IMUKalmanFilter:
     logger.info(f"Initialized brand-new Kalman filter state for {device_id}.")
     return IMUKalmanFilter()
 
+def _has_valid_queue_keys(packet: Any) -> bool:
+    """
+    The priority queue orders items by (priority, timestamp, seq). A string/null
+    timestamp or seq makes those comparisons raise inside the heap, so such
+    packets are rejected before they are enqueued. Missing keys use defaults.
+    """
+    if not isinstance(packet, dict):
+        return False
+    for key in ("timestamp", "seq"):
+        val = packet.get(key, 0)
+        if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
+            return False
+    return True
+
 @router.websocket("/ws/track/{device_id}")
 async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
     # Step 1: JWT Authentication during handshake
@@ -93,11 +108,20 @@ async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
 
             # 2. Real-Time Live Frame (10Hz, Priority 0)
             elif msg_type == "live":
+                if not _has_valid_queue_keys(data):
+                    logger.warning(f"Dropping live frame with invalid timestamp/seq from {device_id}")
+                    continue
                 await queue_mgr.enqueue_live(device_id, data)
 
             # 3. Backlog Recovery Dump (Priority 1 with chunking)
             elif msg_type == "backlog":
                 chunk = data.get("chunk", [])
+                if not isinstance(chunk, list):
+                    chunk = []
+                valid_chunk = [p for p in chunk if _has_valid_queue_keys(p)]
+                if len(valid_chunk) != len(chunk):
+                    logger.warning(f"Dropped {len(chunk) - len(valid_chunk)} invalid backlog frames from {device_id}")
+                chunk = valid_chunk
                 enqueued = await queue_mgr.enqueue_backlog_chunk(device_id, chunk)
                 logger.info(f"Enqueued {enqueued} backlog frames for {device_id}")
 
