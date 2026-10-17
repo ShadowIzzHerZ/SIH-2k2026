@@ -2,23 +2,65 @@
 import asyncio
 import json
 import logging
+import time
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from app.core.auth import authenticate_ws
 from app.core.time_sync import TimeSyncManager
 from app.core.queue_manager import IngestionQueueManager
 from app.fusion.kalman_filter import IMUKalmanFilter
+from app.config import get_settings
 from app.cache.redis_client import cache_manager
 from app.db.database import AsyncSessionLocal
 from app.db.crud import get_last_known_position, save_trajectory_point
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+settings = get_settings()
 
 # Global Queue and Connection Pool
 queue_mgr = IngestionQueueManager()
 active_connections: Dict[str, WebSocket] = {}
 device_kalman_filters: Dict[str, IMUKalmanFilter] = {}
+
+# Per-device in-memory state is freed after DEVICE_IDLE_TTL_SEC with no traffic and
+# no open socket. The filter state is also cached (Redis / memory fallback) after
+# every sample, so a device returning later is restored by restore_or_init_filter.
+# An idle TTL rather than cleanup-on-disconnect never races a reconnecting socket,
+# lets frames still queued after a disconnect use the live filter, and also covers
+# devices that only ever post to the REST /sensor-data fallback.
+_device_last_seen: Dict[str, float] = {}
+_IDLE_SWEEP_INTERVAL_SEC = 60.0
+_last_idle_sweep = 0.0
+
+def _touch_device(device_id: str, now: Optional[float] = None):
+    _device_last_seen[device_id] = time.monotonic() if now is None else now
+
+def sweep_idle_devices(now: Optional[float] = None) -> int:
+    """Free filters and queue bookkeeping of devices idle longer than the TTL."""
+    now = time.monotonic() if now is None else now
+    cutoff = now - settings.DEVICE_IDLE_TTL_SEC
+    known = set(device_kalman_filters) | set(_device_last_seen)
+    freed = 0
+    for device_id in known:
+        if device_id in active_connections:
+            continue
+        if _device_last_seen.get(device_id, 0.0) > cutoff:
+            continue
+        device_kalman_filters.pop(device_id, None)
+        _device_last_seen.pop(device_id, None)
+        queue_mgr.forget_device(device_id)
+        freed += 1
+    if freed:
+        logger.info(f"Freed in-memory state for {freed} idle device(s).")
+    return freed
+
+def _maybe_sweep_idle_devices():
+    global _last_idle_sweep
+    now = time.monotonic()
+    if now - _last_idle_sweep >= _IDLE_SWEEP_INTERVAL_SEC:
+        _last_idle_sweep = now
+        sweep_idle_devices(now)
 
 async def restore_or_init_filter(device_id: str) -> IMUKalmanFilter:
     """
@@ -70,6 +112,7 @@ async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
 
     await websocket.accept()
     active_connections[device_id] = websocket
+    _touch_device(device_id)
     logger.info(f"WebSocket client connected: {device_id}")
 
     # Restore or create Kalman filter
@@ -127,6 +170,7 @@ async def queue_worker():
             if not kf:
                 kf = await restore_or_init_filter(device_id)
                 device_kalman_filters[device_id] = kf
+            _touch_device(device_id)
 
             # 2. 9-DOF IMU Kalman Filter Statistical Sensor Fusion
             fused_state = kf.process_sample(packet)
@@ -170,6 +214,7 @@ async def queue_worker():
             logger.error(f"Error processing item in queue worker: {e}", exc_info=True)
         finally:
             queue_mgr.task_done()
+            _maybe_sweep_idle_devices()
 
 _db_write_lock = asyncio.Lock()
 
