@@ -1021,6 +1021,33 @@
                         android:visibility="gone" />
                 </LinearLayout>
             </LinearLayout>
+
+            <!-- Optional account (AuthActivity): signing in lets recordings
+                 be uploaded if the user opts in. Nothing else needs it. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/card_background"
+                android:orientation="vertical"
+                android:padding="8dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:paddingTop="4dp"
+                    android:text="@string/account_label"
+                    style="@style/Text.LabelSm" />
+
+                <Button
+                    android:id="@+id/accountSignInButton"
+                    style="@style/Widget.App.Button.Ghost"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/account_sign_in" />
+            </LinearLayout>
         </LinearLayout>
     </ScrollView>
 
