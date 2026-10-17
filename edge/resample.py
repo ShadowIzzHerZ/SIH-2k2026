@@ -112,4 +112,6 @@ def resample(t: np.ndarray, x: np.ndarray, out_hz: float, method: str = "mean") 
     for ti, xi in zip(t, x):
         rows.extend(rs.push(float(ti), xi))
     rows.extend(rs.flush())
+    if not rows:  # input shorter than one output tick
+        return np.zeros(0), np.zeros((0, x.shape[1]))
     return np.array([r[0] for r in rows]), np.stack([r[1] for r in rows])

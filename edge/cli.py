@@ -135,6 +135,9 @@ def cmd_run(args):
     rec = load_csv(args.input, args.accel_unit, args.gyro_unit)
     if len(rec.t_imu) < 2:
         raise SystemExit("no IMU rows in input")
+    if rec.t_imu[-1] - rec.t_imu[0] < 1.0 / args.model_hz:
+        raise SystemExit(f"IMU rows span {rec.t_imu[-1] - rec.t_imu[0]:.3f} s, less than one "
+                         f"{args.model_hz:g} Hz model tick")
     imu_hz = (len(rec.t_imu) - 1) / (rec.t_imu[-1] - rec.t_imu[0])
     spans = [(rec.t_imu[0] + a, rec.t_imu[0] + b) for a, b in parse_spans(args.blackout)]
     gnss_mask = np.ones(len(rec.t_gnss), dtype=bool)
