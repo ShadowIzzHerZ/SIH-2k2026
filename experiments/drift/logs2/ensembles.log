@@ -1,0 +1,3 @@
+RESULT rotyaw_augbias: io_5s   6.5 | io_30s  15.6 | io_60s  23.0 | io_30s_slow  57.2 | io_30s_fast  13.9 | comma_5s   2.8 | comma_30s  12.1
+RESULT rotyaw_augbias_s7: io_5s   6.3 | io_30s  14.7 | io_60s  20.8 | io_30s_slow  59.0 | io_30s_fast  12.9 | comma_5s   2.6 | comma_30s  11.4
+RESULT seedens_augbias+augbias_s7+augbias_long: io_5s   6.2 | io_30s  14.7 | io_60s  21.4 | io_30s_slow  56.1 | io_30s_fast  13.1 | comma_5s   2.6 | comma_30s  11.8
