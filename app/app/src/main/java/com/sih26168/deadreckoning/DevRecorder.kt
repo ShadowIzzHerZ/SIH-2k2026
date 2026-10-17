@@ -3,9 +3,17 @@ package com.sih26168.deadreckoning
 import android.content.Context
 import java.io.File
 import java.io.FileWriter
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/** The `recordings` folder under the first of [roots] that exists (non-null)
+ * and can be created, or null if none can. */
+internal fun recordingsDir(vararg roots: File?): File? =
+    roots.firstNotNullOfOrNull { root ->
+        root?.let { File(it, "recordings") }?.takeIf { it.isDirectory || it.mkdirs() }
+    }
 
 /**
  * Developer-mode data recorder — logs real sensor+GPS samples to a CSV in
@@ -42,13 +50,24 @@ class DevRecorder(private val context: Context) {
 
     /** Starts a new recording, closing any previous one first. `label`
      * becomes the filename prefix — "openroute" or "calib", matching
-     * data/own_recordings/README.md's naming convention. */
-    fun start(label: String): File {
+     * data/own_recordings/README.md's naming convention. Returns null if
+     * no file could be opened (no usable storage at all); the caller tells
+     * the user, nothing is recorded. */
+    fun start(label: String): File? {
         stop()
+        currentFile = null
         val ts = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
-        val dir = File(context.getExternalFilesDir(null), "recordings").apply { mkdirs() }
+        // getExternalFilesDir returns null while shared storage is
+        // unavailable (unmounted, or mid-mount right after boot); fall back
+        // to internal storage rather than crash. Both are listed in
+        // provider_paths.xml, so Share works for either.
+        val dir = recordingsDir(context.getExternalFilesDir(null), context.filesDir) ?: return null
         val file = File(dir, "${label}_$ts.csv")
-        val w = FileWriter(file)
+        val w = try {
+            FileWriter(file)
+        } catch (e: IOException) {
+            return null
+        }
         w.append("time_since_start,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,lat,lon,speed_gt,heading_gt\n")
         writer = w
         currentFile = file
