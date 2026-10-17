@@ -50,10 +50,16 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+def cors_settings(origins_setting: str) -> dict:
+    """allow_origins/allow_credentials from CORS_ORIGINS. With "*", Starlette would echo
+    any Origin back when credentials are allowed, so credentials are only allowed
+    for an explicit origin list."""
+    origins = [o.strip() for o in origins_setting.split(",") if o.strip()]
+    return {"allow_origins": origins, "allow_credentials": "*" not in origins}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    **cors_settings(settings.CORS_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
