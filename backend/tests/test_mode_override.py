@@ -3,6 +3,7 @@
 import asyncio
 import os
 import unittest
+from unittest import mock
 
 os.environ.setdefault("SECRET_KEY", "test-only-secret-key")
 
@@ -19,6 +20,10 @@ class TestModeOverride(unittest.IsolatedAsyncioTestCase):
         from app.api import websocket as ws_mod
 
         dev = "mode_override_dev"
+        # A private queue: the module-level one would stay bound to this test's
+        # event loop and break later tests that run the app on their own loop.
+        queue_patch = mock.patch.object(ws_mod, "queue_mgr", ws_mod.IngestionQueueManager(maxsize=100))
+        queue_patch.start()
         worker = asyncio.create_task(ws_mod.queue_worker())
         t = 1_000.0
         seq = 0
@@ -63,6 +68,7 @@ class TestModeOverride(unittest.IsolatedAsyncioTestCase):
                 await worker
             except asyncio.CancelledError:
                 pass
+            queue_patch.stop()
             getattr(ws_mod, "device_mode_overrides", {}).pop(dev, None)
             ws_mod.device_kalman_filters.pop(dev, None)
 
