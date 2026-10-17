@@ -134,7 +134,9 @@ def calibrate_sequence(seq: ImuSequence, stationary_samples: int = 20,
                 warnings.filterwarnings("ignore", category=RuntimeWarning)  # see note below
                 level_accel = seq.accel @ R_level.T
             heading_xy = compass_deg_to_xy_unit(seq.heading_gt)
-            psi_yaw = estimate_yaw_misalignment(level_accel[confident, :2], heading_xy[confident])
+            dt = float(np.median(np.diff(seq.time)))
+            psi_yaw = estimate_yaw_misalignment(level_accel[:, :2], heading_xy, seq.speed_gt, dt,
+                                                min_speed_mps=min_speed_mps)
 
     # macOS's Accelerate BLAS backend emits spurious "divide by zero" /
     # "invalid value" RuntimeWarnings on these small (Nx3 @ 3x3) matmuls —
