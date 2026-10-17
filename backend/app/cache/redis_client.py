@@ -1,4 +1,5 @@
 # 10Hz Dead Reckoning Backend Engine - SIH 2026
+import asyncio
 import json
 import logging
 import time
@@ -63,6 +64,15 @@ class CacheManager:
         if self._redis and self.is_redis_connected:
             await self._redis.aclose()
             logger.info("Disconnected from Redis.")
+
+    async def ping(self, timeout: float = 0.5) -> bool:
+        """Live Redis reachability check for /health (short timeout, never raises)."""
+        if not self._redis:
+            return False
+        try:
+            return bool(await asyncio.wait_for(self._redis.ping(), timeout=timeout))
+        except Exception:
+            return False
 
     async def get(self, key: str) -> Optional[str]:
         if self.is_redis_connected and self._redis:

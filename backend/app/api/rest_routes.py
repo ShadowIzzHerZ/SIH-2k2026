@@ -76,7 +76,8 @@ async def health_check():
     """Returns status of cache layer, queues, and active connections."""
     return {
         "status": "healthy",
-        "redis_connected": cache_manager.is_redis_connected,
+        # Pinged on each call: the startup flag alone goes stale if Redis drops later
+        "redis_connected": await cache_manager.ping(),
         "active_websockets": len(active_connections),
         "queue_depth": queue_mgr.queue_size
     }
