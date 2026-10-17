@@ -13,3 +13,5 @@ duo_ens_slowspec7
 ens_all5
 moredata --seed 11
 ens_moredata4
+speedjitter
+speedjitter --seed 7

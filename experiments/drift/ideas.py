@@ -433,3 +433,23 @@ EXPERIMENTS["moredata_long"] = dict(EXPERIMENTS["moredata"],
 EXPERIMENTS["slowspec_plain"] = dict(EXPERIMENTS["moredata"],
     desc="slow specialist with plain bias augmentation (no richer augmentation), windows below 8 m/s, recovered drives",
     train_ds=lambda model, sp: AugDataset(slow_windows(sp["train"])))
+
+
+# ------------------------------------------------ round 3: noisy speed input
+def speedjitter_loss(model, splits, rel=0.1, absn=0.5):
+    """Stage-1 loss where the speed fed to the network is the true v0 plus
+    noise (10% + 0.5 m/s). In a real blackout that input is the model's own
+    drifting estimate, so training only on the exact value overtrusts it.
+    The integrator still starts from the true v0."""
+    from src.train import compute_loss, forward_pass
+
+    def fn(b):
+        v = b["v0"]
+        model.cur_v0 = (v * (1 + rel * torch.randn_like(v)) + absn * torch.randn_like(v)).clamp(min=0)
+        return compute_loss(*forward_pass(model, b, lib.DT, "cpu"), lib.LOSS_WEIGHTS)
+    return fn
+
+
+EXPERIMENTS["speedjitter"] = dict(EXPERIMENTS["moredata"],
+    desc="moredata + noisy speed input during single-window training (10% + 0.5 m/s)",
+    loss_fn=speedjitter_loss)
