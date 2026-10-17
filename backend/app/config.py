@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    DEBUG: bool = True
+    DEBUG: bool = False  # enables uvicorn auto-reload when run via `python -m app.main`; dev only
 
     # Security & JWT
     SECRET_KEY: str  # required, set in .env (see .env.example)
