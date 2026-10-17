@@ -17,3 +17,6 @@ speedjitter
 speedjitter --seed 7
 moredata_swa
 moredata_swa --seed 11
+moredata --seed 5
+moredata --seed 13
+speedaware --seed 3
