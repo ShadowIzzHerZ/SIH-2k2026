@@ -24,8 +24,17 @@
         android:theme="@style/Theme.DeadReckoning"
         android:supportsRtl="true">
 
+        <!-- configChanges: resizing (split screen, folding, a large-screen
+             rotation despite the portrait lock), dark mode and a keyboard
+             no longer recreate MainActivity, which used to reset
+             calibration and the fusion state and close any recording. The
+             layout copes with a resize on its own (AdaptiveWindow re-caps
+             the content width), and the theme has no night variant.
+             density is left out on purpose: inflated sizes don't rescale,
+             so a display-size change still recreates the Activity. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|keyboardHidden"
             android:exported="true"
             android:screenOrientation="portrait">
             <intent-filter>
