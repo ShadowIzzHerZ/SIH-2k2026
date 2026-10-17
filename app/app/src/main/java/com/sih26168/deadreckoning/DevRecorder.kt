@@ -3,9 +3,12 @@ package com.sih26168.deadreckoning
 import android.content.Context
 import java.io.File
 import java.io.FileWriter
+import java.io.IOException
+import java.io.Writer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 
 /**
  * Developer-mode data recorder — logs real sensor+GPS samples to a CSV in
@@ -30,7 +33,7 @@ import java.util.Locale
  * top of IO-VNBD/comma2k19.
  */
 class DevRecorder(private val context: Context) {
-    private var writer: FileWriter? = null
+    private var writer: BackgroundRowWriter? = null
     private var startNanos: Long = 0
 
     var sampleCount: Int = 0
@@ -50,7 +53,7 @@ class DevRecorder(private val context: Context) {
         val file = File(dir, "${label}_$ts.csv")
         val w = FileWriter(file)
         w.append("time_since_start,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,lat,lon,speed_gt,heading_gt\n")
-        writer = w
+        writer = BackgroundRowWriter(w)
         currentFile = file
         sampleCount = 0
         startNanos = System.nanoTime()
@@ -76,14 +79,14 @@ class DevRecorder(private val context: Context) {
     ) {
         val w = writer ?: return
         val t = (System.nanoTime() - startNanos) / 1e9
-        w.append(formatRecordingRow(t, accel, gyro, hasFix, lat, lon, speed, bearingDeg))
+        w.write(formatRecordingRow(t, accel, gyro, hasFix, lat, lon, speed, bearingDeg))
         sampleCount++
     }
 
     /** Flushes and closes the current file, returning it (null if nothing
-     * was ever started). Safe to call when not recording. */
+     * was ever started). Safe to call when not recording. Waits for the
+     * rows still queued, so the file is complete once this returns. */
     fun stop(): File? {
-        writer?.flush()
         writer?.close()
         writer = null
         return currentFile
@@ -110,4 +113,47 @@ internal fun formatRecordingRow(
         Locale.US, "%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%s\n",
         t, accel[0], accel[1], accel[2], gyro[0], gyro[1], gyro[2], fix,
     )
+}
+
+/** Appends rows to [out] on its own single background thread, in the order
+ * they were given, so the 10 Hz tick on the main thread never waits on
+ * file I/O. close() flushes and closes [out] after every queued row and
+ * returns once that is done. A failed write stops further writes to this
+ * file (it would have a hole in it anyway) instead of crashing the app;
+ * [failure] keeps the error. */
+internal class BackgroundRowWriter(private val out: Writer) {
+    private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "dev-recorder-writer") }
+
+    @Volatile var failure: IOException? = null
+        private set
+
+    fun write(row: String) {
+        executor.execute {
+            if (failure != null) return@execute
+            try {
+                out.write(row)
+            } catch (e: IOException) {
+                failure = e
+            }
+        }
+    }
+
+    fun close() {
+        try {
+            executor.submit {
+                try {
+                    out.flush()
+                } catch (e: IOException) {
+                    if (failure == null) failure = e
+                }
+                try {
+                    out.close()
+                } catch (e: IOException) {
+                    if (failure == null) failure = e
+                }
+            }.get()
+        } finally {
+            executor.shutdown()
+        }
+    }
 }
