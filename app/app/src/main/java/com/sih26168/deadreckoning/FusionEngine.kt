@@ -444,7 +444,10 @@ class FusionEngine(
      */
     private fun resolveChunk() {
         val window = rollingWindow.toTypedArray()  // always windowSize once filled
-        val corrections = model.predict(window)     // (windowSize, 2)
+        // The speed this chunk's integration starts from: picks the
+        // ensemble's model and fills the fast model's speed channel (see
+        // EnsembleModel). Same value run_duo.py gates on in training.
+        val corrections = model.predict(window, chunkAnchor.speed)     // (windowSize, 2)
         val startIdx = window.size - pending
 
         var v = chunkAnchor.speed

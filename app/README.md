@@ -5,7 +5,8 @@ accelerometer/gyroscope + GNSS, the exact same calibration
 (`src/calibration.py`), integration (`src/models/strapdown_ins.py`), and
 GNSS↔INS mode-switching (`src/fusion.py`, the fixed version — see its
 docstring for the bugs found and fixed getting there) logic ported to
-Kotlin, running the exported ONNX model (`checkpoints/dead_reckoning_model.onnx`)
+Kotlin, running two exported ONNX models (`checkpoints/model_slow.onnx` and
+`model_fast.onnx`, picked per chunk by speed — see "The two-model ensemble")
 via ONNX Runtime Mobile.
 
 This is the on-device counterpart to `src/simulate_blackout.py` — same
@@ -49,7 +50,8 @@ street names rendered correctly, e.g. "Law Gate Rd", "NH44").
 | [app/src/main/java/.../CalibrationManager.kt](app/src/main/java/com/sih26168/deadreckoning/CalibrationManager.kt) | Drives calibration live on startup (stationary leveling, then yaw lock-in during an initial confident/moving stretch) |
 | [app/src/main/java/.../SensorReader.kt](app/src/main/java/com/sih26168/deadreckoning/SensorReader.kt) | Wraps SensorManager for raw accel/gyro |
 | [app/src/main/java/.../LocationReader.kt](app/src/main/java/com/sih26168/deadreckoning/LocationReader.kt) | Wraps LocationManager — no Play Services/API key needed. Uses `Location.getSpeed()`/`getBearing()` (the platform's own Doppler-derived values), not position-differencing — see `fusion.py`'s docstring for why that distinction mattered a lot in testing |
-| [app/src/main/java/.../BiasCorrectionModel.kt](app/src/main/java/com/sih26168/deadreckoning/BiasCorrectionModel.kt) | ONNX Runtime wrapper for the exported network |
+| [app/src/main/java/.../BiasCorrectionModel.kt](app/src/main/java/com/sih26168/deadreckoning/BiasCorrectionModel.kt) | ONNX Runtime wrapper for one exported network, with the downloaded-then-bundled fallback |
+| [app/src/main/java/.../EnsembleModel.kt](app/src/main/java/com/sih26168/deadreckoning/EnsembleModel.kt) | The speed gate that picks the slow or fast network per chunk |
 | [app/src/main/java/.../FusionEngine.kt](app/src/main/java/com/sih26168/deadreckoning/FusionEngine.kt) | The live GNSS↔INS state machine — same design as the fixed `src/fusion.py` |
 | [app/src/main/java/.../RoadMapView.kt](app/src/main/java/com/sih26168/deadreckoning/RoadMapView.kt) | Real OSM-tile map (osmdroid) — "you are here" marker, mode-colored trail polylines, green map-matched overlay, follow/recenter camera |
 | [app/src/main/java/.../ReplayDataSource.kt](app/src/main/java/com/sih26168/deadreckoning/ReplayDataSource.kt) | Reads a bundled real-drive replay asset — MainActivity loads two, `assets/replay_demo1.json`/`replay_demo2.json` (picked via the demoSelector radio buttons, shown once "Replay" is on), both converted from real DevRecorder captures in Jalandhar (`data/own_recordings/openroute_20260909_{1908,1821}.csv`) |
@@ -87,34 +89,62 @@ retrain with the existing, validated pipeline:
 python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
 ```
 
-The app module's `syncModel` Gradle task copies `checkpoints/dead_reckoning_model.onnx`
-into `assets/` at build time — it is never hand-copied/duplicated, so the
-app always bundles whatever the training pipeline last exported. Re-run
-`src/export_onnx.py` and rebuild if the checkpoint changes. When you do,
-bump `ModelUpdater.BUNDLED_MODEL_VERSION`.
+### The two-model ensemble
+
+The app runs two networks and picks one per 5 s chunk by the speed that
+chunk's integration starts from (`EnsembleModel.kt`, `SpeedGate`):
+
+| Role | File | Input | Used when |
+|---|---|---|---|
+| slow | `checkpoints/model_slow.onnx` (augbias_long) | (1, 50, 6) IMU | start speed below 6 m/s |
+| fast | `checkpoints/model_fast.onnx` (speedaware) | (1, 50, 7): IMU + start speed / 10 | start speed 6 m/s or more |
+
+This is the "duo" from the drift experiments (`experiments/drift/run_duo.py`
+on the `drift-experiments` branch): IO-VNBD unseen drives 14.1% median
+drift over 30 s, 19.1% over 60 s, 39.1% in slow traffic. If one model
+can't load even from the APK, the other covers every speed; if the chosen
+model throws or returns non-finite numbers for a chunk, the other is
+tried, and if both fail the chunk falls back to plain strapdown (zero
+corrections) instead of crashing.
+
+Both models were trained on IMU data calibrated with the experiments'
+fixed forward axis (whole-drive leveling, forward axis fitted to GPS
+acceleration). The app's live `CalibrationManager` still estimates yaw
+the older way, so on a phone the inputs can differ from training until
+that calibration is ported.
+
+The app module's `syncModel` Gradle task copies both files from
+`checkpoints/` into `assets/` at build time. Re-export with
+`python -m src.export_ensemble` and rebuild if a checkpoint changes. When
+you do, bump `ModelUpdater.BUNDLED_SLOW_VERSION` or `BUNDLED_FAST_VERSION`.
 
 ## Model updates without a new APK
 
 On every start the app checks `manifest.json` in the public `models`
-bucket of the project's Supabase Storage (`ModelUpdater.kt`). If it lists
-a higher version than the model running now, the app downloads it, checks
-the size and SHA-256, opens it with ONNX Runtime, requires exactly a
-(1, 50, 6) input and (1, 50, 2) output, and runs one test window. Only
-then is it saved, and it is used from the next app start. If the saved
-model is ever missing, corrupted or fails to load, the app deletes it and
-uses the model bundled in the APK, so an update can't break the app. A
+bucket of the project's Supabase Storage (`ModelUpdater.kt`). The
+manifest has one entry per model under `"models"`, each with its own
+version, file, SHA-256 and size; the top-level fields are the single model
+older app versions read. For each model whose published version is higher
+than the one running now, the app downloads it, checks the size and
+SHA-256, opens it with ONNX Runtime, requires exactly that model's input
+shape ((1, 50, 6) slow, (1, 50, 7) fast) and a (1, 50, 2) output, and runs
+one test window. Only then is it saved, and it is used from the next app
+start. The two models update independently. If a saved model is ever
+missing, corrupted or fails to load, the app deletes it and uses that
+model's copy bundled in the APK, so an update can't break the app. A
 version that failed to load is not downloaded again; publish a higher one.
 
 To publish, with a Supabase secret key in your environment (never in the
 repo or the app):
 ```bash
 export SUPABASE_SECRET_KEY=...
-python scripts/publish_model.py path/to/model.onnx --version 3 --dry-run   # checks only
-python scripts/publish_model.py path/to/model.onnx --version 3
+python scripts/publish_model.py checkpoints/model_fast.onnx --role fast --version 2 --dry-run   # checks only
+python scripts/publish_model.py checkpoints/model_fast.onnx --role fast --version 2
 ```
-To roll back, publish the older model again under a higher version. For
-local testing, build with `-PmodelBaseUrl=http://10.0.2.2:8765/` and serve
-`manifest.json` plus the model from the dev machine; debug builds allow
+Publishing one role rewrites only its entry in the manifest. To roll back,
+publish the older model again under a higher version. For local testing,
+build with `-PmodelBaseUrl=http://10.0.2.2:8765/` and serve
+`manifest.json` plus the models from the dev machine; debug builds allow
 plain HTTP to that address only.
 
 ## Building
