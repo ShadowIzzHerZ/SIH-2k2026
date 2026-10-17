@@ -164,7 +164,10 @@ async def queue_worker():
             await cache_manager.set_live_device_state(device_id, state_dict)
 
             # 5. Non-blocking asynchronous persistence to database (prevents I/O lag on 10Hz stream)
-            asyncio.create_task(_persist_point(payload_out))
+            # Keep a reference so the task is not garbage-collected mid-write and can be drained on shutdown
+            task = asyncio.create_task(_persist_point(payload_out))
+            _pending_writes.add(task)
+            task.add_done_callback(_pending_writes.discard)
 
         except Exception as e:
             logger.error(f"Error processing item in queue worker: {e}", exc_info=True)
@@ -172,6 +175,17 @@ async def queue_worker():
             queue_mgr.task_done()
 
 _db_write_lock = asyncio.Lock()
+_pending_writes: set[asyncio.Task] = set()
+
+async def drain_pending_writes(timeout: float = 10.0):
+    """Wait for in-flight trajectory writes to finish (called on shutdown)."""
+    if not _pending_writes:
+        return
+    _, pending = await asyncio.wait(set(_pending_writes), timeout=timeout)
+    if pending:
+        logger.warning(f"{len(pending)} trajectory writes still pending at shutdown; cancelling.")
+        for task in pending:
+            task.cancel()
 
 async def _persist_point(payload: Dict[str, Any]):
     """Background task for async persistence without stalling real-time 10Hz stream."""
