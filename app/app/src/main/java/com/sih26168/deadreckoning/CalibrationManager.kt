@@ -238,8 +238,13 @@ class CalibrationManager(
         val n = forwardAxis.samples
         if (n < minYawSamples || n - lastYawCheckpointSamples < yawCheckpointGap) return
         lastYawCheckpointSamples = n
+        val previousLevel = rLevel
         relevel()
-        val fit = forwardAxis.fit(rLevel!!, minSamples = minYawSamples - 1) ?: return
+        val fit = forwardAxis.fit(rLevel!!, minSamples = minYawSamples - 1)
+        if (fit == null) {
+            if (isReady) rLevel = previousLevel
+            return
+        }
         yawFit = fit
         val coherent = fit.coherence >= minYawCoherence
 
@@ -278,6 +283,11 @@ class CalibrationManager(
             if (coherent) {
                 psiYaw = fit.psi
                 yawConverged = true
+            } else {
+                // psiYaw stays as it was, so the leveling it was fitted
+                // under has to stay too: a small tilt change moves the
+                // forward axis a lot (see relevel).
+                rLevel = previousLevel
             }
             return
         }
@@ -371,6 +381,13 @@ class CalibrationManager(
         return cosAng >= kotlin.math.cos(gravityGateRad.toDouble())
     }
 
+    /** The input jumps between two unrelated samples (a replay looping
+     * back to its first row): ends the current contiguous stretch
+     * without counting a tick toward the wait cap. */
+    fun yawStretchBreak() {
+        if (isLeveled) forwardAxis.gap()
+    }
+
     /** GNSS has no fix this tick: ends the current contiguous stretch. */
     fun yawGnssLost() {
         if (!isLeveled) return
@@ -386,7 +403,9 @@ class CalibrationManager(
         if (yawWaitTicks < maxYawWaitTicks) return false
         relevel()
         val fit = forwardAxis.fit(rLevel!!, minSamples = 0)
-        psiYaw = if (fit != null && fit.samples >= yawCheckpointGap && fit.coherence >= minYawCoherence) fit.psi else 0f
+        // Below minYawSamples the smoothed samples are too few and too
+        // correlated for coherence to mean anything: keep the neutral 0.
+        psiYaw = if (fit != null && fit.samples >= minYawSamples && fit.coherence >= minYawCoherence) fit.psi else 0f
         yawFit = fit
         yawConverged = false
         isReady = true

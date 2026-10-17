@@ -236,6 +236,28 @@ class CalibrationManagerTest {
     }
 
     @Test
+    fun `an incoherent stretch after a rough lock leaves leveling alone too`() {
+        val cal = leveledManager(maxYawWaitTicks = 300)
+        repeat(300) { cal.yawGnssLost() }
+        assertTrue(cal.isReady && cal.isRoughCalibration)
+        val levelBefore = cal.rLevel!!.copyOf()
+        // Fast enough to count, but nothing to fit: psiYaw stays at 0, so
+        // the leveling it goes with must not move either.
+        feedDrive(cal, n = 300, trueYawOffset = 0.6f, noise = 0.3f, speedAt = { 20f }, yawRateAt = { 0f })
+        assertEquals(0f, cal.psiYaw)
+        assertTrue("rLevel moved without psiYaw", levelBefore.contentEquals(cal.rLevel!!))
+    }
+
+    @Test
+    fun `the wait cap does not trust a fit from a few usable samples`() {
+        val cal = leveledManager(maxYawWaitTicks = 300)
+        feedDrive(cal, n = 30, trueYawOffset = 1.2f)
+        feedDrive(cal, n = 270, trueYawOffset = 1.2f, startTick = 30, speedAt = { 1.3f })
+        assertTrue(cal.isReady && cal.isRoughCalibration)
+        assertEquals(0f, cal.psiYaw)
+    }
+
+    @Test
     fun `yaw keeps refining after lock-in`() {
         val cal = leveledManager()
         // Lock in on a short, noisy start, then keep driving cleanly.
