@@ -945,6 +945,34 @@ class MainActivity : AppCompatActivity() {
         roadMapView.onPause()
     }
 
+    // Set when onStop() paused a running pipeline, so onStart() resumes it.
+    private var pausedInBackground = false
+
+    override fun onStart() {
+        super.onStart()
+        if (pausedInBackground) {
+            pausedInBackground = false
+            startPipeline()
+        }
+    }
+
+    /** Stops the tick loop, sensors and GPS while the app isn't visible.
+     * They used to run until onDestroy, but a background app gets no
+     * accelerometer/gyroscope events (Android 9+) and only a few location
+     * updates an hour (Android 8+), so the loop kept feeding fusion,
+     * calibration and any open recording the same frozen sample at 10 Hz,
+     * while still holding both sensors and GPS. The pipeline (calibration,
+     * fusion state, an open recording) is kept and carries on in onStart. */
+    override fun onStop() {
+        super.onStop()
+        if (!::sensorReader.isInitialized || !ticking) return
+        pausedInBackground = true
+        ticking = false
+        tickHandler.removeCallbacksAndMessages(null)
+        sensorReader.stop()
+        locationReader.stop()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         // Reproduced live via adb logcat: onCreate's privacy-consent
