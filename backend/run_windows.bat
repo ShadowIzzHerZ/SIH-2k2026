@@ -19,6 +19,12 @@ if not exist "venv" (
     python -m venv venv
 )
 
+REM SECRET_KEY is required: create .env from the template on first run
+if not exist ".env" (
+    echo Creating .env from .env.example - replace SECRET_KEY before deploying.
+    copy .env.example .env >nul
+)
+
 REM Activate virtual environment
 call venv\Scripts\activate.bat
 
