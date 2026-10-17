@@ -84,7 +84,7 @@ def calibrate_orig(seq):
 
 
 # ---------------------------------------------------------------- datasets
-def build_splits(calib="orig", stride=10, seq_filter=None, extra=False):
+def build_splits(calib="orig", stride=10, seq_filter=None, extra=False, val_in_train=False):
     """Returns dict of IOVNBDWindowDataset: train, val, test, test_iovnbd, test_comma.
     extra=True adds the training-only drives recovered by prep_extra.py."""
     seqs, split = load_sequences()
@@ -108,6 +108,8 @@ def build_splits(calib="orig", stride=10, seq_filter=None, extra=False):
             wins["test_iovnbd" if k.startswith("iovnbd") else "test_comma"].extend(ws)
         else:
             wins[sp].extend(ws)
+    if val_in_train:  # val still reported, but it is training data now
+        wins["train"] = wins["train"] + wins["val"]
     out = {n: IOVNBDWindowDataset(w) for n, w in wins.items()}
     out["test"] = IOVNBDWindowDataset(wins["test_iovnbd"] + wins["test_comma"])
     out["_calib_info"] = info
@@ -196,7 +198,7 @@ def val_score(model, splits, chain_fn=chained_drift, fwd=forward_pass):
 
 def train(model, splits, name, stage1_epochs=6, stage2_epochs=6, lr=1e-3, lr2=3e-4, chunks=3,
           max_chains=12000, weights=None, loss_fn=None, chain_loss_fn=None, chain_fn=chained_drift,
-          fwd=forward_pass, train_ds=None, seed=42, log=print, swa=False):
+          fwd=forward_pass, train_ds=None, seed=42, log=print, swa=False, keep_last=False):
     """v3 recipe on a CPU budget: stage 1 single-window, stage 2 chained-chunk
     fine-tune (K=3). Keeps the epoch with the best val score (window median +
     chained 30 s median). Same budget for every experiment."""
@@ -243,7 +245,7 @@ def train(model, splits, name, stage1_epochs=6, stage2_epochs=6, lr=1e-3, lr2=3e
                 f"30s med {cmed:.2f} | score {score:.2f} | {time.time() - t0:.0f}s")
             if stage == "chain" and swa:
                 snaps.append(copy.deepcopy(model.state_dict()))
-            if score < best[0]:
+            if score < best[0] or keep_last:
                 best = (score, copy.deepcopy(model.state_dict()))
                 torch.save(best[1], ckpt / f"{name}.pt")
             ep += 1

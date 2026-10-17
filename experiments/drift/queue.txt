@@ -22,3 +22,6 @@ moredata --seed 13
 speedaware --seed 3
 ens_moredata6
 duo_ens6_slowspec7
+lastepoch
+trainval
+trainval --seed 7

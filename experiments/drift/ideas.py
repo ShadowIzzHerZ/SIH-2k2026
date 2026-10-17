@@ -458,3 +458,12 @@ EXPERIMENTS["speedjitter"] = dict(EXPERIMENTS["moredata"],
 EXPERIMENTS["moredata_swa"] = dict(EXPERIMENTS["moredata"],
     desc="moredata + weight average of the 6 chained epochs (kept if val agrees); targets the big seed-to-seed swings",
     train_kw={"swa": True})
+
+
+EXPERIMENTS["trainval"] = dict(EXPERIMENTS["moredata"],
+    desc="moredata trained on train + val drives (5 more drives), last epoch kept: val scores do not track test, so spend val on training",
+    splits=lambda: lib.build_splits("fwdfix", extra=True, val_in_train=True),
+    train_kw={"keep_last": True})
+EXPERIMENTS["lastepoch"] = dict(EXPERIMENTS["moredata"],
+    desc="moredata with the last epoch kept instead of the best-val epoch (control for trainval)",
+    train_kw={"keep_last": True})
