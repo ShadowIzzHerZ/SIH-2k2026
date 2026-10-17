@@ -119,7 +119,10 @@ def score(ticks, rec, spans):
             continue
         if has_speed:
             g = (rec.t_gnss >= a) & (rec.t_gnss <= t[sel[-1]])
-            dist = float(np.trapezoid(rec.gnss_speed[g], rec.t_gnss[g]))
+            # np.trapezoid is numpy >= 2.0; requirements.txt allows 1.24+,
+            # which only has np.trapz.
+            trapezoid = getattr(np, "trapezoid", None) or np.trapz
+            dist = float(trapezoid(rec.gnss_speed[g], rec.t_gnss[g]))
         else:
             path = true[sel[0] - 1:sel[-1] + 1] if sel[0] > 0 else true[sel]
             dist = float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum())
