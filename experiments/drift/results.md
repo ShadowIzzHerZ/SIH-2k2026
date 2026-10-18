@@ -67,6 +67,14 @@ heading, so forward-speed integration is the dominant error source.
 | duo_speedaware | speedaware above 6 m/s, augbias_long below (switch on current speed estimate) | 6.4 | 13.8 | 19.2 | 38.9 | 12.4 | 2.0 | 13.2 |
 | duo_speedaware_s7 | speedaware_s7 above 6 m/s, augbias_long below (switch on current speed estimate) | 6.6 | 14.4 | 18.9 | 39.3 | 12.8 | 1.9 | 13.0 |
 | duo_all5_slowspec7 | 5-model average above 7 m/s, slow specialist below | 6.4 | 12.7 | 16.4 | 39.1 | 11.3 | 2.1 | 11.0 |
+| duo_chain6_drop8_7 | 4-seed 30 s-chain average above 7 m/s, 8-seed dropout-0.4 average below | 6.4 | 12.4 | 15.4 | 37.0 | 11.1 | 2.4 | 11.8 |
+| duo_chain6_last8_6 | 4-seed 30 s-chain average above 6 m/s, 8-seed last-epoch average below | 6.4 | 12.4 | 15.4 | 36.9 | 11.1 | 2.4 | 11.8 |
+| duo_chain6_last8_7 | 4-seed 30 s-chain average above 7 m/s, 8-seed last-epoch average below | 6.4 | 12.4 | 15.5 | 36.9 | 11.1 | 2.4 | 11.8 |
+| duo_chain6_last8_8 | 4-seed 30 s-chain average above 8 m/s, 8-seed last-epoch average below | 6.4 | 12.5 | 15.5 | 36.7 | 11.1 | 2.4 | 11.8 |
+| duo_chain6_last8_9 | 4-seed 30 s-chain average above 9 m/s, 8-seed last-epoch average below | 6.4 | 12.4 | 15.6 | 36.7 | 11.1 | 2.4 | 11.8 |
+| duo_chain6_lastdrop12_7 | 4-seed 30 s-chain average above 7 m/s, 8 last-epoch + 4 dropout-0.4 seeds below | 6.4 | 12.4 | 15.4 | 36.5 | 11.1 | 2.4 | 11.8 |
+| duo_chain6_noextra7 | 4-seed 30 s-chain average above 7 m/s, 3-seed no-extra average below | 6.4 | 12.7 | 15.8 | 35.3 | 11.2 | 2.4 | 11.9 |
+| duo_chain6x6_last8_7 | 6-seed 30 s-chain average above 7 m/s, 8-seed last-epoch average below | 6.4 | 12.4 | 15.6 | 36.9 | 11.0 | 2.4 | 11.9 |
 | duo_ens3_slowspec7 | 3-seed moredata average above 7 m/s, slow specialist below | 6.4 | 12.6 | 16.2 | 38.5 | 11.2 | 2.3 | 11.5 |
 | duo_ens6_slowspec7 | 6-seed moredata average above 7 m/s, slow specialist below | 6.4 | 12.9 | 16.8 | 38.7 | 11.5 | 2.3 | 12.3 |
 | duo_ens_slowplain8 | moredata seed-average above 8 m/s, plain slow specialist below | 6.4 | 12.7 | 16.5 | 40.3 | 11.3 | 2.3 | 12.4 |
@@ -74,16 +82,26 @@ heading, so forward-speed integration is the dominant error source.
 | duo_ens_slowspec10 | moredata seed-average above 10 m/s, slow specialist below | 6.6 | 13.6 | 18.4 | 35.3 | 11.9 | 2.3 | 12.4 |
 | duo_ens_slowspec7 | moredata seed-average above 7 m/s, slow specialist below | 6.4 | 12.6 | 16.5 | 39.1 | 11.3 | 2.3 | 12.4 |
 | duo_ens_slowspec8 | moredata seed-average above 8 m/s, slow specialist below | 6.4 | 13.0 | 16.9 | 37.6 | 11.4 | 2.3 | 12.4 |
+| duo_last10_noextra7 | 10-seed last-epoch average above 7 m/s, 3-seed no-extra average below | 6.3 | 12.6 | 16.2 | 35.9 | 11.2 | 2.2 | 11.4 |
 | duo_last4_slowspec7 | 4-seed last-epoch average above 7 m/s, slow specialist below | 6.4 | 12.7 | 16.2 | 37.3 | 11.3 | 2.2 | 11.9 |
 | duo_last6_noextra7 | 6-seed last-epoch moredata average above 7 m/s, 3-seed no-extra average below | 6.4 | 12.6 | 16.2 | 36.1 | 11.3 | 2.2 | 11.5 |
 | duo_last6_slowspec7 | 6-seed last-epoch average above 7 m/s, slow specialist below | 6.4 | 12.6 | 16.3 | 37.3 | 11.3 | 2.2 | 11.6 |
 | duo_moredata_slowspec | moredata above 6 m/s, slow specialist below | 6.4 | 12.7 | 16.8 | 41.8 | 11.4 | 2.2 | 12.0 |
 | ens_all11 | average of every speedaware-family seed: 6 moredata + 5 speedaware | 6.2 | 12.7 | 16.5 | 47.2 | 11.1 | 2.1 | 12.9 |
 | ens_all5 | average of moredata (3 seeds) and richaug (2 seeds) | 6.3 | 12.5 | 16.2 | 42.4 | 11.1 | 2.1 | 11.0 |
+| ens_chain6_4 | average of 4 last-epoch 30 s-chain seeds | 6.4 | 12.3 | 15.0 | 40.5 | 11.0 | 2.4 | 11.8 |
+| ens_chain6_6 | average of 6 last-epoch 30 s-chain seeds | 6.4 | 12.2 | 15.2 | 39.9 | 11.1 | 2.3 | 11.9 |
+| ens_drop4_4 | average of 4 last-epoch dropout-0.4 seeds | 6.3 | 12.3 | 16.1 | 37.8 | 11.0 | 2.1 | 9.5 |
+| ens_drop4_8 | average of 8 last-epoch dropout-0.4 seeds | 6.4 | 12.2 | 16.0 | 38.0 | 11.0 | 2.1 | 11.1 |
+| ens_last6_chain6_4 | average of 6 last-epoch (15 s chains) + 4 last-epoch 30 s-chain seeds | 6.4 | 12.3 | 15.5 | 39.9 | 11.1 | 2.2 | 11.3 |
+| ens_last8_drop4_4 | average of 8 last-epoch seeds and 4 dropout-0.4 seeds | 6.3 | 12.2 | 15.9 | 37.4 | 10.9 | 2.2 | 11.0 |
 | ens_last9mix | average of 6 last-epoch moredata + 3 last-epoch no-extra seeds | 6.4 | 12.7 | 16.3 | 37.3 | 11.4 | 2.1 | 11.5 |
+| ens_lastepoch10 | average of 10 last-epoch moredata seeds | 6.3 | 12.3 | 16.0 | 37.1 | 11.0 | 2.2 | 11.3 |
 | ens_lastepoch4 | average of 4 last-epoch moredata seeds | 6.4 | 12.5 | 16.1 | 38.9 | 11.0 | 2.2 | 11.8 |
 | ens_lastepoch6 | average of 6 last-epoch moredata seeds | 6.4 | 12.4 | 16.0 | 37.8 | 11.1 | 2.2 | 11.5 |
+| ens_lastepoch8 | average of 8 last-epoch moredata seeds | 6.3 | 12.3 | 15.8 | 37.2 | 10.9 | 2.3 | 11.5 |
 | ens_lastnoextra3 | average of 3 last-epoch speedaware seeds without the recovered drives | 6.5 | 13.8 | 17.8 | 35.0 | 12.5 | 2.2 | 11.3 |
+| ens_lastvariants16 | average of 8 last-epoch seeds and the 8 last-epoch recipe variants (speed weight, chained rate, stage budget) | 6.3 | 12.3 | 16.0 | 38.4 | 11.0 | 2.2 | 11.2 |
 | ens_moredata | average of moredata seeds 42 and 7 | 6.4 | 12.6 | 16.5 | 41.3 | 11.2 | 2.3 | 12.4 |
 | ens_moredata3 | average of moredata seeds 42, 7 and 3 | 6.4 | 12.5 | 16.2 | 40.6 | 11.0 | 2.3 | 11.5 |
 | ens_moredata4 | average of 4 moredata seeds | 6.3 | 12.8 | 16.8 | 45.3 | 11.2 | 2.2 | 11.9 |
@@ -91,17 +109,52 @@ heading, so forward-speed integration is the dominant error source.
 | ens_round3 | average of moredata and richaug, both seeds | 6.3 | 12.6 | 16.4 | 43.0 | 11.3 | 2.0 | 11.1 |
 | ens_speedaware3 | average of 3 speedaware seeds (no extra drives): fair control for the moredata ensembles | 6.4 | 12.8 | 16.4 | 48.2 | 11.4 | 2.1 | 13.4 |
 | lastepoch | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.4 | 12.2 | 15.6 | 36.1 | 11.0 | 2.1 | 12.0 |
+| lastepoch_big | last-epoch moredata with a wider network (CNN 64-128-128, GRU 256) | 6.5 | 13.0 | 17.0 | 36.5 | 11.5 | 2.2 | 10.8 |
+| lastepoch_big_s7 | last-epoch moredata with a wider network (CNN 64-128-128, GRU 256) | 6.4 | 13.1 | 17.3 | 35.5 | 11.8 | 2.2 | 11.5 |
+| lastepoch_chain12 | last-epoch moredata with the chained fine-tune over 12 chunks (60 s) | 6.4 | 12.8 | 16.3 | 38.7 | 11.5 | 2.5 | 17.7 |
+| lastepoch_chain12_s7 | last-epoch moredata with the chained fine-tune over 12 chunks (60 s) | 6.8 | 13.4 | 17.7 | 36.2 | 12.2 | 3.0 | 19.3 |
 | lastepoch_chain6 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.5 | 12.3 | 15.7 | 49.0 | 10.9 | 2.6 | 11.7 |
+| lastepoch_chain6_drop4 | last-epoch moredata, GRU dropout 0.4, chained fine-tune over 6 chunks (30 s) | 6.5 | 12.5 | 15.7 | 54.3 | 10.9 | 2.4 | 12.1 |
+| lastepoch_chain6_drop4_s7 | last-epoch moredata, GRU dropout 0.4, chained fine-tune over 6 chunks (30 s) | 6.5 | 13.3 | 17.1 | 36.0 | 11.6 | 2.1 | 12.5 |
+| lastepoch_chain6_s11 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.5 | 13.1 | 16.9 | 39.0 | 11.9 | 2.4 | 12.1 |
+| lastepoch_chain6_s13 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.3 | 13.1 | 16.7 | 39.4 | 11.9 | 2.4 | 11.7 |
+| lastepoch_chain6_s3 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.5 | 13.3 | 17.7 | 40.8 | 11.9 | 2.2 | 12.6 |
+| lastepoch_chain6_s5 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.5 | 12.7 | 16.2 | 37.5 | 11.6 | 2.4 | 12.6 |
 | lastepoch_chain6_s7 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.6 | 13.4 | 16.7 | 37.5 | 12.0 | 2.4 | 12.5 |
+| lastepoch_drop4 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.2 | 12.8 | 16.8 | 38.9 | 11.5 | 2.4 | 7.7 |
+| lastepoch_drop4_s11 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.5 | 13.0 | 17.5 | 34.4 | 11.6 | 2.1 | 11.8 |
+| lastepoch_drop4_s13 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.4 | 12.5 | 16.2 | 43.3 | 11.2 | 2.3 | 11.9 |
+| lastepoch_drop4_s17 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.5 | 14.5 | 21.5 | 38.9 | 13.3 | 2.1 | 12.9 |
+| lastepoch_drop4_s21 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.4 | 12.6 | 16.0 | 35.2 | 11.3 | 2.5 | 12.0 |
+| lastepoch_drop4_s3 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.3 | 12.4 | 16.2 | 41.2 | 11.1 | 2.1 | 10.4 |
+| lastepoch_drop4_s5 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.4 | 12.9 | 17.5 | 37.6 | 11.5 | 2.2 | 10.0 |
+| lastepoch_drop4_s7 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.4 | 13.2 | 17.4 | 38.4 | 11.9 | 2.0 | 10.8 |
+| lastepoch_hilr2 | last-epoch moredata with a 2x higher chained fine-tune learning rate (6e-4) | 6.5 | 12.8 | 16.2 | 39.6 | 11.3 | 2.5 | 12.2 |
+| lastepoch_hilr2_s7 | last-epoch moredata with a 2x higher chained fine-tune learning rate (6e-4) | 6.4 | 13.1 | 17.1 | 41.1 | 11.9 | 2.0 | 9.3 |
+| lastepoch_lowlr2 | last-epoch moredata with a 3x lower chained fine-tune learning rate (1e-4) | 6.3 | 13.3 | 18.0 | 43.9 | 11.6 | 2.3 | 11.8 |
+| lastepoch_lowlr2_s7 | last-epoch moredata with a 3x lower chained fine-tune learning rate (1e-4) | 6.4 | 12.9 | 17.0 | 37.1 | 11.6 | 2.0 | 10.5 |
 | lastepoch_noextra | speedaware (no recovered drives) with the last epoch kept: checks whether the extra drives help once epoch picking is removed | 6.6 | 14.0 | 18.0 | 36.9 | 12.8 | 2.2 | 11.8 |
 | lastepoch_noextra_s3 | speedaware (no recovered drives) with the last epoch kept: checks whether the extra drives help once epoch picking is removed | 6.6 | 14.0 | 19.0 | 36.7 | 12.8 | 2.1 | 10.4 |
 | lastepoch_noextra_s7 | speedaware (no recovered drives) with the last epoch kept: checks whether the extra drives help once epoch picking is removed | 6.5 | 14.1 | 18.4 | 33.6 | 12.7 | 2.4 | 12.2 |
+| lastepoch_richaug | last-epoch speedaware + recovered drives + richer augmentation (richmore with the last epoch kept) | 6.6 | 13.4 | 17.7 | 40.1 | 11.9 | 2.3 | 12.3 |
+| lastepoch_richaug_s7 | last-epoch speedaware + recovered drives + richer augmentation (richmore with the last epoch kept) | 6.4 | 13.9 | 20.2 | 44.4 | 12.5 | 2.3 | 11.7 |
 | lastepoch_s11 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.5 | 12.9 | 17.1 | 37.1 | 11.4 | 2.6 | 13.4 |
 | lastepoch_s13 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.4 | 12.3 | 15.7 | 37.3 | 11.1 | 2.4 | 13.3 |
 | lastepoch_s17 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.3 | 14.1 | 20.2 | 40.9 | 12.8 | 2.4 | 14.3 |
+| lastepoch_s1heavy | last-epoch moredata with the budget shifted to single-window training (run with --stage1 9 --stage2 3) | 6.3 | 13.3 | 17.9 | 37.4 | 12.0 | 2.2 | 11.7 |
+| lastepoch_s21 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.4 | 12.5 | 16.6 | 34.5 | 11.3 | 2.6 | 12.4 |
+| lastepoch_s25 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.3 | 13.0 | 17.2 | 35.5 | 11.6 | 2.0 | 10.0 |
+| lastepoch_s29 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.4 | 13.4 | 18.6 | 38.8 | 11.9 | 2.2 | 11.3 |
+| lastepoch_s2heavy | last-epoch moredata with the budget shifted to chained training (run with --stage1 3 --stage2 9) | 6.5 | 13.5 | 18.4 | 37.2 | 12.3 | 2.3 | 13.1 |
 | lastepoch_s3 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.5 | 12.8 | 16.3 | 40.1 | 11.3 | 2.1 | 10.7 |
 | lastepoch_s5 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.5 | 13.3 | 17.7 | 34.6 | 12.0 | 2.3 | 10.5 |
 | lastepoch_s7 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.5 | 13.6 | 17.9 | 38.2 | 12.2 | 2.3 | 12.0 |
+| lastepoch_speedw | last-epoch moredata with speed loss weight 5 (was 1): speed integration is the dominant error | 6.5 | 12.8 | 16.6 | 39.5 | 11.5 | 2.3 | 12.8 |
+| lastepoch_speedw_s7 | last-epoch moredata with speed loss weight 5 (was 1): speed integration is the dominant error | 6.4 | 13.3 | 17.4 | 43.2 | 11.9 | 2.0 | 11.1 |
+| lastepoch_wd | last-epoch moredata with 100x stronger weight decay (1e-3) | 6.3 | 12.6 | 16.4 | 38.0 | 11.4 | 2.4 | 12.8 |
+| lastepoch_wd_s11 | last-epoch moredata with 100x stronger weight decay (1e-3) | 6.6 | 13.5 | 18.0 | 37.2 | 11.9 | 2.4 | 11.7 |
+| lastepoch_wd_s3 | last-epoch moredata with 100x stronger weight decay (1e-3) | 6.5 | 12.6 | 16.2 | 37.1 | 11.2 | 2.2 | 11.2 |
+| lastepoch_wd_s7 | last-epoch moredata with 100x stronger weight decay (1e-3) | 6.5 | 13.0 | 16.9 | 38.3 | 11.6 | 2.1 | 10.6 |
 | moredata | speedaware + 18 recovered IO-VNBD training drives (+537 min, prep_extra.py); val/test unchanged | 6.4 | 12.8 | 17.2 | 41.8 | 11.4 | 2.2 | 11.5 |
 | moredata_long | moredata with double the training budget (12 single-window + 12 chained epochs) | 6.2 | 14.5 | 20.6 | 54.1 | 12.9 | 2.3 | 18.5 |
 | moredata_s11 | speedaware + 18 recovered IO-VNBD training drives (+537 min, prep_extra.py); val/test unchanged | 6.3 | 14.9 | 22.7 | 56.8 | 13.4 | 2.1 | 13.9 |
