@@ -85,3 +85,5 @@ lastepoch_wd --seed 7
 ens_lastvariants16
 lastepoch_drop4
 lastepoch_drop4 --seed 7
+lastepoch_wd --seed 3
+lastepoch_wd --seed 11
