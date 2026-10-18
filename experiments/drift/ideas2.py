@@ -250,6 +250,10 @@ EXPERIMENTS = {
     "hist10_speedaware_rotaug": recipe("15 s context + speed input, random +/-3 deg mounting rotation in training",
                                        model=HistSpeedNet, splits=hist_splits(100), set_v0=True,
                                        train_ds=lambda m, sp: HistRotDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    "hist10_speedaware_ch10": recipe("15 s context + speed input, 10 chained fine-tune epochs instead of 6",
+                                     model=HistSpeedNet, splits=hist_splits(100), set_v0=True,
+                                     train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
+                                     stage2_epochs=10),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
