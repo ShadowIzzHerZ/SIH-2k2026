@@ -543,3 +543,16 @@ EXPERIMENTS["lastepoch_drop4"] = dict(EXPERIMENTS["moredata"],
 EXPERIMENTS["lastepoch_chain6_drop4"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata, GRU dropout 0.4, chained fine-tune over 6 chunks (30 s)",
     model=DropSpeedAwareNet, train_kw={"keep_last": True, "chunks": 6, "max_chains": 6000})
+
+
+class Drop6SpeedAwareNet(SpeedAwareNet):
+    """SpeedAwareNet with GRU dropout 0.6."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = lib.new_model(input_channels=7, dropout=0.6)
+
+
+EXPERIMENTS["lastepoch_drop6"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata with GRU dropout 0.6 (trend check after 0.4 helped comma)",
+    model=Drop6SpeedAwareNet, train_kw={"keep_last": True})
