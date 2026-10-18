@@ -80,3 +80,5 @@ lastepoch_lowlr2
 lastepoch_lowlr2 --seed 7
 lastepoch_hilr2
 lastepoch_hilr2 --seed 7
+lastepoch_wd
+lastepoch_wd --seed 7

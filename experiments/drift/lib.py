@@ -198,7 +198,7 @@ def val_score(model, splits, chain_fn=chained_drift, fwd=forward_pass):
 
 def train(model, splits, name, stage1_epochs=6, stage2_epochs=6, lr=1e-3, lr2=3e-4, chunks=3,
           max_chains=12000, weights=None, loss_fn=None, chain_loss_fn=None, chain_fn=chained_drift,
-          fwd=forward_pass, train_ds=None, seed=42, log=print, swa=False, keep_last=False):
+          fwd=forward_pass, train_ds=None, seed=42, log=print, swa=False, keep_last=False, wd=1e-5):
     """v3 recipe on a CPU budget: stage 1 single-window, stage 2 chained-chunk
     fine-tune (K=3). Keeps the epoch with the best val score (window median +
     chained 30 s median). Same budget for every experiment."""
@@ -222,7 +222,7 @@ def train(model, splits, name, stage1_epochs=6, stage2_epochs=6, lr=1e-3, lr2=3e
             continue
         if stage == "chain" and best[1] is not None:
             model.load_state_dict(best[1])
-        opt = torch.optim.AdamW(model.parameters(), lr=stage_lr, weight_decay=1e-5)
+        opt = torch.optim.AdamW(model.parameters(), lr=stage_lr, weight_decay=wd)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=n_ep)
         for _ in range(n_ep):
             t0 = time.time()
