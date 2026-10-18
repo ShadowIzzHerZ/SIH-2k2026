@@ -153,9 +153,17 @@ class HistSpeedAuxNet(HistSpeedNet):
         return c[..., :2]
 
 
-def hist_splits(hist):
+class HistSpeedBigNet(HistSpeedNet):
+    """HistSpeedNet with a wider GRU (192 hidden) and CNN (48/96/96)."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = lib.new_model(input_channels=7, gru_hidden=192, cnn_channels=[48, 96, 96])
+
+
+def hist_splits(hist, extra=False):
     def make():
-        sp = aligned.build_splits()
+        sp = aligned.build_splits(extra=extra)
         for k in ("val", "test", "test_iovnbd", "test_comma"):
             sp[k] = HistDataset(sp[k], sp["_seqs"], hist=hist, aug=False)
         sp["_hist"] = hist
@@ -209,6 +217,15 @@ EXPERIMENTS = {
     "hist10_speedaux": recipe("15 s context + speed input + auxiliary absolute-speed head",
                               model=HistSpeedAuxNet, splits=hist_splits(100), set_v0=True, aux_w=0.5,
                               train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    "hist10_speedbig": recipe("15 s context + speed input, wider network (GRU 192, CNN 48/96/96)",
+                              model=HistSpeedBigNet, splits=hist_splits(100), set_v0=True,
+                              train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    # from the drift-experiments thread: keep the last epoch (val does not flag bad
+    # seeds) and add the 18 training-only drives recovered by prep_extra.py
+    "hist10_speedaware_lx": recipe("15 s context + speed input, last epoch kept, + 18 recovered training drives",
+                                   model=HistSpeedNet, splits=hist_splits(100, extra=True), set_v0=True,
+                                   train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
+                                   keep_last=True),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }

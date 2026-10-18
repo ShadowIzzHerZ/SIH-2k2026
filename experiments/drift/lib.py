@@ -84,9 +84,13 @@ def calibrate_orig(seq):
 
 
 # ---------------------------------------------------------------- datasets
-def build_splits(calib="orig", stride=10, seq_filter=None):
-    """Returns dict of IOVNBDWindowDataset: train, val, test, test_iovnbd, test_comma."""
+def build_splits(calib="orig", stride=10, seq_filter=None, extra=False, val_in_train=False):
+    """Returns dict of IOVNBDWindowDataset: train, val, test, test_iovnbd, test_comma.
+    extra=True adds the training-only drives recovered by prep_extra.py."""
     seqs, split = load_sequences()
+    if extra:
+        ex = pickle.load(open(ROOT / "cache" / "extra_sequences.pkl", "rb"))
+        seqs, split = {**seqs, **ex}, {**split, **{k: "train" for k in ex}}
     cal = {"orig": calibrate_orig, "fwdfix": calibrate_fwdfix}[calib] if isinstance(calib, str) else calib
     wins = {"train": [], "val": [], "test_iovnbd": [], "test_comma": []}
     info, cal_seqs = {}, {}
@@ -104,6 +108,8 @@ def build_splits(calib="orig", stride=10, seq_filter=None):
             wins["test_iovnbd" if k.startswith("iovnbd") else "test_comma"].extend(ws)
         else:
             wins[sp].extend(ws)
+    if val_in_train:  # val still reported, but it is training data now
+        wins["train"] = wins["train"] + wins["val"]
     out = {n: IOVNBDWindowDataset(w) for n, w in wins.items()}
     out["test"] = IOVNBDWindowDataset(wins["test_iovnbd"] + wins["test_comma"])
     out["_calib_info"] = info
@@ -192,7 +198,7 @@ def val_score(model, splits, chain_fn=chained_drift, fwd=forward_pass):
 
 def train(model, splits, name, stage1_epochs=6, stage2_epochs=6, lr=1e-3, lr2=3e-4, chunks=3,
           max_chains=12000, weights=None, loss_fn=None, chain_loss_fn=None, chain_fn=chained_drift,
-          fwd=forward_pass, train_ds=None, seed=42, log=print):
+          fwd=forward_pass, train_ds=None, seed=42, log=print, swa=False, keep_last=False):
     """v3 recipe on a CPU budget: stage 1 single-window, stage 2 chained-chunk
     fine-tune (K=3). Keeps the epoch with the best val score (window median +
     chained 30 s median). Same budget for every experiment."""
@@ -203,7 +209,7 @@ def train(model, splits, name, stage1_epochs=6, stage2_epochs=6, lr=1e-3, lr2=3e
     ckpt = ROOT / "checkpoints"
     ckpt.mkdir(exist_ok=True)
     best = (float("inf"), None)
-    hist = []
+    hist, snaps = [], []
     tr = train_ds or splits["train"]
     stages = [("single", stage1_epochs, lr, DataLoader(tr, batch_size=64, shuffle=True))]
     if stage2_epochs:
@@ -237,10 +243,22 @@ def train(model, splits, name, stage1_epochs=6, stage2_epochs=6, lr=1e-3, lr2=3e
                          "val_chain30_median": cmed, "score": score, "sec": time.time() - t0})
             log(f"[{name}] ep {ep} {stage} loss {tot / max(nb, 1):.2f} | val 5s med {wmed:.2f} "
                 f"30s med {cmed:.2f} | score {score:.2f} | {time.time() - t0:.0f}s")
-            if score < best[0]:
+            if stage == "chain" and swa:
+                snaps.append(copy.deepcopy(model.state_dict()))
+            if score < best[0] or keep_last:
                 best = (score, copy.deepcopy(model.state_dict()))
                 torch.save(best[1], ckpt / f"{name}.pt")
             ep += 1
+    if snaps:  # weight average of all chained epochs; kept only if val agrees
+        model.load_state_dict({k: sum(s[k].float() for s in snaps) / len(snaps) for k in snaps[0]})
+        model.eval()
+        score, wmed, cmed = val_score(model, splits, chain_fn, fwd)
+        log(f"[{name}] weight average of {len(snaps)} chained epochs | val 5s med {wmed:.2f} "
+            f"30s med {cmed:.2f} | score {score:.2f} (best single epoch {best[0]:.2f})")
+        hist.append({"epoch": "swa", "stage": "swa", "val_win_median": wmed, "val_chain30_median": cmed, "score": score})
+        if score < best[0]:
+            best = (score, copy.deepcopy(model.state_dict()))
+            torch.save(best[1], ckpt / f"{name}.pt")
     model.load_state_dict(best[1])
     model.eval()
     return model, hist

@@ -1,3 +1,9 @@
 /home/claude/SIH-2k2026/experiments/drift/lib.py:231: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
 Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
   tot += float(loss)
+[hist10_speedaux] ep 0 single loss 61.78 | val 5s med 13.18 30s med 45.59 | score 58.76 | 187s
+[hist10_speedaux] ep 1 single loss 56.26 | val 5s med 12.80 30s med 45.46 | score 58.26 | 180s
+[hist10_speedaux] ep 2 single loss 53.45 | val 5s med 11.79 30s med 35.56 | score 47.35 | 181s
+[hist10_speedaux] ep 3 single loss 52.00 | val 5s med 12.16 30s med 37.14 | score 49.29 | 177s
+[hist10_speedaux] ep 4 single loss 50.12 | val 5s med 11.39 30s med 29.46 | score 40.85 | 179s
+[hist10_speedaux] ep 5 single loss 49.24 | val 5s med 10.95 30s med 30.81 | score 41.75 | 178s

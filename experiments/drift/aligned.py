@@ -179,8 +179,8 @@ def chained_drift(model, dataset, device, dt, window_size=50, n_chunks=6, max_ch
             "p90_drift_pct": float(np.percentile(d, 90)), "pass_rate_pct": float((d < 10.0).mean() * 100)}
 
 
-def build_splits(calib="fwdfix"):
-    sp = lib.build_splits(calib)
+def build_splits(calib="fwdfix", extra=False):
+    sp = lib.build_splits(calib, extra=extra)
     for k in ("train", "val", "test", "test_iovnbd", "test_comma"):
         sp[k] = NextStep(sp[k], sp["_seqs"])
     return sp
