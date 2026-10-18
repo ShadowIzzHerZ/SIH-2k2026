@@ -506,3 +506,9 @@ EXPERIMENTS["lastepoch_speedw"] = dict(EXPERIMENTS["moredata"],
     loss_fn=lambda model, sp: speedaware_loss(model, sp, SPEED_HEAVY),
     chain_loss_fn=lambda model, sp: speedaware_chain_loss(model, sp, SPEED_HEAVY),
     train_kw={"keep_last": True})
+
+
+EXPERIMENTS["lastepoch_s1heavy"] = dict(EXPERIMENTS["lastepoch"],
+    desc="last-epoch moredata with the budget shifted to single-window training (run with --stage1 9 --stage2 3)")
+EXPERIMENTS["lastepoch_s2heavy"] = dict(EXPERIMENTS["lastepoch"],
+    desc="last-epoch moredata with the budget shifted to chained training (run with --stage1 3 --stage2 9)")

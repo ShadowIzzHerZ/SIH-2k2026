@@ -69,3 +69,5 @@ lastepoch_richaug
 lastepoch_richaug --seed 7
 lastepoch_speedw
 lastepoch_speedw --seed 7
+lastepoch_s1heavy --stage1 9 --stage2 3
+lastepoch_s2heavy --stage1 3 --stage2 9
