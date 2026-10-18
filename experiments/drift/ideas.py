@@ -540,3 +540,6 @@ class DropSpeedAwareNet(SpeedAwareNet):
 EXPERIMENTS["lastepoch_drop4"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata with GRU dropout 0.4 instead of 0.2",
     model=DropSpeedAwareNet, train_kw={"keep_last": True})
+EXPERIMENTS["lastepoch_chain6_drop4"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata, GRU dropout 0.4, chained fine-tune over 6 chunks (30 s)",
+    model=DropSpeedAwareNet, train_kw={"keep_last": True, "chunks": 6, "max_chains": 6000})
