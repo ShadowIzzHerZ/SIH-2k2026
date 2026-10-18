@@ -185,6 +185,12 @@ EXPERIMENTS = {
     "hist10_speedaware": recipe("15 s context + current speed as an input (hist10 + speedaware)",
                                 model=HistSpeedNet, splits=hist_splits(100), set_v0=True,
                                 train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    "hist5_speedaware": recipe("5 s context + current speed as an input (context-length sweep)",
+                               model=HistSpeedNet, splits=hist_splits(50), set_v0=True,
+                               train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    "hist15_speedaware": recipe("20 s context + current speed as an input (context-length sweep)",
+                                model=HistSpeedNet, splits=hist_splits(150), set_v0=True,
+                                train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
