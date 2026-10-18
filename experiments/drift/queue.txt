@@ -106,3 +106,5 @@ lastepoch_chain6 --seed 17
 lastepoch_chain6 --seed 21
 ens_chain6_8
 duo_chain6x8_last8_7
+lastepoch_small
+lastepoch_small --seed 7

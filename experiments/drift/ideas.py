@@ -556,3 +556,17 @@ class Drop6SpeedAwareNet(SpeedAwareNet):
 EXPERIMENTS["lastepoch_drop6"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata with GRU dropout 0.6 (trend check after 0.4 helped comma)",
     model=Drop6SpeedAwareNet, train_kw={"keep_last": True})
+
+
+class SmallSpeedAwareNet(SpeedAwareNet):
+    """SpeedAwareNet with half the width (CNN 16-32-32, GRU 64): checks whether
+    the 30-odd training drives are overfit by the default size."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = lib.new_model(input_channels=7, cnn_channels=[16, 32, 32], gru_hidden=64)
+
+
+EXPERIMENTS["lastepoch_small"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata with a half-width net (CNN 16-32-32, GRU 64)",
+    model=SmallSpeedAwareNet, train_kw={"keep_last": True})
