@@ -42,6 +42,39 @@ class Mix(torch.nn.Module):
         return torch.where(fast, outs[0], outs[1])
 
 
+class Scale(torch.nn.Module):
+    """Multiplies a model's corrections by alpha (alpha < 1 shrinks them toward the raw IMU)."""
+
+    def __init__(self, inner, alpha=1.0):
+        super().__init__()
+        self.inner, self.alpha = inner, alpha
+        self.cur_v0 = torch.zeros(1)
+
+    def forward(self, x):
+        if hasattr(self.inner, "cur_v0"):
+            self.inner.cur_v0 = self.cur_v0
+        return self.alpha * self.inner(x)
+
+
+def run_valshrink(name, fast, slow, switch, alphas=(1.0, 0.9, 0.8, 0.7, 0.6, 0.5)):
+    """Pair whose below-switch branch is scaled by alpha; alpha is picked on the VAL drives only
+    (lowest mean of the 30 s median and 30 s slow median), then the test sets are scored once."""
+    sp = lib.build_splits("fwdfix")
+    sc = Scale(Mix(slow))
+    m = Mix([Mix(fast), sc], "duo", switch).eval()
+    scores = {}
+    for a in alphas:
+        sc.alpha = a
+        r = lib.evaluate(m, sp, chain_fn=lib.chained_drift_x, fwd=ideas.speedaware_forward, sets=("val",))["val"]["30s"]
+        scores[a] = 0.5 * (r["all"]["median"] + r["slow"]["median"])
+        print(f"val alpha {a}: 30 s {r['all']['median']:.1f}, slow {r['slow']['median']:.1f}", flush=True)
+    best = min(scores, key=scores.get)
+    sc.alpha = best
+    res = lib.evaluate(m, sp, chain_fn=lib.chained_drift_x, fwd=ideas.speedaware_forward)
+    rec = lib.save_result(name, f"{COMBOS[name][2]}; alpha={best} picked on val", res)
+    print(f"RESULT {name}: {lib.fmt_headline(rec['headline'])}  (alpha {best})", flush=True)
+
+
 COMBOS = {
     "ens_moredata": ("ens", ["moredata", "moredata_s7"], "average of moredata seeds 42 and 7"),
     "ens_moredata3": ("ens", ["moredata", "moredata_s7", "moredata_s3"], "average of moredata seeds 42, 7 and 3"),
@@ -100,6 +133,7 @@ COMBOS = {
     "dslowmed_chain6_last8_7": ("dslowmed", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "4-seed 30 s-chain mean above 7 m/s, median of 8 last-epoch seeds below", 7.0),
     "tmed_lastepoch8": ("tmed", ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"], "true median (mean of the two middle values) of 8 last-epoch seeds"),
     "dslowtmed_chain6_last8_7": ("dslowtmed", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "4-seed 30 s-chain mean above 7 m/s, true median of 8 last-epoch seeds below", 7.0),
+    "valshrink_chain6_last8_7": ("valshrink", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "4-seed 30 s-chain mean above 7 m/s, 8-seed last-epoch mean below scaled by a val-picked alpha", 7.0),
     "ens_chain6_6": ("ens", ["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3",
                              "lastepoch_chain6_s5", "lastepoch_chain6_s13"], "average of 6 last-epoch 30 s-chain seeds"),
     "duo_chain6x6_last8_7": ("duo", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3", "lastepoch_chain6_s5", "lastepoch_chain6_s13"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "6-seed 30 s-chain average above 7 m/s, 8-seed last-epoch average below", 7.0),
@@ -114,6 +148,8 @@ COMBOS = {
 
 def run(name):
     mode, members, desc, *sw = COMBOS[name]
+    if mode == "valshrink":
+        return run_valshrink(name, members[0], members[1], *sw)
     if members[0] is None:
         members = [Mix(["moredata", "moredata_s7"])] + members[1:]
     # dmed: speed-switched pair of per-element medians; dslowmed: mean above the switch, median below
