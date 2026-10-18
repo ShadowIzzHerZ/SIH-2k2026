@@ -124,3 +124,7 @@ lastepoch_chainmix --seed 3
 A_ens_lastepoch8
 A_duo_chain6_last8_7
 A_ens_chain6_4
+aligned_lastepoch
+aligned_lastepoch_chain6
+aligned_lastepoch --seed 7
+aligned_lastepoch_chain6 --seed 7

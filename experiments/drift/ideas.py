@@ -576,3 +576,24 @@ EXPERIMENTS["lastepoch_chain8"] = dict(EXPERIMENTS["moredata"],
 EXPERIMENTS["lastepoch_chainmix"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata; chained epochs cycle 15 s, 30 s and 45 s chains instead of one fixed length",
     train_kw={"keep_last": True, "chunks": (3, 6, 9), "max_chains": 6000})
+
+
+def _aligned_splits():
+    from experiments.drift import aligned
+    aligned.use_aligned_chains()
+    return aligned.build_splits("fwdfix", extra=True)
+
+
+def _aligned_spec(desc, **train_kw):
+    from experiments.drift import aligned
+    return dict(desc=desc, model=SpeedAwareNet, splits=_aligned_splits,
+                loss_fn=lambda m, sp: aligned.make_loss(m, set_v0=True),
+                chain_loss_fn=lambda m, sp: aligned.make_chain_loss(m, set_v0=True),
+                chain_fn=lambda m, sp: aligned.chained_drift, fwd=aligned.make_fwd(True),
+                train_kw=dict(keep_last=True, **train_kw))
+
+
+# Trained and scored with the off-by-one-free integration from drift-search-2 (compare with the A_* rows).
+EXPERIMENTS["aligned_lastepoch"] = _aligned_spec("aligned training: speed input, recovered drives, last epoch")
+EXPERIMENTS["aligned_lastepoch_chain6"] = _aligned_spec(
+    "aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune", chunks=6, max_chains=6000)
