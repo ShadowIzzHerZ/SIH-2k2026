@@ -118,3 +118,5 @@ dslowtmed_chain6_last8_7
 lastepoch_chain8 --seed 7
 valshrink_chain6_last8_7
 valshrink_last8_all
+lastepoch_chainmix
+lastepoch_chainmix --seed 7

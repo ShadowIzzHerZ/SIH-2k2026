@@ -213,9 +213,12 @@ def train(model, splits, name, stage1_epochs=6, stage2_epochs=6, lr=1e-3, lr2=3e
     tr = train_ds or splits["train"]
     stages = [("single", stage1_epochs, lr, DataLoader(tr, batch_size=64, shuffle=True))]
     if stage2_epochs:
-        chains = build_chains(tr, WS, chunks, chain_stride_chunks=2, max_chains=max_chains, seed=seed)
-        stages.append(("chain", stage2_epochs, lr2,
-                       DataLoader(ChainTrainDataset(tr, chains), batch_size=21, shuffle=True)))
+        # chunks may be a tuple of chain lengths: the chained epochs then cycle through them
+        lens = chunks if isinstance(chunks, (tuple, list)) else (chunks,)
+        loaders = [DataLoader(ChainTrainDataset(tr, build_chains(tr, WS, c, chain_stride_chunks=2,
+                                                                 max_chains=max_chains, seed=seed)),
+                              batch_size=21, shuffle=True) for c in lens]
+        stages.append(("chain", stage2_epochs, lr2, loaders))
     ep = 0
     for stage, n_ep, stage_lr, loader in stages:
         if n_ep == 0:
@@ -224,11 +227,11 @@ def train(model, splits, name, stage1_epochs=6, stage2_epochs=6, lr=1e-3, lr2=3e
             model.load_state_dict(best[1])
         opt = torch.optim.AdamW(model.parameters(), lr=stage_lr, weight_decay=wd)
         sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=n_ep)
-        for _ in range(n_ep):
+        for i in range(n_ep):
             t0 = time.time()
             model.train()
             tot, nb = 0.0, 0
-            for b in loader:
+            for b in (loader[i % len(loader)] if isinstance(loader, list) else loader):
                 opt.zero_grad()
                 loss, _ = chain_loss_fn(b) if stage == "chain" else loss_fn(b)
                 loss.backward()

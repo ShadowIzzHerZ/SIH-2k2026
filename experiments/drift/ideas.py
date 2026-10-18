@@ -573,3 +573,6 @@ EXPERIMENTS["lastepoch_small"] = dict(EXPERIMENTS["moredata"],
 EXPERIMENTS["lastepoch_chain8"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata with the chained fine-tune over 8 chunks (40 s), between the 30 s and 60 s runs",
     train_kw={"keep_last": True, "chunks": 8, "max_chains": 4500})
+EXPERIMENTS["lastepoch_chainmix"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata; chained epochs cycle 15 s, 30 s and 45 s chains instead of one fixed length",
+    train_kw={"keep_last": True, "chunks": (3, 6, 9), "max_chains": 6000})
