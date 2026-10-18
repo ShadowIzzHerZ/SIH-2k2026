@@ -521,3 +521,6 @@ EXPERIMENTS["lastepoch_lowlr2"] = dict(EXPERIMENTS["moredata"],
 EXPERIMENTS["lastepoch_chain6_lowlr2"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata, chained fine-tune rate 1e-4 and the chain-6 setup combined",
     train_kw={"keep_last": True, "lr2": 1e-4, "chunks": 6, "max_chains": 6000})
+EXPERIMENTS["lastepoch_hilr2"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata with a 2x higher chained fine-tune learning rate (6e-4)",
+    train_kw={"keep_last": True, "lr2": 6e-4})

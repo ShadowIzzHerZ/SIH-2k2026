@@ -78,5 +78,5 @@ lastepoch_chain12
 lastepoch_chain12 --seed 7
 lastepoch_lowlr2
 lastepoch_lowlr2 --seed 7
-lastepoch_chain6_lowlr2
-lastepoch_chain6_lowlr2 --seed 7
+lastepoch_hilr2
+lastepoch_hilr2 --seed 7
