@@ -87,3 +87,5 @@ lastepoch_drop4
 lastepoch_drop4 --seed 7
 lastepoch_wd --seed 3
 lastepoch_wd --seed 11
+lastepoch_drop4 --seed 3
+lastepoch_drop4 --seed 11
