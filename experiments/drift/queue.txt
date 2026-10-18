@@ -64,3 +64,5 @@ lastepoch_big --seed 7
 lastepoch_chain6 --seed 5
 lastepoch_chain6 --seed 13
 ens_chain6_6
+lastepoch_richaug
+lastepoch_richaug --seed 7

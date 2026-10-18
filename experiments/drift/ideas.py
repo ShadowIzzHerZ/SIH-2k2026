@@ -491,3 +491,8 @@ class BigSpeedAwareNet(SpeedAwareNet):
 EXPERIMENTS["lastepoch_big"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata with a wider network (CNN 64-128-128, GRU 256)",
     model=BigSpeedAwareNet, train_kw={"keep_last": True})
+
+
+EXPERIMENTS["lastepoch_richaug"] = dict(EXPERIMENTS["richmore"],
+    desc="last-epoch speedaware + recovered drives + richer augmentation (richmore with the last epoch kept)",
+    train_kw={"keep_last": True})
