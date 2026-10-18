@@ -527,3 +527,16 @@ EXPERIMENTS["lastepoch_hilr2"] = dict(EXPERIMENTS["moredata"],
 EXPERIMENTS["lastepoch_wd"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata with 100x stronger weight decay (1e-3)",
     train_kw={"keep_last": True, "wd": 1e-3})
+
+
+class DropSpeedAwareNet(SpeedAwareNet):
+    """SpeedAwareNet with GRU dropout 0.4 instead of 0.2."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = lib.new_model(input_channels=7, dropout=0.4)
+
+
+EXPERIMENTS["lastepoch_drop4"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata with GRU dropout 0.4 instead of 0.2",
+    model=DropSpeedAwareNet, train_kw={"keep_last": True})

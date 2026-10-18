@@ -82,3 +82,6 @@ lastepoch_hilr2
 lastepoch_hilr2 --seed 7
 lastepoch_wd
 lastepoch_wd --seed 7
+ens_lastvariants16
+lastepoch_drop4
+lastepoch_drop4 --seed 7
