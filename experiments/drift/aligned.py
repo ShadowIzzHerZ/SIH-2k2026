@@ -69,6 +69,8 @@ def make_loss(model, set_v0=False, aux_w=0.0):
         loss, m = compute_loss(*fwd(model, b, lib.DT, "cpu"), lib.LOSS_WEIGHTS)
         if aux_w:
             loss = loss + aux_w * torch.nn.functional.smooth_l1_loss(model.aux, b["speed_gt"])
+        if getattr(model, "distill", None) is not None:
+            loss = loss + model.distill
         return loss, m
     return fn
 
@@ -141,6 +143,8 @@ def make_chain_loss(model, end_w=None, aux_w=0.0, set_v0=False):
             total = total + lj + ew[j] * cd.mean()
             if aux_w:
                 total = total + aux_w * torch.nn.functional.smooth_l1_loss(model.aux, sgt[:, j])
+            if getattr(model, "distill", None) is not None:
+                total = total + model.distill
         return total / K, {}
     return fn
 

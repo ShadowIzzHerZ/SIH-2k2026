@@ -178,6 +178,36 @@ class HistRotDataset(HistDataset):
         return it
 
 
+class DistillNet(HistSpeedNet):
+    """One HistSpeedNet trained to match the 3-model average (the current
+    pick) as well as the truth, so the phone runs one model instead of three.
+    While training, self.distill holds w * MSE(student, teacher) for the
+    loss to add; the frozen teacher is not part of the saved weights."""
+
+    TEACHERS = ("hist10_speedaware", "hist10_speedaware_s7", "hist10_speedaware_s3")
+
+    def __init__(self, w=1000.0):
+        super().__init__()
+        nets = []
+        for n in self.TEACHERS:
+            m = HistSpeedNet()
+            m.load_state_dict(torch.load(lib.ROOT / "checkpoints" / f"{n}.pt"))
+            nets.append(m.eval().requires_grad_(False))
+        object.__setattr__(self, "teacher", MeanEnsemble(nets))
+        self.w, self.distill = w, None
+
+    def forward(self, x):
+        c = super().forward(x)
+        if self.training:
+            self.teacher.cur_v0 = self.cur_v0
+            with torch.no_grad():
+                t = self.teacher(x)
+            self.distill = self.w * torch.nn.functional.mse_loss(c, t)
+        else:
+            self.distill = None
+        return c
+
+
 def hist_splits(hist, extra=False):
     def make():
         sp = aligned.build_splits(extra=extra)
@@ -253,6 +283,9 @@ EXPERIMENTS = {
     "hist10_speedaware_ch10": recipe("15 s context + speed input, 10 chained fine-tune epochs instead of 6",
                                      model=HistSpeedNet, splits=hist_splits(100), set_v0=True,
                                      train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),  # run with --stage2 10
+    "hist10_speedaware_distill": recipe("one 15 s context + speed input model trained to match the 3-model average",
+                                        model=DistillNet, splits=hist_splits(100), set_v0=True,
+                                        train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }

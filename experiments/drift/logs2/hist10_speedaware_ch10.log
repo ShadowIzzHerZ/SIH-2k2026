@@ -1,0 +1,20 @@
+/home/claude/SIH-2k2026/experiments/drift/lib.py:237: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  tot += float(loss)
+[hist10_speedaware_ch10] ep 0 single loss 60.67 | val 5s med 18.97 30s med 59.61 | score 78.58 | 125s
+[hist10_speedaware_ch10] ep 1 single loss 55.41 | val 5s med 13.42 30s med 42.53 | score 55.95 | 124s
+[hist10_speedaware_ch10] ep 2 single loss 53.28 | val 5s med 12.30 30s med 32.40 | score 44.69 | 122s
+[hist10_speedaware_ch10] ep 3 single loss 51.94 | val 5s med 12.18 30s med 34.35 | score 46.54 | 125s
+[hist10_speedaware_ch10] ep 4 single loss 50.13 | val 5s med 11.77 30s med 32.85 | score 44.62 | 126s
+[hist10_speedaware_ch10] ep 5 single loss 49.27 | val 5s med 11.25 30s med 33.74 | score 44.99 | 122s
+[hist10_speedaware_ch10] ep 6 chain loss 98.20 | val 5s med 13.54 30s med 34.68 | score 48.22 | 208s
+[hist10_speedaware_ch10] ep 7 chain loss 93.33 | val 5s med 11.20 30s med 25.69 | score 36.89 | 201s
+[hist10_speedaware_ch10] ep 8 chain loss 91.58 | val 5s med 12.01 30s med 29.80 | score 41.81 | 204s
+[hist10_speedaware_ch10] ep 9 chain loss 89.52 | val 5s med 11.99 30s med 28.76 | score 40.75 | 201s
+[hist10_speedaware_ch10] ep 10 chain loss 88.90 | val 5s med 12.93 30s med 30.27 | score 43.20 | 199s
+[hist10_speedaware_ch10] ep 11 chain loss 86.90 | val 5s med 11.81 30s med 26.23 | score 38.03 | 212s
+[hist10_speedaware_ch10] ep 12 chain loss 85.78 | val 5s med 12.45 30s med 29.83 | score 42.28 | 208s
+[hist10_speedaware_ch10] ep 13 chain loss 84.37 | val 5s med 12.11 30s med 28.68 | score 40.79 | 210s
+[hist10_speedaware_ch10] ep 14 chain loss 83.79 | val 5s med 11.22 30s med 26.49 | score 37.70 | 208s
+[hist10_speedaware_ch10] ep 15 chain loss 83.42 | val 5s med 11.39 30s med 27.21 | score 38.61 | 205s
+RESULT hist10_speedaware_ch10: io_5s   6.3 | io_30s  13.3 | io_60s  17.8 | io_30s_slow  40.9 | io_30s_fast  11.9 | comma_5s   2.6 | comma_30s  11.3  (49 min)
