@@ -67,3 +67,5 @@ ens_chain6_6
 duo_chain6x6_last8_7
 lastepoch_richaug
 lastepoch_richaug --seed 7
+lastepoch_speedw
+lastepoch_speedw --seed 7

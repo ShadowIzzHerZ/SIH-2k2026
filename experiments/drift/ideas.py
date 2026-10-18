@@ -150,7 +150,7 @@ def anchor_chain_loss(model, splits):
             speed, vhat = model.integrate(raw[:, j], c, v)
             heading = integrate_heading(raw[:, j, :, 5] + c[..., 1], lib.DT, theta0=th)
             pos = dead_reckon_position(speed, heading, lib.DT)
-            lj, _ = compute_loss(speed, pos, sgt[:, j], pgt[:, j], lib.LOSS_WEIGHTS)
+            lj, _ = compute_loss(speed, pos, sgt[:, j], pgt[:, j], w)
             p_cum = p_cum + pos[:, -1]
             gt_cum = gt_cum + pgt[:, j, -1]
             dist = dist + torch.linalg.norm(pgt[:, j, 1:] - pgt[:, j, :-1], dim=-1).sum(1)
@@ -308,16 +308,18 @@ def speedaware_forward(model, batch, dt, device):
     return forward_pass(model, batch, dt, device)
 
 
-def speedaware_loss(model, splits):
+def speedaware_loss(model, splits, weights=None):
     from src.train import compute_loss
+    w = weights or lib.LOSS_WEIGHTS
 
     def fn(b):
-        return compute_loss(*speedaware_forward(model, b, lib.DT, "cpu"), lib.LOSS_WEIGHTS)
+        return compute_loss(*speedaware_forward(model, b, lib.DT, "cpu"), w)
     return fn
 
 
-def speedaware_chain_loss(model, splits):
+def speedaware_chain_loss(model, splits, weights=None):
     from src.train import compute_loss
+    w = weights or lib.LOSS_WEIGHTS
 
     def fn(b):
         imu, raw, sgt, pgt = b["imu"], b["imu_raw"], b["speed_gt"], b["pos_gt"]
@@ -331,7 +333,7 @@ def speedaware_chain_loss(model, splits):
             speed = torch.clamp(v.unsqueeze(1) + torch.cumsum((raw[:, j, :, 0] + c[..., 0]) * lib.DT, 1), min=0.0)
             heading = integrate_heading(raw[:, j, :, 5] + c[..., 1], lib.DT, theta0=th)
             pos = dead_reckon_position(speed, heading, lib.DT)
-            lj, _ = compute_loss(speed, pos, sgt[:, j], pgt[:, j], lib.LOSS_WEIGHTS)
+            lj, _ = compute_loss(speed, pos, sgt[:, j], pgt[:, j], w)
             p_cum = p_cum + pos[:, -1]
             gt_cum = gt_cum + pgt[:, j, -1]
             dist = dist + torch.linalg.norm(pgt[:, j, 1:] - pgt[:, j, :-1], dim=-1).sum(1)
@@ -495,4 +497,12 @@ EXPERIMENTS["lastepoch_big"] = dict(EXPERIMENTS["moredata"],
 
 EXPERIMENTS["lastepoch_richaug"] = dict(EXPERIMENTS["richmore"],
     desc="last-epoch speedaware + recovered drives + richer augmentation (richmore with the last epoch kept)",
+    train_kw={"keep_last": True})
+
+
+SPEED_HEAVY = dict(lib.LOSS_WEIGHTS, speed=5.0)
+EXPERIMENTS["lastepoch_speedw"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata with speed loss weight 5 (was 1): speed integration is the dominant error",
+    loss_fn=lambda model, sp: speedaware_loss(model, sp, SPEED_HEAVY),
+    chain_loss_fn=lambda model, sp: speedaware_chain_loss(model, sp, SPEED_HEAVY),
     train_kw={"keep_last": True})
