@@ -1,0 +1,20 @@
+/home/claude/SIH-2k2026/experiments/drift/lib.py:237: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  tot += float(loss)
+[hist10_speedaware_ch10_s7] ep 0 single loss 59.65 | val 5s med 12.48 30s med 33.54 | score 46.02 | 147s
+[hist10_speedaware_ch10_s7] ep 1 single loss 55.34 | val 5s med 13.59 30s med 43.96 | score 57.55 | 122s
+[hist10_speedaware_ch10_s7] ep 2 single loss 52.93 | val 5s med 11.12 30s med 28.42 | score 39.54 | 120s
+[hist10_speedaware_ch10_s7] ep 3 single loss 51.67 | val 5s med 11.07 30s med 27.16 | score 38.23 | 119s
+[hist10_speedaware_ch10_s7] ep 4 single loss 50.06 | val 5s med 11.17 30s med 28.75 | score 39.92 | 117s
+[hist10_speedaware_ch10_s7] ep 5 single loss 48.80 | val 5s med 11.26 30s med 29.84 | score 41.10 | 117s
+[hist10_speedaware_ch10_s7] ep 6 chain loss 99.84 | val 5s med 14.42 30s med 34.59 | score 49.01 | 197s
+[hist10_speedaware_ch10_s7] ep 7 chain loss 95.25 | val 5s med 12.91 30s med 33.48 | score 46.39 | 203s
+[hist10_speedaware_ch10_s7] ep 8 chain loss 93.33 | val 5s med 11.97 30s med 27.82 | score 39.78 | 210s
+[hist10_speedaware_ch10_s7] ep 9 chain loss 91.91 | val 5s med 12.85 30s med 26.99 | score 39.84 | 204s
+[hist10_speedaware_ch10_s7] ep 10 chain loss 90.27 | val 5s med 12.01 30s med 25.85 | score 37.86 | 203s
+[hist10_speedaware_ch10_s7] ep 11 chain loss 89.53 | val 5s med 12.74 30s med 29.27 | score 42.01 | 218s
+[hist10_speedaware_ch10_s7] ep 12 chain loss 87.84 | val 5s med 12.03 30s med 27.61 | score 39.65 | 210s
+[hist10_speedaware_ch10_s7] ep 13 chain loss 86.22 | val 5s med 11.97 30s med 26.42 | score 38.39 | 213s
+[hist10_speedaware_ch10_s7] ep 14 chain loss 85.44 | val 5s med 12.38 30s med 27.67 | score 40.05 | 212s
+[hist10_speedaware_ch10_s7] ep 15 chain loss 85.17 | val 5s med 12.96 30s med 29.43 | score 42.39 | 205s
+RESULT hist10_speedaware_ch10_s7: io_5s   6.7 | io_30s  14.1 | io_60s  19.2 | io_30s_slow  40.2 | io_30s_fast  12.9 | comma_5s   2.6 | comma_30s  10.7  (49 min)
