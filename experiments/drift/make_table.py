@@ -47,6 +47,17 @@ Round 2 (best two-seed averages):
 7. No gain: speed from turning (centripetal observer), augbias + 30 s chains (slow worse), double training budget
    (validation improved, test unchanged except slow 37.5%).
 
+Round 3 (seed spread turned out to be large, so only all-seed averages count; no seed is ever picked by test results):
+8. **Keep the last training epoch** (lastepoch) instead of the best-validation epoch: the 5 validation drives do not
+   track the test drives, and picking epochs on them produced bad seeds (60 s up to 22-26%). Last-epoch seeds are tighter.
+9. **Average several seeds** (combos.py): 6 last-epoch seeds averaged (ens_lastepoch6) = IO 30 s 12.4%, **60 s 16.0%**,
+   slow 37.8%, comma 30 s 11.5%. Best overall.
+10. **18 recovered training drives** (prep_extra.py, train only): with last-epoch training they help long blackouts
+    (no-extra seeds 14.0-14.1% at 30 s vs 12.2-13.6%); no-extra models are a bit better in slow traffic, so the pair
+    duo_last6_noextra7 (with-drives above 7 m/s, no-extra below) gives slow 36.1% at 12.6 / 16.2%.
+11. No gain: richer augmentation on top of the extra drives, double training budget, noisy speed input, weight-averaged
+    epochs, training on the validation drives, slow-only specialist once last-epoch is used, 11-model mixed average.
+
 Error decomposition (physics, fixed alignment, IO 30 s): 18.2% as is, 7.3% with true speed, 14.5% with true
 heading, so forward-speed integration is the dominant error source.
 
