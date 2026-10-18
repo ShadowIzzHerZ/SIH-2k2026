@@ -94,6 +94,7 @@ COMBOS = {
     "med_lastepoch8": ("med", ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"], "per-element median of 8 last-epoch seeds (robust to one bad seed)"),
     "med_chain6_8": ("med", ["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3", "lastepoch_chain6_s5", "lastepoch_chain6_s13", "lastepoch_chain6_s17", "lastepoch_chain6_s21"], "per-element median of 8 30 s-chain seeds"),
     "dmed_chain6x8_last8_7": ("dmed", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3", "lastepoch_chain6_s5", "lastepoch_chain6_s13", "lastepoch_chain6_s17", "lastepoch_chain6_s21"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "median of 8 30 s-chain seeds above 7 m/s, median of 8 last-epoch seeds below", 7.0),
+    "dslowmed_chain6_last8_7": ("dslowmed", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "4-seed 30 s-chain mean above 7 m/s, median of 8 last-epoch seeds below", 7.0),
     "ens_chain6_6": ("ens", ["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3",
                              "lastepoch_chain6_s5", "lastepoch_chain6_s13"], "average of 6 last-epoch 30 s-chain seeds"),
     "duo_chain6x6_last8_7": ("duo", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3", "lastepoch_chain6_s5", "lastepoch_chain6_s13"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "6-seed 30 s-chain average above 7 m/s, 8-seed last-epoch average below", 7.0),
@@ -110,13 +111,14 @@ def run(name):
     mode, members, desc, *sw = COMBOS[name]
     if members[0] is None:
         members = [Mix(["moredata", "moredata_s7"])] + members[1:]
-    inner = "med" if mode == "dmed" else "ens"  # dmed: speed-switched pair of per-element medians
-    if mode == "dmed":
+    # dmed: speed-switched pair of per-element medians; dslowmed: mean above the switch, median below
+    inner = {"dmed": ("med", "med"), "dslowmed": ("ens", "med")}.get(mode, ("ens", "ens"))
+    if mode in ("dmed", "dslowmed"):
         mode = "duo"
     if isinstance(members[0], list):
-        members = [Mix(members[0], inner)] + members[1:]
+        members = [Mix(members[0], inner[0])] + members[1:]
     if mode == "duo" and isinstance(members[1], list):
-        members = [members[0], Mix(members[1], inner)]
+        members = [members[0], Mix(members[1], inner[1])]
     m = Mix(members, mode, *sw).eval()
     sp = lib.build_splits("fwdfix")  # only val/test are used here
     res = lib.evaluate(m, sp, chain_fn=lib.chained_drift_x, fwd=ideas.speedaware_forward)
