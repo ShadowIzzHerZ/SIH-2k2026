@@ -570,3 +570,6 @@ class SmallSpeedAwareNet(SpeedAwareNet):
 EXPERIMENTS["lastepoch_small"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata with a half-width net (CNN 16-32-32, GRU 64)",
     model=SmallSpeedAwareNet, train_kw={"keep_last": True})
+EXPERIMENTS["lastepoch_chain8"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata with the chained fine-tune over 8 chunks (40 s), between the 30 s and 60 s runs",
+    train_kw={"keep_last": True, "chunks": 8, "max_chains": 4500})

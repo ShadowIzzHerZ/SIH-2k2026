@@ -111,3 +111,5 @@ lastepoch_small --seed 7
 med_lastepoch8
 med_chain6_8
 dmed_chain6x8_last8_7
+lastepoch_chain8
+lastepoch_chain8 --seed 7
