@@ -128,3 +128,10 @@ aligned_lastepoch
 aligned_lastepoch_chain6
 aligned_lastepoch --seed 7
 aligned_lastepoch_chain6 --seed 7
+aligned_lastepoch --seed 3
+aligned_lastepoch_chain6 --seed 3
+aligned_lastepoch --seed 11
+aligned_lastepoch_chain6 --seed 11
+A_ens_al_last4
+A_ens_al_chain6_4
+A_duo_al_chain6_last4_7
