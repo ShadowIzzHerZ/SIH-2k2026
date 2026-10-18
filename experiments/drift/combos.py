@@ -1,3 +1,4 @@
+import re
 """Combinations of already-trained checkpoints, no training.
 
 ens:  average the per-sample corrections of several models (seeds disagree on
@@ -12,7 +13,7 @@ from experiments.drift import ideas, lib
 
 
 def load(name):
-    spec = ideas.EXPERIMENTS[name.split("_s")[0] if name not in ideas.EXPERIMENTS else name]
+    spec = ideas.EXPERIMENTS[name if name in ideas.EXPERIMENTS else re.sub(r"_s\d+$", "", name)]
     m = spec.get("model", lib.new_model)()
     m.load_state_dict(torch.load(lib.ROOT / "checkpoints" / f"{name}.pt"))
     return m.eval()
