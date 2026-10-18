@@ -7,3 +7,10 @@ Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pyto
 [hist10_speedaux] ep 3 single loss 52.00 | val 5s med 12.16 30s med 37.14 | score 49.29 | 177s
 [hist10_speedaux] ep 4 single loss 50.12 | val 5s med 11.39 30s med 29.46 | score 40.85 | 179s
 [hist10_speedaux] ep 5 single loss 49.24 | val 5s med 10.95 30s med 30.81 | score 41.75 | 178s
+[hist10_speedaux] ep 6 chain loss 98.46 | val 5s med 12.49 30s med 30.49 | score 42.99 | 11875s
+[hist10_speedaux] ep 7 chain loss 92.93 | val 5s med 10.93 30s med 23.37 | score 34.30 | 329s
+[hist10_speedaux] ep 8 chain loss 90.62 | val 5s med 12.38 30s med 30.54 | score 42.92 | 334s
+[hist10_speedaux] ep 9 chain loss 88.50 | val 5s med 11.28 30s med 24.71 | score 35.98 | 331s
+[hist10_speedaux] ep 10 chain loss 87.28 | val 5s med 12.61 30s med 29.50 | score 42.11 | 332s
+[hist10_speedaux] ep 11 chain loss 85.48 | val 5s med 11.40 30s med 23.65 | score 35.05 | 332s
+RESULT hist10_speedaux: io_5s   6.3 | io_30s  13.6 | io_60s  18.8 | io_30s_slow  45.2 | io_30s_fast  12.1 | comma_5s   2.7 | comma_30s   8.0  (246 min)
