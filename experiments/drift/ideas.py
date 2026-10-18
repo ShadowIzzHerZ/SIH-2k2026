@@ -477,3 +477,17 @@ EXPERIMENTS["lastepoch_noextra"] = dict(EXPERIMENTS["speedaware"],
 EXPERIMENTS["lastepoch_chain6"] = dict(EXPERIMENTS["moredata"],
     desc="last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3",
     train_kw={"keep_last": True, "chunks": 6, "max_chains": 6000})
+
+
+class BigSpeedAwareNet(SpeedAwareNet):
+    """SpeedAwareNet with a wider net (CNN 64-128-128, GRU 256): more capacity
+    now that the recovered drives nearly double the training data."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = lib.new_model(input_channels=7, cnn_channels=[64, 128, 128], gru_hidden=256)
+
+
+EXPERIMENTS["lastepoch_big"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata with a wider network (CNN 64-128-128, GRU 256)",
+    model=BigSpeedAwareNet, train_kw={"keep_last": True})

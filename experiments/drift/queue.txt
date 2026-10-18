@@ -57,3 +57,5 @@ lastepoch --seed 25
 lastepoch --seed 29
 ens_lastepoch10
 duo_last10_noextra7
+lastepoch_big
+lastepoch_big --seed 7
