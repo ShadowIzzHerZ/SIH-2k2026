@@ -16,6 +16,12 @@ ap.add_argument("--seed", type=int, default=42)
 args = ap.parse_args()
 
 from experiments.drift import combos
+if args.name.startswith("A_"):  # rescore with the aligned (off-by-one-free) metric, no training
+    import sys
+    from experiments.drift import rescore_aligned
+    sys.argv = [sys.argv[0], args.name[2:]]
+    rescore_aligned.main()
+    raise SystemExit
 if args.name in combos.COMBOS:  # checkpoint combination, no training
     combos.run(args.name)
     raise SystemExit
