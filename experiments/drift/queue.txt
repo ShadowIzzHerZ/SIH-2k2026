@@ -120,3 +120,4 @@ valshrink_chain6_last8_7
 valshrink_last8_all
 lastepoch_chainmix
 lastepoch_chainmix --seed 7
+lastepoch_chainmix --seed 3
