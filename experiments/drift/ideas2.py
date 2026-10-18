@@ -138,6 +138,21 @@ class HistSpeedNet(ideas.SpeedAwareNet):
         return super().forward(x)[:, -lib.WS:]
 
 
+class HistSpeedAuxNet(HistSpeedNet):
+    """HistSpeedNet plus the auxiliary absolute-speed head of SpeedHeadNet."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = lib.new_model(input_channels=7, output_dim=3)
+        self.aux = None
+
+    def forward(self, x):
+        v = self.cur_v0.reshape(-1, 1, 1).expand(x.shape[0], x.shape[1], 1) / 10.0
+        c = self.net(torch.cat([x, v.to(x.dtype)], -1))[:, -lib.WS:]
+        self.aux = torch.nn.functional.softplus(c[..., 2]) * 10.0
+        return c[..., :2]
+
+
 def hist_splits(hist):
     def make():
         sp = aligned.build_splits()
@@ -191,6 +206,9 @@ EXPERIMENTS = {
     "hist15_speedaware": recipe("20 s context + current speed as an input (context-length sweep)",
                                 model=HistSpeedNet, splits=hist_splits(150), set_v0=True,
                                 train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    "hist10_speedaux": recipe("15 s context + speed input + auxiliary absolute-speed head",
+                              model=HistSpeedAuxNet, splits=hist_splits(100), set_v0=True, aux_w=0.5,
+                              train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
