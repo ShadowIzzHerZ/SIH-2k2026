@@ -512,3 +512,6 @@ EXPERIMENTS["lastepoch_s1heavy"] = dict(EXPERIMENTS["lastepoch"],
     desc="last-epoch moredata with the budget shifted to single-window training (run with --stage1 9 --stage2 3)")
 EXPERIMENTS["lastepoch_s2heavy"] = dict(EXPERIMENTS["lastepoch"],
     desc="last-epoch moredata with the budget shifted to chained training (run with --stage1 3 --stage2 9)")
+EXPERIMENTS["lastepoch_chain12"] = dict(EXPERIMENTS["moredata"],
+    desc="last-epoch moredata with the chained fine-tune over 12 chunks (60 s)",
+    train_kw={"keep_last": True, "chunks": 12, "max_chains": 3000})
