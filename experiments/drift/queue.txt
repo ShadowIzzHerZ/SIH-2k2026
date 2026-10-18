@@ -94,5 +94,11 @@ lastepoch_chain6_drop4 --seed 7
 ens_drop4_4
 ens_last8_drop4_4
 duo_chain6_lastdrop12_7
+lastepoch_drop4 --seed 5
+lastepoch_drop4 --seed 13
+lastepoch_drop4 --seed 17
+lastepoch_drop4 --seed 21
+ens_drop4_8
+duo_chain6_drop8_7
 lastepoch_drop6
 lastepoch_drop6 --seed 7
