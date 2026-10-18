@@ -74,6 +74,8 @@ COMBOS = {
     "ens_last6_chain6_4": ("ens", ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13",
                                    "lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3"],
                            "average of 6 last-epoch (15 s chains) + 4 last-epoch 30 s-chain seeds"),
+    "ens_lastepoch10": ("ens", ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21", "lastepoch_s25", "lastepoch_s29"], "average of 10 last-epoch moredata seeds"),
+    "duo_last10_noextra7": ("duo", [["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21", "lastepoch_s25", "lastepoch_s29"], ["lastepoch_noextra", "lastepoch_noextra_s7", "lastepoch_noextra_s3"]], "10-seed last-epoch average above 7 m/s, 3-seed no-extra average below", 7.0),
     "ens_round3": ("ens", ["moredata", "moredata_s7", "richaug", "richaug_s7"],
                    "average of moredata and richaug, both seeds"),
     "duo_moredata_slowspec": ("duo", ["moredata", "slowspec"], "moredata above 6 m/s, slow specialist below"),
