@@ -33,8 +33,11 @@ class Mix(torch.nn.Module):
             outs.append(m(x))
         if self.mode == "ens":
             return torch.stack(outs).mean(0)
-        if self.mode == "med":
+        if self.mode == "med":  # torch.median takes the lower middle value for an even count
             return torch.stack(outs).median(0).values
+        if self.mode == "tmed":  # true median: mean of the two middle values for an even count
+            st, n = torch.stack(outs).sort(0).values, len(outs)
+            return st[n // 2] if n % 2 else 0.5 * (st[n // 2 - 1] + st[n // 2])
         fast = self.cur_v0.reshape(-1, 1, 1) >= self.switch
         return torch.where(fast, outs[0], outs[1])
 
@@ -95,6 +98,8 @@ COMBOS = {
     "med_chain6_8": ("med", ["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3", "lastepoch_chain6_s5", "lastepoch_chain6_s13", "lastepoch_chain6_s17", "lastepoch_chain6_s21"], "per-element median of 8 30 s-chain seeds"),
     "dmed_chain6x8_last8_7": ("dmed", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3", "lastepoch_chain6_s5", "lastepoch_chain6_s13", "lastepoch_chain6_s17", "lastepoch_chain6_s21"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "median of 8 30 s-chain seeds above 7 m/s, median of 8 last-epoch seeds below", 7.0),
     "dslowmed_chain6_last8_7": ("dslowmed", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "4-seed 30 s-chain mean above 7 m/s, median of 8 last-epoch seeds below", 7.0),
+    "tmed_lastepoch8": ("tmed", ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"], "true median (mean of the two middle values) of 8 last-epoch seeds"),
+    "dslowtmed_chain6_last8_7": ("dslowtmed", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "4-seed 30 s-chain mean above 7 m/s, true median of 8 last-epoch seeds below", 7.0),
     "ens_chain6_6": ("ens", ["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3",
                              "lastepoch_chain6_s5", "lastepoch_chain6_s13"], "average of 6 last-epoch 30 s-chain seeds"),
     "duo_chain6x6_last8_7": ("duo", [["lastepoch_chain6", "lastepoch_chain6_s7", "lastepoch_chain6_s11", "lastepoch_chain6_s3", "lastepoch_chain6_s5", "lastepoch_chain6_s13"], ["lastepoch", "lastepoch_s7", "lastepoch_s11", "lastepoch_s3", "lastepoch_s5", "lastepoch_s13", "lastepoch_s17", "lastepoch_s21"]], "6-seed 30 s-chain average above 7 m/s, 8-seed last-epoch average below", 7.0),
@@ -112,8 +117,8 @@ def run(name):
     if members[0] is None:
         members = [Mix(["moredata", "moredata_s7"])] + members[1:]
     # dmed: speed-switched pair of per-element medians; dslowmed: mean above the switch, median below
-    inner = {"dmed": ("med", "med"), "dslowmed": ("ens", "med")}.get(mode, ("ens", "ens"))
-    if mode in ("dmed", "dslowmed"):
+    inner = {"dmed": ("med", "med"), "dslowmed": ("ens", "med"), "dslowtmed": ("ens", "tmed")}.get(mode, ("ens", "ens"))
+    if mode in ("dmed", "dslowmed", "dslowtmed"):
         mode = "duo"
     if isinstance(members[0], list):
         members = [Mix(members[0], inner[0])] + members[1:]
