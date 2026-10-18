@@ -61,3 +61,6 @@ ens_lastepoch10
 duo_last10_noextra7
 lastepoch_big
 lastepoch_big --seed 7
+lastepoch_chain6 --seed 5
+lastepoch_chain6 --seed 13
+ens_chain6_6
