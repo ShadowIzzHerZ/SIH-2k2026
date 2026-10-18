@@ -76,3 +76,7 @@ duo_chain6_last8_8
 duo_chain6_last8_9
 lastepoch_chain12
 lastepoch_chain12 --seed 7
+lastepoch_lowlr2
+lastepoch_lowlr2 --seed 7
+lastepoch_chain6_lowlr2
+lastepoch_chain6_lowlr2 --seed 7
