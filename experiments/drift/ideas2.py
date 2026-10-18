@@ -161,6 +161,23 @@ class HistSpeedBigNet(HistSpeedNet):
         self.net = lib.new_model(input_channels=7, gru_hidden=192, cnn_channels=[48, 96, 96])
 
 
+class HistRotDataset(HistDataset):
+    """HistDataset plus a random mounting rotation (yaw and pitch, up to
+    +/-deg) of history and window alike, so the net learns to undo small
+    calibration errors instead of only seeing perfectly aligned axes."""
+
+    def __init__(self, *a, deg=3.0, **k):
+        super().__init__(*a, **k)
+        self.deg = deg
+
+    def __getitem__(self, i):
+        it = super().__getitem__(i)
+        y, p = (math.radians(float(np.random.uniform(-self.deg, self.deg))) for _ in range(2))
+        full = RotEnsemble._rot(it["imu"], y, p)
+        it["imu"], it["imu_raw"] = full, full[self.hist:].contiguous()
+        return it
+
+
 def hist_splits(hist, extra=False):
     def make():
         sp = aligned.build_splits(extra=extra)
@@ -230,6 +247,9 @@ EXPERIMENTS = {
                                     model=HistSpeedNet, splits=hist_splits(100), set_v0=True,
                                     train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
                                     swa=True),
+    "hist10_speedaware_rotaug": recipe("15 s context + speed input, random +/-3 deg mounting rotation in training",
+                                       model=HistSpeedNet, splits=hist_splits(100), set_v0=True,
+                                       train_ds=lambda m, sp: HistRotDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
