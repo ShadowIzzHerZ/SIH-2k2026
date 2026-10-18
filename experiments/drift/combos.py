@@ -1,4 +1,3 @@
-import re
 """Combinations of already-trained checkpoints, no training.
 
 ens:  average the per-sample corrections of several models (seeds disagree on
@@ -7,6 +6,7 @@ duo:  pick a model by the current speed estimate (fast one >= switch m/s).
 Members are checkpoint names; speed-aware ones get the current speed set.
 Run through run_exp like any experiment: python -m experiments.drift.run_exp ens_moredata
 """
+import re
 import torch
 
 from experiments.drift import ideas, lib
