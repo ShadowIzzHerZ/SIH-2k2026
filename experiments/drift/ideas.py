@@ -597,3 +597,6 @@ def _aligned_spec(desc, **train_kw):
 EXPERIMENTS["aligned_lastepoch"] = _aligned_spec("aligned training: speed input, recovered drives, last epoch")
 EXPERIMENTS["aligned_lastepoch_chain6"] = _aligned_spec(
     "aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune", chunks=6, max_chains=6000)
+EXPERIMENTS["aligned_chain6_drop4"] = dict(
+    _aligned_spec("aligned training, 30 s chained fine-tune, GRU dropout 0.4", chunks=6, max_chains=6000),
+    model=DropSpeedAwareNet)
