@@ -323,6 +323,10 @@ EXPERIMENTS = {
                                            model=HistSpeedNet, splits=hist_splits(100, extra=True), set_v0=True,
                                            train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
                                            keep_last=True, chunks=12, max_chains=3000),
+    "hist15_speedaware_lx_chain6": recipe("new best recipe with 20 s of IMU context instead of 15 s",
+                                          model=HistSpeedNet, splits=hist_splits(150, extra=True), set_v0=True,
+                                          train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
+                                          keep_last=True, chunks=6, max_chains=6000),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
