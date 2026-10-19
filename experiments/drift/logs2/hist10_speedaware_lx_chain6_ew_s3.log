@@ -9,3 +9,8 @@ Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pyto
 [hist10_speedaware_lx_chain6_ew_s3] ep 5 single loss 41.82 | val 5s med 11.03 30s med 28.62 | score 39.65 | 495s
 [hist10_speedaware_lx_chain6_ew_s3] ep 6 chain loss 116.28 | val 5s med 11.69 30s med 28.11 | score 39.80 | 497s
 [hist10_speedaware_lx_chain6_ew_s3] ep 7 chain loss 107.97 | val 5s med 12.84 30s med 31.36 | score 44.20 | 489s
+[hist10_speedaware_lx_chain6_ew_s3] ep 8 chain loss 105.05 | val 5s med 12.52 30s med 29.31 | score 41.83 | 491s
+[hist10_speedaware_lx_chain6_ew_s3] ep 9 chain loss 105.16 | val 5s med 12.28 30s med 24.76 | score 37.04 | 479s
+[hist10_speedaware_lx_chain6_ew_s3] ep 10 chain loss 101.03 | val 5s med 12.02 30s med 26.44 | score 38.46 | 476s
+[hist10_speedaware_lx_chain6_ew_s3] ep 11 chain loss 99.99 | val 5s med 12.22 30s med 27.84 | score 40.06 | 480s
+RESULT hist10_speedaware_lx_chain6_ew_s3: io_5s   6.3 | io_30s  12.6 | io_60s  16.6 | io_30s_slow  35.9 | io_30s_fast  11.4 | comma_5s   3.3 | comma_30s  11.8  (99 min)
