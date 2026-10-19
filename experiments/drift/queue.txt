@@ -142,3 +142,14 @@ A_lastepoch_chain6
 A_lastepoch_chain6_s7
 A_lastepoch_chain6_s3
 A_lastepoch_chain6_s11
+aligned_lastepoch_chain6 --seed 5
+aligned_lastepoch --seed 5
+aligned_lastepoch_chain6 --seed 13
+aligned_lastepoch --seed 13
+aligned_lastepoch_chain6 --seed 17
+aligned_lastepoch --seed 17
+aligned_lastepoch_chain6 --seed 21
+aligned_lastepoch --seed 21
+A_ens_al_chain6_8
+A_ens_al_last8
+A_duo_al_chain6x8_last8_7
