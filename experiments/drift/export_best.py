@@ -1,5 +1,6 @@
 """Export the best round-2 model (average of three 15 s-context, speed-input
-models) to one ONNX file and check it against PyTorch.
+models trained with keep_last, the extra drives and 6-chunk chains) to one
+ONNX file and check it against PyTorch.
 
     python -m experiments.drift.export_best [name ...]
 
@@ -18,7 +19,7 @@ import torch
 
 from experiments.drift import ideas2, lib
 
-NAMES = sys.argv[1:] or ["hist10_speedaware", "hist10_speedaware_s7", "hist10_speedaware_s3"]
+NAMES = sys.argv[1:] or ["hist10_speedaware_lx_chain6", "hist10_speedaware_lx_chain6_s7", "hist10_speedaware_lx_chain6_s3"]
 
 
 class Exported(torch.nn.Module):
@@ -37,7 +38,7 @@ for n in NAMES:
     m.load_state_dict(torch.load(lib.ROOT / "checkpoints" / f"{n}.pt"))
     nets.append(m.eval())
 model = Exported(nets).eval()
-out = lib.ROOT / "checkpoints" / "hist10_speedaware_ens3.onnx"
+out = lib.ROOT / "checkpoints" / f"{NAMES[0]}_ens{len(NAMES)}.onnx"
 imu, v0 = torch.randn(1, 150, 6) * 0.5, torch.tensor([12.0])
 torch.onnx.export(model, (imu, v0), out, input_names=["imu", "v0"], output_names=["corr"], opset_version=17,
                   dynamo=False)
