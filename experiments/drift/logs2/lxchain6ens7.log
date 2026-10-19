@@ -1,0 +1,1 @@
+RESULT seedens_hist10_speedaware_lx_chain6+hist10_speedaware_lx_chain6_s11+hist10_speedaware_lx_chain6_s13+hist10_speedaware_lx_chain6_s17+hist10_speedaware_lx_chain6_s21+hist10_speedaware_lx_chain6_s3+hist10_speedaware_lx_chain6_s7: io_5s   6.3 | io_30s  12.0 | io_60s  15.4 | io_30s_slow  36.4 | io_30s_fast  10.7 | comma_5s   2.9 | comma_30s  10.5

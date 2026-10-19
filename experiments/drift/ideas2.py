@@ -314,6 +314,11 @@ EXPERIMENTS = {
                                           model=HistSpeedNet, splits=hist_splits(100, extra=True), set_v0=True,
                                           train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
                                           keep_last=True, chunks=6, max_chains=6000),
+    "hist10_speedaware_lx_chain6_ew": recipe("new best recipe with the 6-chunk chain loss weighted toward 30 s",
+                                             model=HistSpeedNet, splits=hist_splits(100, extra=True), set_v0=True,
+                                             train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
+                                             end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0],
+                                             keep_last=True, chunks=6, max_chains=6000),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
