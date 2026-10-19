@@ -308,6 +308,12 @@ EXPERIMENTS = {
                                       model=HistSpeedNet, splits=hist_splits(100), set_v0=True,
                                       train_ds=lambda m, sp: SlowOversample(
                                           HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]))),
+    # suggested by the drift-experiments thread: its best recipe (keep_last, extra
+    # drives, 6-chunk chained fine-tune) plus this branch's 15 s history
+    "hist10_speedaware_lx_chain6": recipe("15 s context + speed input, last epoch kept, + 18 extra drives, 6-chunk chained fine-tune",
+                                          model=HistSpeedNet, splits=hist_splits(100, extra=True), set_v0=True,
+                                          train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]),
+                                          keep_last=True, chunks=6, max_chains=6000),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
