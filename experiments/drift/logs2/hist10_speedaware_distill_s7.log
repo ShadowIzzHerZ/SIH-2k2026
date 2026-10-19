@@ -1,0 +1,16 @@
+/home/claude/SIH-2k2026/experiments/drift/lib.py:237: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  tot += float(loss)
+[hist10_speedaware_distill_s7] ep 0 single loss 136.03 | val 5s med 11.14 30s med 23.44 | score 34.58 | 236s
+[hist10_speedaware_distill_s7] ep 1 single loss 87.62 | val 5s med 10.94 30s med 22.73 | score 33.67 | 193s
+[hist10_speedaware_distill_s7] ep 2 single loss 79.00 | val 5s med 12.24 30s med 27.13 | score 39.37 | 200s
+[hist10_speedaware_distill_s7] ep 3 single loss 73.61 | val 5s med 10.64 30s med 21.54 | score 32.18 | 202s
+[hist10_speedaware_distill_s7] ep 4 single loss 70.81 | val 5s med 10.77 30s med 23.81 | score 34.58 | 192s
+[hist10_speedaware_distill_s7] ep 5 single loss 68.05 | val 5s med 11.62 30s med 25.78 | score 37.40 | 193s
+[hist10_speedaware_distill_s7] ep 6 chain loss 126.60 | val 5s med 11.54 30s med 26.95 | score 38.49 | 316s
+[hist10_speedaware_distill_s7] ep 7 chain loss 124.31 | val 5s med 10.96 30s med 24.58 | score 35.54 | 322s
+[hist10_speedaware_distill_s7] ep 8 chain loss 120.90 | val 5s med 12.01 30s med 27.55 | score 39.56 | 315s
+[hist10_speedaware_distill_s7] ep 9 chain loss 119.46 | val 5s med 12.02 30s med 28.24 | score 40.26 | 318s
+[hist10_speedaware_distill_s7] ep 10 chain loss 115.21 | val 5s med 11.30 30s med 23.95 | score 35.25 | 319s
+[hist10_speedaware_distill_s7] ep 11 chain loss 115.37 | val 5s med 11.96 30s med 26.70 | score 38.66 | 318s
+RESULT hist10_speedaware_distill_s7: io_5s   6.3 | io_30s  13.8 | io_60s  19.5 | io_30s_slow  43.7 | io_30s_fast  12.3 | comma_5s   2.2 | comma_30s  10.4  (54 min)
