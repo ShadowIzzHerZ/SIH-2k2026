@@ -600,3 +600,6 @@ EXPERIMENTS["aligned_lastepoch_chain6"] = _aligned_spec(
 EXPERIMENTS["aligned_chain6_drop4"] = dict(
     _aligned_spec("aligned training, 30 s chained fine-tune, GRU dropout 0.4", chunks=6, max_chains=6000),
     model=DropSpeedAwareNet)
+EXPERIMENTS["aligned_chain6_big"] = dict(
+    _aligned_spec("aligned training, 30 s chained fine-tune, wider net (CNN 64-128-128, GRU 256)", chunks=6, max_chains=6000),
+    model=BigSpeedAwareNet)

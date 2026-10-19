@@ -155,3 +155,5 @@ A_ens_al_last8
 A_duo_al_chain6x8_last8_7
 aligned_chain6_drop4
 aligned_chain6_drop4 --seed 7
+aligned_chain6_big
+aligned_chain6_big --seed 7

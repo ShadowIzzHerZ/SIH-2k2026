@@ -66,6 +66,42 @@ heading, so forward-speed integration is the dominant error source.
 | speedaware_s7 | calibfix + bias augmentation + current speed fed to the network as an input | 6.7 | 14.7 | 19.4 | 45.7 | 12.8 | 1.9 | 12.9 |
 | duo_speedaware | speedaware above 6 m/s, augbias_long below (switch on current speed estimate) | 6.4 | 13.8 | 19.2 | 38.9 | 12.4 | 2.0 | 13.2 |
 | duo_speedaware_s7 | speedaware_s7 above 6 m/s, augbias_long below (switch on current speed estimate) | 6.6 | 14.4 | 18.9 | 39.3 | 12.8 | 1.9 | 13.0 |
+| A_duo_al_chain6_last4_7 | aligned metric: aligned-trained: 4-seed 30 s-chain average above 7 m/s, 4-seed last-epoch average below | 6.5 | 12.1 | 15.3 | 37.4 | 11.0 | 2.6 | 11.9 |
+| A_duo_al_chain6x8_last8_7 | aligned metric: aligned-trained: 8-seed 30 s-chain average above 7 m/s, 8-seed last-epoch average below | 6.5 | 12.1 | 15.2 | 36.8 | 10.9 | 2.8 | 11.8 |
+| A_duo_chain6_last8_7 | aligned metric: 4-seed 30 s-chain average above 7 m/s, 8-seed last-epoch average below | 7.0 | 12.7 | 15.7 | 37.5 | 11.4 | 3.7 | 12.4 |
+| A_ens_al_chain6_4 | aligned metric: average of 4 aligned-trained 30 s-chain seeds (score with A_ prefix) | 6.5 | 11.9 | 15.0 | 38.5 | 10.8 | 2.6 | 11.9 |
+| A_ens_al_chain6_8 | aligned metric: average of 8 aligned-trained 30 s-chain seeds (score with A_ prefix) | 6.5 | 11.9 | 15.1 | 39.1 | 10.8 | 2.7 | 11.8 |
+| A_ens_al_last4 | aligned metric: average of 4 aligned-trained last-epoch seeds (score with A_ prefix) | 6.3 | 12.5 | 16.1 | 37.5 | 11.2 | 2.4 | 10.9 |
+| A_ens_al_last8 | aligned metric: average of 8 aligned-trained last-epoch seeds (score with A_ prefix) | 6.3 | 12.5 | 16.3 | 36.8 | 11.2 | 2.3 | 11.2 |
+| A_ens_chain6_4 | aligned metric: average of 4 last-epoch 30 s-chain seeds | 7.0 | 12.8 | 15.5 | 40.3 | 11.5 | 3.7 | 12.4 |
+| A_ens_lastepoch8 | aligned metric: average of 8 last-epoch moredata seeds | 6.8 | 12.6 | 15.8 | 37.6 | 11.3 | 3.4 | 11.5 |
+| A_lastepoch | aligned metric: moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.9 | 12.5 | 15.6 | 41.6 | 11.2 | 3.3 | 12.4 |
+| A_lastepoch_chain6 | aligned metric: last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 7.1 | 12.4 | 15.5 | 50.0 | 11.1 | 4.0 | 12.7 |
+| A_lastepoch_chain6_s11 | aligned metric: last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 7.1 | 13.8 | 17.8 | 39.0 | 12.7 | 3.9 | 13.2 |
+| A_lastepoch_chain6_s3 | aligned metric: last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 7.0 | 13.3 | 17.4 | 40.9 | 11.7 | 3.7 | 12.9 |
+| A_lastepoch_chain6_s7 | aligned metric: last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 7.1 | 13.6 | 17.4 | 38.7 | 12.3 | 3.6 | 12.2 |
+| A_lastepoch_s11 | aligned metric: moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 7.1 | 13.2 | 17.3 | 38.8 | 12.1 | 3.8 | 13.8 |
+| A_lastepoch_s3 | aligned metric: moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 7.0 | 13.1 | 16.2 | 43.6 | 11.6 | 3.4 | 11.3 |
+| A_lastepoch_s7 | aligned metric: moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.9 | 13.7 | 18.1 | 39.3 | 12.5 | 3.3 | 11.6 |
+| aligned_lastepoch | aligned training: speed input, recovered drives, last epoch | 6.5 | 13.3 | 17.4 | 35.7 | 12.0 | 2.6 | 11.3 |
+| aligned_lastepoch_chain6 | aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune | 6.5 | 12.4 | 15.8 | 38.8 | 11.1 | 2.5 | 11.6 |
+| aligned_lastepoch_chain6_s11 | aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune | 7.0 | 13.5 | 17.6 | 34.7 | 12.4 | 3.2 | 14.4 |
+| aligned_lastepoch_chain6_s13 | aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune | 6.4 | 12.8 | 16.4 | 37.6 | 11.5 | 2.6 | 12.9 |
+| aligned_lastepoch_chain6_s17 | aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune | 6.7 | 12.6 | 16.3 | 44.7 | 11.5 | 3.3 | 12.3 |
+| aligned_lastepoch_chain6_s21 | aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune | 6.5 | 13.0 | 16.2 | 40.7 | 11.8 | 3.0 | 12.2 |
+| aligned_lastepoch_chain6_s3 | aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune | 6.6 | 13.2 | 17.2 | 52.7 | 11.6 | 2.9 | 11.8 |
+| aligned_lastepoch_chain6_s5 | aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune | 6.6 | 12.5 | 16.1 | 41.3 | 11.4 | 2.5 | 11.7 |
+| aligned_lastepoch_chain6_s7 | aligned training: speed input, recovered drives, last epoch, 30 s chained fine-tune | 6.5 | 12.7 | 16.4 | 37.7 | 11.6 | 2.5 | 12.8 |
+| aligned_lastepoch_s11 | aligned training: speed input, recovered drives, last epoch | 6.3 | 12.9 | 16.9 | 37.9 | 11.6 | 2.3 | 11.5 |
+| aligned_lastepoch_s13 | aligned training: speed input, recovered drives, last epoch | 6.4 | 12.6 | 16.4 | 36.5 | 11.4 | 2.3 | 11.0 |
+| aligned_lastepoch_s17 | aligned training: speed input, recovered drives, last epoch | 6.6 | 13.9 | 18.8 | 39.6 | 12.6 | 2.6 | 11.9 |
+| aligned_lastepoch_s21 | aligned training: speed input, recovered drives, last epoch | 6.2 | 13.3 | 18.2 | 40.2 | 12.0 | 2.4 | 12.1 |
+| aligned_lastepoch_s3 | aligned training: speed input, recovered drives, last epoch | 6.3 | 12.8 | 16.5 | 35.3 | 11.5 | 2.4 | 12.1 |
+| aligned_lastepoch_s5 | aligned training: speed input, recovered drives, last epoch | 6.5 | 13.1 | 17.3 | 36.9 | 11.8 | 2.3 | 12.3 |
+| aligned_lastepoch_s7 | aligned training: speed input, recovered drives, last epoch | 6.4 | 12.9 | 16.8 | 44.7 | 11.5 | 2.6 | 10.8 |
+| dmed_chain6x8_last8_7 | median of 8 30 s-chain seeds above 7 m/s, median of 8 last-epoch seeds below | 6.5 | 13.1 | 16.9 | 33.6 | 11.6 | 2.4 | 11.9 |
+| dslowmed_chain6_last8_7 | 4-seed 30 s-chain mean above 7 m/s, median of 8 last-epoch seeds below | 6.4 | 12.5 | 15.7 | 34.5 | 11.1 | 2.4 | 11.8 |
+| dslowtmed_chain6_last8_7 | 4-seed 30 s-chain mean above 7 m/s, true median of 8 last-epoch seeds below | 6.4 | 12.4 | 15.5 | 37.0 | 11.1 | 2.4 | 11.8 |
 | duo_all5_slowspec7 | 5-model average above 7 m/s, slow specialist below | 6.4 | 12.7 | 16.4 | 39.1 | 11.3 | 2.1 | 11.0 |
 | duo_chain6_drop8_7 | 4-seed 30 s-chain average above 7 m/s, 8-seed dropout-0.4 average below | 6.4 | 12.4 | 15.4 | 37.0 | 11.1 | 2.4 | 11.8 |
 | duo_chain6_last8_6 | 4-seed 30 s-chain average above 6 m/s, 8-seed last-epoch average below | 6.4 | 12.4 | 15.4 | 36.9 | 11.1 | 2.4 | 11.8 |
@@ -75,6 +111,7 @@ heading, so forward-speed integration is the dominant error source.
 | duo_chain6_lastdrop12_7 | 4-seed 30 s-chain average above 7 m/s, 8 last-epoch + 4 dropout-0.4 seeds below | 6.4 | 12.4 | 15.4 | 36.5 | 11.1 | 2.4 | 11.8 |
 | duo_chain6_noextra7 | 4-seed 30 s-chain average above 7 m/s, 3-seed no-extra average below | 6.4 | 12.7 | 15.8 | 35.3 | 11.2 | 2.4 | 11.9 |
 | duo_chain6x6_last8_7 | 6-seed 30 s-chain average above 7 m/s, 8-seed last-epoch average below | 6.4 | 12.4 | 15.6 | 36.9 | 11.0 | 2.4 | 11.9 |
+| duo_chain6x8_last8_7 | 8-seed 30 s-chain average above 7 m/s, 8-seed last-epoch average below | 6.4 | 12.4 | 15.6 | 36.5 | 11.0 | 2.4 | 11.2 |
 | duo_ens3_slowspec7 | 3-seed moredata average above 7 m/s, slow specialist below | 6.4 | 12.6 | 16.2 | 38.5 | 11.2 | 2.3 | 11.5 |
 | duo_ens6_slowspec7 | 6-seed moredata average above 7 m/s, slow specialist below | 6.4 | 12.9 | 16.8 | 38.7 | 11.5 | 2.3 | 12.3 |
 | duo_ens_slowplain8 | moredata seed-average above 8 m/s, plain slow specialist below | 6.4 | 12.7 | 16.5 | 40.3 | 11.3 | 2.3 | 12.4 |
@@ -91,6 +128,7 @@ heading, so forward-speed integration is the dominant error source.
 | ens_all5 | average of moredata (3 seeds) and richaug (2 seeds) | 6.3 | 12.5 | 16.2 | 42.4 | 11.1 | 2.1 | 11.0 |
 | ens_chain6_4 | average of 4 last-epoch 30 s-chain seeds | 6.4 | 12.3 | 15.0 | 40.5 | 11.0 | 2.4 | 11.8 |
 | ens_chain6_6 | average of 6 last-epoch 30 s-chain seeds | 6.4 | 12.2 | 15.2 | 39.9 | 11.1 | 2.3 | 11.9 |
+| ens_chain6_8 | average of 8 last-epoch 30 s-chain seeds | 6.4 | 12.3 | 15.2 | 39.5 | 11.1 | 2.4 | 11.4 |
 | ens_drop4_4 | average of 4 last-epoch dropout-0.4 seeds | 6.3 | 12.3 | 16.1 | 37.8 | 11.0 | 2.1 | 9.5 |
 | ens_drop4_8 | average of 8 last-epoch dropout-0.4 seeds | 6.4 | 12.2 | 16.0 | 38.0 | 11.0 | 2.1 | 11.1 |
 | ens_last6_chain6_4 | average of 6 last-epoch (15 s chains) + 4 last-epoch 30 s-chain seeds | 6.4 | 12.3 | 15.5 | 39.9 | 11.1 | 2.2 | 11.3 |
@@ -118,9 +156,16 @@ heading, so forward-speed integration is the dominant error source.
 | lastepoch_chain6_drop4_s7 | last-epoch moredata, GRU dropout 0.4, chained fine-tune over 6 chunks (30 s) | 6.5 | 13.3 | 17.1 | 36.0 | 11.6 | 2.1 | 12.5 |
 | lastepoch_chain6_s11 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.5 | 13.1 | 16.9 | 39.0 | 11.9 | 2.4 | 12.1 |
 | lastepoch_chain6_s13 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.3 | 13.1 | 16.7 | 39.4 | 11.9 | 2.4 | 11.7 |
+| lastepoch_chain6_s17 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.4 | 13.1 | 16.7 | 36.0 | 11.6 | 2.2 | 9.5 |
+| lastepoch_chain6_s21 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.8 | 13.9 | 18.8 | 43.6 | 12.7 | 3.2 | 14.0 |
 | lastepoch_chain6_s3 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.5 | 13.3 | 17.7 | 40.8 | 11.9 | 2.2 | 12.6 |
 | lastepoch_chain6_s5 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.5 | 12.7 | 16.2 | 37.5 | 11.6 | 2.4 | 12.6 |
 | lastepoch_chain6_s7 | last-epoch moredata with the chained fine-tune over 6 chunks (30 s) instead of 3 | 6.6 | 13.4 | 16.7 | 37.5 | 12.0 | 2.4 | 12.5 |
+| lastepoch_chain8 | last-epoch moredata with the chained fine-tune over 8 chunks (40 s), between the 30 s and 60 s runs | 6.5 | 13.5 | 17.1 | 40.5 | 11.9 | 2.3 | 12.1 |
+| lastepoch_chain8_s7 | last-epoch moredata with the chained fine-tune over 8 chunks (40 s), between the 30 s and 60 s runs | 6.5 | 13.2 | 16.5 | 40.7 | 11.9 | 2.1 | 14.1 |
+| lastepoch_chainmix | last-epoch moredata; chained epochs cycle 15 s, 30 s and 45 s chains instead of one fixed length | 6.5 | 13.3 | 17.6 | 42.8 | 12.1 | 2.6 | 13.3 |
+| lastepoch_chainmix_s3 | last-epoch moredata; chained epochs cycle 15 s, 30 s and 45 s chains instead of one fixed length | 6.3 | 12.9 | 17.8 | 45.3 | 11.6 | 2.3 | 12.5 |
+| lastepoch_chainmix_s7 | last-epoch moredata; chained epochs cycle 15 s, 30 s and 45 s chains instead of one fixed length | 6.5 | 13.3 | 17.4 | 44.5 | 11.6 | 2.6 | 13.5 |
 | lastepoch_drop4 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.2 | 12.8 | 16.8 | 38.9 | 11.5 | 2.4 | 7.7 |
 | lastepoch_drop4_s11 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.5 | 13.0 | 17.5 | 34.4 | 11.6 | 2.1 | 11.8 |
 | lastepoch_drop4_s13 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.4 | 12.5 | 16.2 | 43.3 | 11.2 | 2.3 | 11.9 |
@@ -129,6 +174,8 @@ heading, so forward-speed integration is the dominant error source.
 | lastepoch_drop4_s3 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.3 | 12.4 | 16.2 | 41.2 | 11.1 | 2.1 | 10.4 |
 | lastepoch_drop4_s5 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.4 | 12.9 | 17.5 | 37.6 | 11.5 | 2.2 | 10.0 |
 | lastepoch_drop4_s7 | last-epoch moredata with GRU dropout 0.4 instead of 0.2 | 6.4 | 13.2 | 17.4 | 38.4 | 11.9 | 2.0 | 10.8 |
+| lastepoch_drop6 | last-epoch moredata with GRU dropout 0.6 (trend check after 0.4 helped comma) | 6.5 | 12.7 | 16.5 | 38.0 | 11.3 | 2.1 | 11.2 |
+| lastepoch_drop6_s7 | last-epoch moredata with GRU dropout 0.6 (trend check after 0.4 helped comma) | 6.5 | 13.2 | 17.3 | 35.6 | 11.7 | 2.0 | 10.8 |
 | lastepoch_hilr2 | last-epoch moredata with a 2x higher chained fine-tune learning rate (6e-4) | 6.5 | 12.8 | 16.2 | 39.6 | 11.3 | 2.5 | 12.2 |
 | lastepoch_hilr2_s7 | last-epoch moredata with a 2x higher chained fine-tune learning rate (6e-4) | 6.4 | 13.1 | 17.1 | 41.1 | 11.9 | 2.0 | 9.3 |
 | lastepoch_lowlr2 | last-epoch moredata with a 3x lower chained fine-tune learning rate (1e-4) | 6.3 | 13.3 | 18.0 | 43.9 | 11.6 | 2.3 | 11.8 |
@@ -149,12 +196,16 @@ heading, so forward-speed integration is the dominant error source.
 | lastepoch_s3 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.5 | 12.8 | 16.3 | 40.1 | 11.3 | 2.1 | 10.7 |
 | lastepoch_s5 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.5 | 13.3 | 17.7 | 34.6 | 12.0 | 2.3 | 10.5 |
 | lastepoch_s7 | moredata with the last epoch kept instead of the best-val epoch (control for trainval) | 6.5 | 13.6 | 17.9 | 38.2 | 12.2 | 2.3 | 12.0 |
+| lastepoch_small | last-epoch moredata with a half-width net (CNN 16-32-32, GRU 64) | 6.5 | 13.2 | 17.9 | 39.6 | 11.8 | 2.4 | 13.2 |
+| lastepoch_small_s7 | last-epoch moredata with a half-width net (CNN 16-32-32, GRU 64) | 6.7 | 14.2 | 19.0 | 35.8 | 12.6 | 2.7 | 10.8 |
 | lastepoch_speedw | last-epoch moredata with speed loss weight 5 (was 1): speed integration is the dominant error | 6.5 | 12.8 | 16.6 | 39.5 | 11.5 | 2.3 | 12.8 |
 | lastepoch_speedw_s7 | last-epoch moredata with speed loss weight 5 (was 1): speed integration is the dominant error | 6.4 | 13.3 | 17.4 | 43.2 | 11.9 | 2.0 | 11.1 |
 | lastepoch_wd | last-epoch moredata with 100x stronger weight decay (1e-3) | 6.3 | 12.6 | 16.4 | 38.0 | 11.4 | 2.4 | 12.8 |
 | lastepoch_wd_s11 | last-epoch moredata with 100x stronger weight decay (1e-3) | 6.6 | 13.5 | 18.0 | 37.2 | 11.9 | 2.4 | 11.7 |
 | lastepoch_wd_s3 | last-epoch moredata with 100x stronger weight decay (1e-3) | 6.5 | 12.6 | 16.2 | 37.1 | 11.2 | 2.2 | 11.2 |
 | lastepoch_wd_s7 | last-epoch moredata with 100x stronger weight decay (1e-3) | 6.5 | 13.0 | 16.9 | 38.3 | 11.6 | 2.1 | 10.6 |
+| med_chain6_8 | per-element median of 8 30 s-chain seeds | 6.5 | 13.0 | 16.8 | 33.4 | 11.7 | 2.4 | 11.9 |
+| med_lastepoch8 | per-element median of 8 last-epoch seeds (robust to one bad seed) | 6.5 | 12.9 | 16.9 | 33.2 | 11.6 | 2.3 | 13.2 |
 | moredata | speedaware + 18 recovered IO-VNBD training drives (+537 min, prep_extra.py); val/test unchanged | 6.4 | 12.8 | 17.2 | 41.8 | 11.4 | 2.2 | 11.5 |
 | moredata_long | moredata with double the training budget (12 single-window + 12 chained epochs) | 6.2 | 14.5 | 20.6 | 54.1 | 12.9 | 2.3 | 18.5 |
 | moredata_s11 | speedaware + 18 recovered IO-VNBD training drives (+537 min, prep_extra.py); val/test unchanged | 6.3 | 14.9 | 22.7 | 56.8 | 13.4 | 2.1 | 13.9 |
@@ -176,5 +227,8 @@ heading, so forward-speed integration is the dominant error source.
 | speedaware_s5 | calibfix + bias augmentation + current speed fed to the network as an input | 6.4 | 16.1 | 26.1 | 89.2 | 14.4 | 2.3 | 17.1 |
 | speedjitter | moredata + noisy speed input during single-window training (10% + 0.5 m/s) | 6.4 | 13.2 | 17.1 | 43.9 | 11.7 | 2.5 | 13.9 |
 | speedjitter_s7 | moredata + noisy speed input during single-window training (10% + 0.5 m/s) | 6.4 | 13.5 | 18.2 | 42.3 | 12.1 | 2.2 | 14.1 |
+| tmed_lastepoch8 | true median (mean of the two middle values) of 8 last-epoch seeds | 6.3 | 12.3 | 16.0 | 39.6 | 11.0 | 2.2 | 12.6 |
 | trainval | moredata trained on train + val drives (5 more drives), last epoch kept: val scores do not track test, so spend val on training | 6.6 | 13.5 | 18.5 | 36.4 | 12.4 | 2.5 | 12.2 |
 | trainval_s7 | moredata trained on train + val drives (5 more drives), last epoch kept: val scores do not track test, so spend val on training | 6.5 | 13.2 | 17.5 | 38.8 | 11.7 | 2.1 | 11.8 |
+| valshrink_chain6_last8_7 | 4-seed 30 s-chain mean above 7 m/s, 8-seed last-epoch mean below scaled by a val-picked alpha; alpha=1.0 picked on val | 6.4 | 12.4 | 15.5 | 36.9 | 11.1 | 2.4 | 11.8 |
+| valshrink_last8_all | 8-seed last-epoch mean at every speed, scaled by a val-picked alpha; alpha=0.9 picked on val | 6.3 | 12.4 | 16.3 | 37.2 | 11.1 | 2.2 | 11.7 |
