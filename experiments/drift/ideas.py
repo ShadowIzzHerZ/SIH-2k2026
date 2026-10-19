@@ -603,3 +603,5 @@ EXPERIMENTS["aligned_chain6_drop4"] = dict(
 EXPERIMENTS["aligned_chain6_big"] = dict(
     _aligned_spec("aligned training, 30 s chained fine-tune, wider net (CNN 64-128-128, GRU 256)", chunks=6, max_chains=6000),
     model=BigSpeedAwareNet)
+EXPERIMENTS["aligned_chain6_more"] = _aligned_spec(
+    "aligned training, 30 s chained fine-tune drawing 12000 chains instead of 6000", chunks=6, max_chains=12000)
