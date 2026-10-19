@@ -208,6 +208,24 @@ class DistillNet(HistSpeedNet):
         return c
 
 
+class SlowOversample(torch.utils.data.Dataset):
+    """Single-window training set where windows slower than lib.SLOW (the
+    weakest case, ~35% drift at 30 s) appear `k` times per epoch. The first
+    len(windows) indices are the original windows, so chains built from
+    .windows for the fine-tune stage are unchanged."""
+
+    def __init__(self, base, k=3):
+        self.base, self.windows = base, base.windows
+        slow = [i for i, w in enumerate(self.windows) if float(np.mean(w.speed_gt)) < lib.SLOW]
+        self.idx = list(range(len(self.windows))) + slow * (k - 1)
+
+    def __len__(self):
+        return len(self.idx)
+
+    def __getitem__(self, i):
+        return self.base[self.idx[i]]
+
+
 def hist_splits(hist, extra=False):
     def make():
         sp = aligned.build_splits(extra=extra)
@@ -286,6 +304,10 @@ EXPERIMENTS = {
     "hist10_speedaware_distill": recipe("one 15 s context + speed input model trained to match the 3-model average",
                                         model=DistillNet, splits=hist_splits(100), set_v0=True,
                                         train_ds=lambda m, sp: HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"])),
+    "hist10_speedaware_slow3": recipe("15 s context + speed input, slow (< 6 m/s) windows 3x as often in training",
+                                      model=HistSpeedNet, splits=hist_splits(100), set_v0=True,
+                                      train_ds=lambda m, sp: SlowOversample(
+                                          HistDataset(sp["train"], sp["_seqs"], hist=sp["_hist"]))),
     "endweight": recipe("aligned, chained fine-tune over 6 chunks with the cumulative-drift loss weighted toward 30 s",
                         end_w=[0.25, 0.25, 0.5, 0.5, 1.5, 3.0], chunks=6, max_chains=6000),
 }
