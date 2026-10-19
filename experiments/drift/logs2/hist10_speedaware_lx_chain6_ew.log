@@ -5,3 +5,12 @@ Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pyto
 [hist10_speedaware_lx_chain6_ew] ep 1 single loss 47.66 | val 5s med 12.14 30s med 35.93 | score 48.07 | 449s
 [hist10_speedaware_lx_chain6_ew] ep 2 single loss 46.17 | val 5s med 12.51 30s med 38.57 | score 51.07 | 433s
 [hist10_speedaware_lx_chain6_ew] ep 3 single loss 44.79 | val 5s med 12.43 30s med 37.35 | score 49.78 | 437s
+[hist10_speedaware_lx_chain6_ew] ep 4 single loss 42.93 | val 5s med 11.12 30s med 33.25 | score 44.36 | 480s
+[hist10_speedaware_lx_chain6_ew] ep 5 single loss 41.44 | val 5s med 11.25 30s med 32.28 | score 43.53 | 472s
+[hist10_speedaware_lx_chain6_ew] ep 6 chain loss 118.95 | val 5s med 11.25 30s med 28.48 | score 39.73 | 495s
+[hist10_speedaware_lx_chain6_ew] ep 7 chain loss 111.32 | val 5s med 13.65 30s med 36.83 | score 50.48 | 482s
+[hist10_speedaware_lx_chain6_ew] ep 8 chain loss 107.51 | val 5s med 11.66 30s med 26.55 | score 38.21 | 465s
+[hist10_speedaware_lx_chain6_ew] ep 9 chain loss 104.39 | val 5s med 12.46 30s med 30.25 | score 42.71 | 455s
+[hist10_speedaware_lx_chain6_ew] ep 10 chain loss 101.69 | val 5s med 12.29 30s med 30.25 | score 42.54 | 461s
+[hist10_speedaware_lx_chain6_ew] ep 11 chain loss 100.63 | val 5s med 12.06 30s med 27.79 | score 39.85 | 466s
+RESULT hist10_speedaware_lx_chain6_ew: io_5s   6.2 | io_30s  12.6 | io_60s  15.8 | io_30s_slow  36.9 | io_30s_fast  11.5 | comma_5s   2.8 | comma_30s  11.4  (96 min)
