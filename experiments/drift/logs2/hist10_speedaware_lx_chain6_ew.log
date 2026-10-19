@@ -1,0 +1,7 @@
+/home/claude/SIH-2k2026/experiments/drift/lib.py:237: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /__w/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:820.)
+  tot += float(loss)
+[hist10_speedaware_lx_chain6_ew] ep 0 single loss 52.17 | val 5s med 11.64 30s med 34.13 | score 45.76 | 437s
+[hist10_speedaware_lx_chain6_ew] ep 1 single loss 47.66 | val 5s med 12.14 30s med 35.93 | score 48.07 | 449s
+[hist10_speedaware_lx_chain6_ew] ep 2 single loss 46.17 | val 5s med 12.51 30s med 38.57 | score 51.07 | 433s
+[hist10_speedaware_lx_chain6_ew] ep 3 single loss 44.79 | val 5s med 12.43 30s med 37.35 | score 49.78 | 437s
