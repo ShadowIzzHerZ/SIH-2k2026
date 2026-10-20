@@ -71,7 +71,11 @@ class CalibrationManager(
     private val levelSamples: Int = 20,
     private val minConfidentSamples: Int = 30,
     private val maxConfidentSamples: Int = 90,
-    private val minSpeedMps: Float = 2.0f,
+    // Same bar FusionEngine's minHeadingLockSpeedMps already trusts a GPS
+    // bearing at. Was 2.0, which is above walking pace: six of the seven
+    // bundled demo recordings never pass 2 m/s (max ~1.4), so yaw got no
+    // samples at all and calibration sat at 50% forever.
+    private val minSpeedMps: Float = 1.0f,
     // Min orientation steadiness (0-1) for a leveling window to be
     // trusted — see orientationSteadiness. A resting phone scores
     // ~0.9999; a real car driving, braking and cornering still scores
@@ -108,6 +112,13 @@ class CalibrationManager(
     // history for a stable estimate, short enough to actually recover
     // after a turn within one confident-collection window.
     private val yawWindowSamples: Int = 60,
+    // Wall-clock cap on the yaw stage, in ticks (10Hz, so 30s). The
+    // sample-count cap above only counts samples that pass the speed
+    // gate, so a phone that never moves (parked car, a desk, an emulator
+    // whose GPS reports speed 0) never reached it. Past this, calibration
+    // finishes with a best-effort yaw flagged rough, and yaw keeps
+    // listening for a real moving stretch to lock in properly later.
+    private val maxYawWaitTicks: Int = 300,
 ) {
     private val levelBuf = ArrayList<FloatArray>(levelSamples)
     private val yawAccelBuf = ArrayList<FloatArray>()
@@ -118,12 +129,21 @@ class CalibrationManager(
     private var lastYawEstimate: Float? = null
     private var lastYawCheckpointSize = 0
     private var yawAgreementStreak = 0
+    private var yawWaitTicks = 0
 
     var rLevel: FloatArray? = null
         private set
     var psiYaw: Float = 0f
         private set
     var isReady: Boolean = false
+        private set
+
+    /** True once yaw has been estimated from real moving samples (or
+     * skipped for testing). Can stay false after [isReady] when the yaw
+     * stage timed out — see [tickYawWait] — in which case the caller
+     * keeps feeding [addYawSample] so a later moving stretch can still
+     * replace the best-effort estimate. */
+    var yawLocked: Boolean = false
         private set
 
     /** True if leveling settled on a genuinely stationary window; false if
@@ -156,7 +176,10 @@ class CalibrationManager(
      * itself. */
     val progressPercent: Int get() = when {
         isReady -> 100
-        isLeveled -> 50 + (50 * yawSamplesSeen / minConfidentSamples).coerceIn(0, 50)
+        isLeveled -> 50 + maxOf(
+            50 * yawSamplesSeen / minConfidentSamples,
+            50 * yawWaitTicks / maxYawWaitTicks,
+        ).coerceIn(0, 49)  // 100 only once isReady: a full ring that keeps waiting reads as a hang
         else -> (50 * levelSamplesSeen / levelSamples).coerceIn(0, 50)
     }
 
@@ -187,7 +210,7 @@ class CalibrationManager(
      * `yawCheckpointGap` samples apart agree, or at maxConfidentSamples,
      * whichever comes first — see class doc. */
     fun addYawSample(rawAccel: FloatArray, gpsSpeed: Float, gpsHeadingRad: Float) {
-        if (!isLeveled || isReady || gpsSpeed <= minSpeedMps) return
+        if (!isLeveled || yawLocked || gpsSpeed <= minSpeedMps) return
         val leveled = Calibration.matVec3(rLevel!!, rawAccel)
         yawAccelBuf.add(floatArrayOf(leveled[0], leveled[1]))
         yawHeadingBuf.add(
@@ -227,11 +250,29 @@ class CalibrationManager(
             // worth flagging — see yawSpreadThresh's doc.
             val incoherent = Calibration.yawMisalignmentSpread(yawAccelBuf, yawHeadingBuf) >= yawSpreadThresh
             yawConverged = settled && !incoherent
+            yawLocked = true
             isReady = true
             return
         }
         lastYawEstimate = estimate
         lastYawCheckpointSize = n
+    }
+
+    /** Call once per tick while leveled but not yet ready, whether or not
+     * this tick had a usable yaw sample. Ends the yaw stage after
+     * maxYawWaitTicks with whatever estimate the samples so far support
+     * (none: psiYaw=0), marked not converged — see maxYawWaitTicks. */
+    fun tickYawWait() {
+        if (!isLeveled || isReady) return
+        yawWaitTicks++
+        if (yawWaitTicks < maxYawWaitTicks) return
+        psiYaw = if (yawAccelBuf.size >= yawCheckpointGap) {
+            Calibration.estimateYawMisalignment(yawAccelBuf, yawHeadingBuf)
+        } else {
+            0f
+        }
+        yawConverged = false
+        isReady = true
     }
 
     /**
@@ -272,9 +313,10 @@ class CalibrationManager(
             }
             levelConverged = false
         }
-        if (!isReady) {
+        if (!yawLocked) {
             psiYaw = 0f
             yawConverged = false
+            yawLocked = true
             isReady = true
         }
     }
