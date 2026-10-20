@@ -20,7 +20,7 @@ import os
 
 import numpy as np
 
-from edge.engine import BLACKOUT, EdgeEngine, Fix, ModelRateFusion, OnnxPredictor, ZeroPredictor
+from edge.engine import BLACKOUT, GNSS, EdgeEngine, Fix, ModelRateFusion, OnnxPredictor, ZeroPredictor
 from edge.mounting import estimate_mount, level, rotation_from_axes
 from edge.resample import resample
 
@@ -83,6 +83,7 @@ def _drive(imu_hz=200.0, duration=60.0, speed=12.0, yaw_rate=0.05):
 
 def test_engine_zero_model():
     t, xy, th, accel, gyro = _drive()
+    xy = xy + [500.0, -300.0]  # start away from the origin
     eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp", gnss_timeout_s=0.15)
     live = []
     for i in range(len(t)):
@@ -97,9 +98,122 @@ def test_engine_zero_model():
     true = xy[np.searchsorted(t, last.t)]
     err = np.hypot(last.x - true[0], last.y - true[1])
     assert err / (12.0 * 20) < 0.01, f"drift {err:.2f} m over 240 m"
-    pts = np.array([[s.x, s.y] for s in live if s.t > 1.0])
+    pts = np.array([[s.x, s.y] for s in live])  # from the first sample: no placeholder at the origin
     step = np.linalg.norm(np.diff(pts, axis=0), axis=1).max()
     assert step < 3 * 12.0 / 200, f"high-rate output jumped {step:.3f} m in one sample"
+
+
+def test_imu_gap_with_gnss():
+    """An IMU dropout while GNSS keeps arriving is not a blackout. The 10 Hz
+    ticks inside the gap are only emitted when the next IMU sample lands, by
+    which time newer fixes have been pushed; each tick must still see the
+    fix that was current at its own time."""
+    t, xy, th, accel, gyro = _drive()
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp")
+    tg = np.arange(0.037, t[-1], 0.1)  # receiver not phase-locked to the IMU
+    gi = 0
+    for i in range(len(t)):
+        while gi < len(tg) and tg[gi] <= t[i]:
+            j = np.searchsorted(t, tg[gi])
+            eng.push_gnss(Fix(tg[gi], *xy[j], 12.0, th[j]))
+            gi += 1
+        if 30.0 <= t[i] < 30.5:
+            continue  # 0.5 s of IMU lost
+        eng.push_imu(t[i], accel[i], gyro[i])
+    ticks = eng.finish()
+    assert eng.core.model_calls == 0, eng.core.model_calls
+    assert all(s.mode == "gnss" for s in ticks), sorted({s.mode for s in ticks})
+
+
+def test_jittered_timestamps():
+    """3 ms of timestamp jitter on a 200 Hz stream (timestamps step backwards
+    hundreds of times) must not make the high-rate track drift away from
+    the 10 Hz one."""
+    t, xy, th, accel, gyro = _drive()
+    t_rep = t + 0.003 * np.random.default_rng(0).standard_normal(len(t))
+    assert (np.diff(t_rep) < 0).sum() > 100
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp", gnss_timeout_s=0.15)
+    live = []
+    for i in range(len(t)):
+        if i % 20 == 0 and not 20.0 <= t[i] < 40.0:
+            eng.push_gnss(Fix(t[i], *xy[i], 12.0, th[i]))
+        live.append(eng.push_imu(t_rep[i], accel[i], gyro[i]))
+    eng.finish()
+    last = [s for s in live if s.mode == BLACKOUT][-1]
+    true = xy[np.searchsorted(t, last.t)]
+    assert np.hypot(last.x - true[0], last.y - true[1]) < 1.5
+
+
+def test_first_tick_does_not_jump():
+    """Before the first 10 Hz tick the live output shows the fix extrapolated
+    with its Doppler speed. When Doppler and positions disagree (IO-VNBD's
+    phone GPS often does), the first tick must fade in like every later one
+    instead of jumping."""
+    t, xy, th, accel, gyro = _drive()
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="interp")
+    live = []
+    for i in range(len(t)):
+        if i % 20 == 0:
+            eng.push_gnss(Fix(t[i], *xy[i], 24.0, th[i]))  # Doppler twice the true speed
+        live.append(eng.push_imu(t[i], accel[i], gyro[i]))
+    pts = np.array([[s.x, s.y] for s in live[:200]])
+    step = np.linalg.norm(np.diff(pts, axis=0), axis=1).max()
+    assert step < 3 * 24.0 / 200, f"live output jumped {step:.3f} m at the first tick"
+
+
+def test_clock_reset():
+    for resample in ("interp", "mean"):
+        _check_clock_reset(resample)
+
+
+def _check_clock_reset(resample):
+    """The sensor clock restarts at 0 halfway through (a logger restart).
+    The engine must notice, keep its position and carry on, instead of
+    ignoring every sample until the new clock passes the old one."""
+    t, xy, th, accel, gyro = _drive()
+    t_rep = np.where(t < 30.0, t, t - 30.0)
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample=resample, gnss_timeout_s=0.15)
+    live = []
+    for i in range(len(t)):
+        if i % 20 == 0 and not 40.0 <= t[i] < 50.0:  # blackout after the restart
+            eng.push_gnss(Fix(t_rep[i], *xy[i], 12.0, th[i]))
+        live.append(eng.push_imu(t_rep[i], accel[i], gyro[i]))
+    ticks = eng.finish()
+    assert eng.clock_resets == 1
+    assert len(ticks) > 590, len(ticks)
+    bo = [s for s in ticks if s.mode == BLACKOUT]
+    assert 95 <= len(bo) <= 100, (resample, len(bo))
+    # GNSS never drops across the restart itself: only the 40-50 s blackout
+    # may run the model, and no tick before it is a blackout or a blend.
+    assert eng.core.model_calls == 2, (resample, eng.core.model_calls)
+    assert all(s.mode == GNSS for s in ticks if s.t < 9.5 and s is not ticks[0]), resample
+    true = xy[np.searchsorted(t_rep[t >= 30.0], bo[-1].t) + int((t < 30.0).sum())]
+    assert np.hypot(bo[-1].x - true[0], bo[-1].y - true[1]) < 1.5
+    pts = np.array([[s.x, s.y] for s in live])
+    assert np.linalg.norm(np.diff(pts, axis=0), axis=1).max() < 3 * 12.0 / 200
+
+
+class _BiasedPredictor:
+    """Adds a constant 2 m/s^2 forward correction: each 5 s chunk lands ~25 m
+    away from the raw strapdown the live output was showing."""
+    window_size = 50
+
+    def __call__(self, w):
+        return np.tile([2.0, 0.0], (len(w), 1))
+
+
+def test_live_fade_rate():
+    t, xy, th, accel, gyro = _drive()
+    eng = EdgeEngine(_BiasedPredictor(), np.eye(3), resample="interp", gnss_timeout_s=0.15)
+    live = []
+    for i in range(len(t)):
+        if i % 20 == 0 and not 20.0 <= t[i] < 40.0:
+            eng.push_gnss(Fix(t[i], *xy[i], 12.0, th[i]))
+        live.append(eng.push_imu(t[i], accel[i], gyro[i]))
+    pts = np.array([[s.x, s.y, s.speed] for s in live if 20.0 <= s.t < 40.0])
+    v_shown = np.linalg.norm(np.diff(pts[:, :2], axis=0), axis=1) * 200
+    excess = v_shown - pts[1:, 2]
+    assert excess.max() < 5.0 + 1.0, f"live output ran {excess.max():.1f} m/s faster than its own speed"
 
 
 class _LinearPredictor:

@@ -81,7 +81,8 @@ def mount_rotation(args, rec, model_hz: float):
 
 def run_engine(rec, predictor, R, args, model_hz, gnss_mask, predictor_highway=None):
     eng = EdgeEngine(predictor, R, model_hz=model_hz, resample=args.resample, gnss_timeout_s=args.gnss_timeout,
-                     live_smooth_s=args.live_smooth, blend_seconds=args.blend_seconds,
+                     live_smooth_s=args.live_smooth, live_fade_max_mps=args.live_fade_max,
+                     clock_reset_s=args.clock_reset, blend_seconds=args.blend_seconds,
                      v_clamp_max=args.v_max, predictor_highway=predictor_highway)
     live = []
     gi, ng = 0, len(rec.t_gnss)
@@ -176,6 +177,7 @@ def cmd_run(args):
         "resample": args.resample,
         "mount": mount,
         "model_calls": eng.core.model_calls,
+        "clock_resets": eng.clock_resets,
         "blackout_ticks": int(sum(s.mode == BLACKOUT for s in ticks)),
         "wall_s": round(wall, 3),
         "realtime_factor": round(float(rec.t_imu[-1] - rec.t_imu[0]) / wall, 1),
@@ -264,6 +266,10 @@ def build_parser():
     r.add_argument("--gnss-timeout", type=float, default=1.5)
     r.add_argument("--blend-seconds", type=float, default=2.0)
     r.add_argument("--live-smooth", type=float, default=1.0)
+    r.add_argument("--live-fade-max", type=float, default=5.0,
+                   help="fastest a correction may fade into the live output (m/s); 0 = always --live-smooth seconds")
+    r.add_argument("--clock-reset", type=float, default=1.0,
+                   help="an IMU timestamp this many seconds behind the newest one is a clock restart")
     r.add_argument("--v-max", type=float, default=50.0)
     r.add_argument("--threads", type=int, default=1)
     r.set_defaults(func=cmd_run)
