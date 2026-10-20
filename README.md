@@ -35,7 +35,7 @@ Same tests, other checkpoints (median drift):
 |---|---|---|---|---|
 | **`best_v3chain.pt`** | **3.4%** | **13.1%** | **22.0%** | **38.8%** |
 | `best_cleanlabels.pt` | 5.8% | 86.1% | 21.4% | 91.1% |
-| `best.pt` (in the app today) | 8.9% | 20.8% | 52.5% | 139.4% |
+| `best.pt` (the app's model until 2026-10-16) | 8.9% | 20.8% | 52.5% | 139.4% |
 
 Sources: [results/final_report_v3.json](results/final_report_v3.json) (comma2k19
 rows, reproduced exactly on 2026-10-16) and
@@ -61,9 +61,12 @@ rows, from [src/report_unseen.py](src/report_unseen.py)).
   [src/data/io_vnbd_loader.py](src/data/io_vnbd_loader.py)) fits each IO-VNBD
   file against its own GPS heading, including test files. The app's phone gyro
   does not need it, but it makes IO-VNBD easier than raw phone data.
-- The app now bundles the ONNX export of `checkpoints/best_v3chain.pt` (same
-  `[1, 50, 6] -> [1, 50, 2]` interface, matches PyTorch to 4e-6). It loads and
-  runs on the emulator but has not been tested on a phone or a real drive yet.
+- The app bundles the ONNX export of `checkpoints/best_v3chain.pt` (same
+  `[1, 50, 6] -> [1, 50, 2]` interface, matches PyTorch to 4e-6), and can pick
+  up newer models without a new APK (see
+  [How the app gets model updates](#how-the-app-gets-model-updates)). It loads
+  and runs on the emulator but has not been tested on a phone or a real drive
+  yet.
 - The 2.9% "30 s highway blackout" demo figure in Status was measured on one
   comma2k19 drive with the old `best.pt`, through `src/simulate_blackout.py`.
 - Earlier entries in [Status](#status) quote numbers from older checkpoints and
@@ -164,6 +167,42 @@ index rather than being described file-by-file here:
 subproject — see [app/README.md](app/README.md). There's also a
 standalone cloud backend — see [backend/README.md](backend/README.md)
 and [Backend](#backend) below.
+
+### How the app gets model updates
+
+The APK bundles `checkpoints/dead_reckoning_model.onnx` (the export of
+`best_v3chain.pt`), so the app always has a working model offline. A newer
+model can reach phones without a new APK:
+
+- `scripts/publish_model.py` checks an ONNX file (exactly one `(1, 50, 6)`
+  input and one `(1, 50, 2)` output, one test window giving finite numbers),
+  uploads it to the public `models` bucket in the project's Supabase Storage,
+  then uploads `manifest.json` with the version, file name, SHA-256 and size.
+  The version must be higher than the bundled one and the one already
+  published.
+- On each start the app reads the manifest (`ModelUpdater.kt`). If it lists a
+  higher version, the app downloads the file, checks the size and SHA-256,
+  opens it with ONNX Runtime, checks the shapes and runs one test window, and
+  only then saves it. The new model is used from the next app start, never
+  swapped mid-drive.
+- If the downloaded model is missing, corrupted or fails to load, the app
+  deletes it and uses the bundled model. A version that failed to load is not
+  downloaded again. With no network the check does nothing.
+
+Publishing needs a Supabase secret key with Storage write access, set in your
+own shell. Never commit it or put it in the app; phones only read the public
+bucket.
+
+```bash
+export SUPABASE_SECRET_KEY=...   # Project Settings > API Keys > Secret keys
+python scripts/publish_model.py path/to/model.onnx --version 3 --dry-run   # checks only
+python scripts/publish_model.py path/to/model.onnx --version 3
+```
+
+To roll back, publish the older model again under a higher version. When the
+bundled model changes, bump `ModelUpdater.BUNDLED_MODEL_VERSION` (1 was
+`best.pt`, 2 is `best_v3chain.pt`). More detail in
+[app/README.md](app/README.md#model-updates-without-a-new-apk).
 
 ## Setup
 
@@ -300,7 +339,7 @@ python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
 python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
 
 # 4. export for the mobile app
-python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints/best.pt
+python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints/best_v3chain.pt
 
 # sanity check any time you change the integrator/model/loss
 python -m tests.test_pipeline_smoke

@@ -225,9 +225,10 @@ highway/suburban driving).
 | comma2k19 highway (never-seen segments) | **3.4%** | **13.1%** | n/a (segments too short) |
 | IO-VNBD, drive not in training | 22.0% | 38.8% | 52.0% |
 
-The model the app ships today (`checkpoints/best.pt`) scores 8.9% / 20.8%
-on highway and 52.5% / 139.4% on the unseen IO-VNBD drive, so the newest
-checkpoint is far better on every row.
+This is the model the app ships (its ONNX export,
+`checkpoints/dead_reckoning_model.onnx`). The app's previous model,
+`checkpoints/best.pt`, scores 8.9% / 20.8% on highway and 52.5% / 139.4% on
+the unseen IO-VNBD drive, so the new one is far better on every row.
 
 **Two things a judge may find, so say them first.** IO-VNBD ships every
 drive in two folders and the loader splits by file, so 17 of the 23 IO-VNBD
@@ -248,7 +249,7 @@ is what cut 30-second blackout drift on highway from 86% (`best_cleanlabels.pt`)
 to 13%.
 
 **History (older checkpoints, older labels, kept as a record).** Before the
-label fixes, the shipped `best.pt` measured 16.49% mean / 8.94% median on
+label fixes, the then-shipped `best.pt` measured 16.49% mean / 8.94% median on
 comma2k19 and 62.33% / 67.56% on IO-VNBD. Five fixes tried against the
 IO-VNBD number all landed in the 60-75% band; that diagnosis of "broad
 underfitting on urban driving" was measuring broken labels.
@@ -277,7 +278,7 @@ further toward the "easy" end of the difficulty spectrum than comma2k19
 did, so training on more of that flavor of data pulls the shared network
 capacity further toward the easy case and away from IO-VNBD's harder
 low-speed/turning regime — a real trade-off in a small shared model, not
-a bug. `checkpoints/best.pt` (the shipped checkpoint) is unchanged;
+a bug. `checkpoints/best.pt` (the shipped checkpoint at the time) was unchanged;
 this run is kept as `checkpoints/best_decimeter.pt`, reference only.
 
 **Say it like this:** *"On highway driving we beat the PS's target: 3.4%
@@ -437,6 +438,22 @@ Mobile running the exported trained network) → `MapMatcher` (snap onto
 `MainActivity` — **matching the PS's 10Hz requirement exactly, measured,
 not assumed.**
 
+**Model updates without a new APK.** The APK bundles the
+`best_v3chain.pt` export, so it always works offline. On start,
+`ModelUpdater` reads a small `manifest.json` from Supabase Storage
+(version, file name, SHA-256, size). If there is a newer version, it
+downloads it, checks the size and checksum, opens it, checks the input and
+output shapes and runs one test window before saving it for the next app
+start. Anything that fails, at download or at load, falls back to the
+bundled model. New models are published with `scripts/publish_model.py`,
+using a Supabase secret key kept in the publisher's shell, never in the
+repo or the app.
+
+*If asked "what if a bad model gets pushed?":* "The phone checks the
+checksum and the shapes and runs it once before using it, and if it still
+fails to load, the app deletes it and goes back to the model inside the
+APK."
+
 **Say it like this:** *"This isn't a demo video — it's a real Android
 app, running on a real phone, right now. You can toggle a simulated
 blackout live and watch the trail switch from blue to red to green as
@@ -529,8 +546,8 @@ judges have seen a hundred pitches that hide the rough edges.
 - **The IO-VNBD test split overlaps its training drives** (the dataset ships
   each drive twice). Only one unseen IO-VNBD drive is left to score on, so a
   proper re-split and retrain is still to do.
-- **The app still bundles the older `best.pt` model**; the newer
-  `best_v3chain.pt` is exported and checked but not yet swapped in.
+- **The shipped `best_v3chain.pt` model has only been run on the
+  emulator so far**, not yet on a phone during a real drive.
 - **The on-device map-matcher is a simplified greedy matcher**, not the
   full HMM used offline — a deliberate, explained scope decision (online
   matching can't see the future the way offline evaluation can).

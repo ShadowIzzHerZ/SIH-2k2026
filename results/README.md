@@ -17,10 +17,10 @@ The sections below describe older checkpoints. Their IO-VNBD numbers were
 measured on the overlapping split and, before the label fixes, on broken
 labels; keep them as a record only.
 
-## App checkpoint (`checkpoints/best.pt`)
+## Previous app checkpoint (`checkpoints/best.pt`)
 
 The 6-raw-channel network, trained on IO-VNBD + comma2k19 combined (the
-one the app ships). "Current" files have no run suffix; the `_run1`
+one the app shipped until 2026-10-16; it now ships `best_v3chain.pt`). "Current" files have no run suffix; the `_run1`
 duplicates alongside them are kept because the main README cites those
 exact filenames as the evidence trail for that specific training run —
 same numbers, both kept rather than one silently deleted out from under
