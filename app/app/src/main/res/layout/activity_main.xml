@@ -110,9 +110,14 @@
                 android:layout_marginEnd="6dp"
                 android:background="@drawable/legend_dot_matched" />
 
+            <!-- maxWidth leaves the title room at large font sizes, where
+                 this pill used to squeeze it down to "Z…". -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:maxWidth="180dp"
                 android:text="@string/sensors_ready_pill"
                 style="@style/Text.LabelMd" />
         </LinearLayout>
@@ -167,7 +172,7 @@
                         android:layout_height="match_parent"
                         android:text="@string/ic_autorenew"
                         android:textColor="@color/on_primary_container"
-                        android:textSize="15sp"
+                        android:textSize="15dp"
                         style="@style/Text.Icon" />
                 </FrameLayout>
 
@@ -189,7 +194,7 @@
                     android:layout_marginStart="6dp"
                     android:text="@string/ic_expand_more"
                     android:textColor="@color/on_surface_muted"
-                    android:textSize="18sp"
+                    android:textSize="18dp"
                     style="@style/Text.Icon" />
             </LinearLayout>
 
@@ -355,7 +360,7 @@
                             android:layout_height="match_parent"
                             android:text="@string/ic_near_me"
                             android:textColor="@color/on_primary_container"
-                            android:textSize="7sp"
+                            android:textSize="7dp"
                             style="@style/Text.Icon" />
                     </FrameLayout>
 
@@ -451,7 +456,7 @@
                         android:layout_marginStart="4dp"
                         android:text="@string/ic_expand_more"
                         android:textColor="@color/on_surface_muted"
-                        android:textSize="18sp"
+                        android:textSize="18dp"
                         style="@style/Text.Icon" />
                 </LinearLayout>
 
@@ -488,6 +493,20 @@
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="8dp"
                         style="@style/Text.BodyMd" />
+
+                    <!-- Shown only while CalibrationManager.isRoughCalibration
+                         is true (a stage fell back to a best-effort estimate
+                         or was skipped). Lives in the details, not the
+                         summary row, which has no width to spare. -->
+                    <TextView
+                        android:id="@+id/roughCalibrationText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:text="@string/calib_rough_notice"
+                        android:textColor="@color/warning"
+                        android:visibility="gone"
+                        style="@style/Text.LabelSm" />
 
                     <!-- wrap_content + centered, not stretched edge-to-edge:
                          an earlier equal-width-column version (each
@@ -697,7 +716,7 @@
                         android:layout_height="18dp"
                         android:text="@string/ic_speed"
                         android:textColor="@color/primary"
-                        android:textSize="15sp"
+                        android:textSize="15dp"
                         style="@style/Text.Icon" />
 
                     <TextView
@@ -746,7 +765,7 @@
                         android:layout_height="18dp"
                         android:text="@string/ic_rotate_right"
                         android:textColor="@color/primary"
-                        android:textSize="15sp"
+                        android:textSize="15dp"
                         style="@style/Text.Icon" />
 
                     <TextView
@@ -811,7 +830,7 @@
                             android:layout_height="match_parent"
                             android:text="@string/ic_info"
                             android:textColor="@color/on_primary_container"
-                            android:textSize="15sp"
+                            android:textSize="15dp"
                             style="@style/Text.Icon" />
                     </FrameLayout>
 
@@ -825,13 +844,13 @@
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/location_needed_settings_title"
+                            android:text="@string/replay_fallback_title"
                             style="@style/Text.LabelMd" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="@string/replay_real_drive"
+                            android:text="@string/replay_fallback_body"
                             style="@style/Text.BodyMd" />
                     </LinearLayout>
                 </LinearLayout>
@@ -1071,14 +1090,19 @@
                 android:layout_height="20dp"
                 android:text="@string/ic_explore"
                 android:textColor="@color/on_primary_container"
-                android:textSize="17sp"
+                android:textSize="17dp"
                 style="@style/Text.Icon" />
 
             <TextView
                 android:id="@+id/navLiveMapLabel"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
+                android:gravity="center"
+                android:maxLines="1"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="8sp"
+                app:autoSizeMaxTextSize="10.5sp"
                 android:text="@string/nav_live_map"
                 android:textColor="@color/on_primary_container"
                 style="@style/Text.LabelSm" />
@@ -1100,14 +1124,19 @@
                 android:layout_height="20dp"
                 android:text="@string/ic_sensors"
                 android:textColor="@color/on_surface_muted"
-                android:textSize="17sp"
+                android:textSize="17dp"
                 style="@style/Text.Icon" />
 
             <TextView
                 android:id="@+id/navSensorsLabel"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
+                android:gravity="center"
+                android:maxLines="1"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="8sp"
+                app:autoSizeMaxTextSize="10.5sp"
                 android:text="@string/nav_sensors"
                 android:textColor="@color/on_surface_muted"
                 style="@style/Text.LabelSm" />
@@ -1129,14 +1158,19 @@
                 android:layout_height="20dp"
                 android:text="@string/ic_signal_disconnected"
                 android:textColor="@color/on_surface_muted"
-                android:textSize="17sp"
+                android:textSize="17dp"
                 style="@style/Text.Icon" />
 
             <TextView
                 android:id="@+id/navSimulationLabel"
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
+                android:gravity="center"
+                android:maxLines="1"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="8sp"
+                app:autoSizeMaxTextSize="10.5sp"
                 android:text="@string/nav_simulation"
                 android:textColor="@color/on_surface_muted"
                 style="@style/Text.LabelSm" />
@@ -1158,13 +1192,18 @@
                 android:layout_height="20dp"
                 android:text="@string/ic_restart_alt"
                 android:textColor="@color/on_surface_muted"
-                android:textSize="17sp"
+                android:textSize="17dp"
                 style="@style/Text.Icon" />
 
             <TextView
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
+                android:gravity="center"
+                android:maxLines="1"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="8sp"
+                app:autoSizeMaxTextSize="10.5sp"
                 android:text="@string/nav_reset"
                 android:textColor="@color/on_surface_muted"
                 style="@style/Text.LabelSm" />
@@ -1200,7 +1239,7 @@
                 android:layout_height="match_parent"
                 android:text="@string/ic_near_me"
                 android:textColor="@color/on_primary_container"
-                android:textSize="44sp"
+                android:textSize="44dp"
                 style="@style/Text.Icon" />
         </FrameLayout>
 
@@ -1238,7 +1277,7 @@
                     android:layout_height="match_parent"
                     android:text="@string/ic_near_me"
                     android:textColor="@color/on_primary_container"
-                    android:textSize="18sp"
+                    android:textSize="18dp"
                     style="@style/Text.Icon" />
             </FrameLayout>
 
@@ -1289,7 +1328,7 @@
                 android:layout_height="20dp"
                 android:text="@string/ic_settings"
                 android:textColor="@color/on_surface_variant"
-                android:textSize="18sp"
+                android:textSize="18dp"
                 style="@style/Text.Icon" />
 
             <LinearLayout
@@ -1356,7 +1395,7 @@
                 android:layout_height="match_parent"
                 android:text="@string/ic_near_me"
                 android:textColor="@color/error"
-                android:textSize="44sp"
+                android:textSize="44dp"
                 style="@style/Text.Icon" />
         </FrameLayout>
 

@@ -96,6 +96,9 @@
     <!-- Renders one Material Symbols Outlined glyph — same icon font the
          Stitch mockups themselves use (see strings.xml's ic_* codepoint
          constants), not a hand-drawn approximation. -->
+    <!-- Icon TextViews set their glyph size in dp, not sp: each sits in
+         a fixed-size dp box, and at a large system font size an sp glyph
+         outgrew its box and got clipped. -->
     <style name="Text.Icon" parent="">
         <item name="android:fontFamily">@font/material_symbols_outlined</item>
         <item name="android:includeFontPadding">false</item>

@@ -29,7 +29,7 @@
                 android:layout_height="match_parent"
                 android:text="@string/ic_gps_not_fixed"
                 android:textColor="@color/on_primary_container"
-                android:textSize="26sp"
+                android:textSize="26dp"
                 style="@style/Text.Icon" />
         </FrameLayout>
 
@@ -68,7 +68,7 @@
                     android:layout_height="match_parent"
                     android:text="@string/ic_gps_not_fixed"
                     android:textColor="@color/on_primary_container"
-                    android:textSize="17sp"
+                    android:textSize="17dp"
                     style="@style/Text.Icon" />
             </FrameLayout>
 
@@ -115,7 +115,7 @@
                     android:layout_height="match_parent"
                     android:text="@string/ic_near_me"
                     android:textColor="@color/on_primary_container"
-                    android:textSize="17sp"
+                    android:textSize="17dp"
                     style="@style/Text.Icon" />
             </FrameLayout>
 
@@ -162,7 +162,7 @@
                     android:layout_height="match_parent"
                     android:text="@string/ic_gps_off"
                     android:textColor="@color/on_primary_container"
-                    android:textSize="17sp"
+                    android:textSize="17dp"
                     style="@style/Text.Icon" />
             </FrameLayout>
 
@@ -209,7 +209,7 @@
                     android:layout_height="match_parent"
                     android:text="@string/ic_signal_disconnected"
                     android:textColor="@color/on_primary_container"
-                    android:textSize="17sp"
+                    android:textSize="17dp"
                     style="@style/Text.Icon" />
             </FrameLayout>
 
@@ -256,7 +256,7 @@
                     android:layout_height="match_parent"
                     android:text="@string/ic_settings"
                     android:textColor="@color/on_primary_container"
-                    android:textSize="17sp"
+                    android:textSize="17dp"
                     style="@style/Text.Icon" />
             </FrameLayout>
 
