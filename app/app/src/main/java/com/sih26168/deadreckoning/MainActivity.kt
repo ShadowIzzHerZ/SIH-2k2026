@@ -584,12 +584,22 @@ class MainActivity : AppCompatActivity() {
             replayIndex = (replayIndex + 1) % replayData.rows.size
             return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad, true)
         }
-        val loc = locationReader.lastLocation
-        val hasFix = locationReader.hasRecentFix() && loc != null
-        val hasRoughFix = locationReader.hasAnyRecentFix() && loc != null
+        // While fusion has a live GPS fix, everything (marker included)
+        // comes from that fix; a newer network fix only matters for the
+        // rough marker when there's no GPS at all.
+        val fusionFix = locationReader.lastFusionFix
+        val hasFix = locationReader.hasRecentFix() && fusionFix != null
+        val loc = if (hasFix) fusionFix else locationReader.lastLocation
+        val hasRoughFix = hasFix || (locationReader.hasAnyRecentFix() && loc != null)
+        val speed = if (loc != null) {
+            stationaryFilteredSpeed(
+                loc.speed,
+                if (loc.hasSpeedAccuracy()) loc.speedAccuracyMetersPerSecond else Float.NaN,
+            )
+        } else 0f
         return Sample(
             sensorReader.lastAccel, sensorReader.lastGyro, hasFix, hasRoughFix,
-            loc?.latitude ?: 0.0, loc?.longitude ?: 0.0, loc?.speed ?: 0f,
+            loc?.latitude ?: 0.0, loc?.longitude ?: 0.0, speed,
             if (loc != null) Calibration.compassDegToMathRad(loc.bearing) else 0f,
             loc?.hasBearing() == true,
         )
