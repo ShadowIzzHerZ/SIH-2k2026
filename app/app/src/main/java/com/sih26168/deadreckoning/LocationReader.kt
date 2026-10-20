@@ -28,11 +28,18 @@ class LocationReader(private val context: Context) : LocationListener {
         private set
     @Volatile var lastFixUptimeMs: Long = 0
         private set
-    // True while lastLocation is only start()'s getLastKnownLocation()
-    // seed: fine for placing the map marker, but it can be minutes or
-    // hours old, so its speed and bearing must not reach fusion or yaw
-    // calibration as a live fix. Cleared by the first real update.
-    @Volatile private var lastIsSeed = false
+    // Newest live fix with a Doppler speed (in practice: from GPS), the
+    // only one fusion and yaw calibration read. Kept apart from
+    // lastLocation because a NETWORK_PROVIDER fix (no speed, no bearing)
+    // landing there used to replace a good GPS fix: hasRecentFix() went
+    // false, fusion dropped to BLACKOUT, and the next GPS fix brought it
+    // back through BLEND ("GPS reconnecting"), every time the network
+    // provider delivered, while GPS itself never stopped. Only set from
+    // onLocationChanged, so start()'s cached getLastKnownLocation() seed
+    // (minutes or hours old) places the marker but never reaches fusion.
+    @Volatile var lastFusionFix: Location? = null
+        private set
+    @Volatile private var lastFusionFixUptimeMs: Long = 0
 
     @SuppressLint("MissingPermission")  // caller (MainActivity) checks permission before start()
     fun start() {
@@ -71,7 +78,6 @@ class LocationReader(private val context: Context) : LocationListener {
             ?.let {
                 lastLocation = it
                 lastFixUptimeMs = SystemClock.elapsedRealtime()
-                lastIsSeed = true
             }
     }
 
@@ -82,15 +88,21 @@ class LocationReader(private val context: Context) : LocationListener {
     /** No fix within this window counts as a blackout, even without the
      * manual demo toggle — a real device losing satellite lock (tunnel,
      * underground parking) stops delivering updates rather than reporting
-     * "unavailable" explicitly. Requires hasSpeed()/hasBearing() because
-     * fusion.tick() feeds gnssSpeed/gnssHeadingRad straight into the
-     * GNSS_TRACKING math — this is "good enough for fusion", not "any fix
-     * at all". See hasAnyRecentFix() for the weaker check the map marker
-     * uses instead. */
-    fun hasRecentFix(maxAgeMs: Long = 2000L): Boolean {
-        val loc = lastLocation ?: return false
-        return !lastIsSeed &&
-            SystemClock.elapsedRealtime() - lastFixUptimeMs < maxAgeMs && loc.hasSpeed() && loc.hasBearing()
+     * "unavailable" explicitly. Reads lastFusionFix, not lastLocation, so a
+     * speedless network fix can't knock out a live GPS one.
+     *
+     * Needs hasSpeed() but no longer hasBearing(): a stationary GPS chip
+     * reports a valid fix with zero speed and no course, and requiring a
+     * bearing turned every stop into a fake blackout (speed then came from
+     * dead reckoning and drifted). FusionEngine.tick() already keeps its
+     * previous heading when gnssHasBearing is false, and yaw calibration
+     * checks hasBearing itself.
+     *
+     * 3 s instead of 2 s: GPS indoors or under cover arrives at ~1 Hz with
+     * the odd 2 s gap, which on its own flipped tracking off and on. */
+    fun hasRecentFix(maxAgeMs: Long = 3000L): Boolean {
+        val loc = lastFusionFix ?: return false
+        return SystemClock.elapsedRealtime() - lastFusionFixUptimeMs < maxAgeMs && loc.hasSpeed()
     }
 
     /** Weaker than hasRecentFix() — just "do we know roughly where the
@@ -120,9 +132,13 @@ class LocationReader(private val context: Context) : LocationListener {
     }
 
     override fun onLocationChanged(location: Location) {
+        val now = SystemClock.elapsedRealtime()
         lastLocation = location
-        lastFixUptimeMs = SystemClock.elapsedRealtime()
-        lastIsSeed = false
+        lastFixUptimeMs = now
+        if (location.hasSpeed()) {
+            lastFusionFix = location
+            lastFusionFixUptimeMs = now
+        }
     }
 
     @Deprecated("Deprecated in Java", ReplaceWith(""))
@@ -136,3 +152,21 @@ class LocationReader(private val context: Context) : LocationListener {
  * doesn't matter, see LocationReader.start(). */
 internal fun locationProvidersToRequest(allProviders: List<String>): List<String> =
     listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).filter { it in allProviders }
+
+/** GNSS Doppler speed with the stationary noise floor removed. A phone
+ * lying still typically still reports a few tenths of a m/s, more than
+ * 1 m/s indoors with multipath, and fusion shows that speed as-is, so
+ * the speed tile jittered while nobody moved. Anything under [floorMps], or under one
+ * reported standard deviation ([speedAccuracyMps], NaN when the chip
+ * gives none) while still slow, reads as 0. Real motion above
+ * [maxNoiseMps] always passes through untouched. */
+internal fun stationaryFilteredSpeed(
+    speedMps: Float,
+    speedAccuracyMps: Float,
+    floorMps: Float = 0.5f,
+    maxNoiseMps: Float = 2.0f,
+): Float {
+    if (speedMps < floorMps) return 0f
+    if (speedMps < maxNoiseMps && !speedAccuracyMps.isNaN() && speedMps < speedAccuracyMps) return 0f
+    return speedMps
+}
