@@ -54,6 +54,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var sensorReader: SensorReader
     private lateinit var locationReader: LocationReader
+    // Raw-IMU stillness over the last 2 s, so GNSS speed noise at rest reads as 0.
+    private val stillness = StillnessDetector()
     // 6 real recorded drives (Demo 1-6) — every one a genuine DevRecorder
     // capture from live testing in Jalandhar, Punjab (see
     // data/own_recordings/), not comma2k19/synthetic data — plus Demo 7,
@@ -591,10 +593,14 @@ class MainActivity : AppCompatActivity() {
         val hasFix = locationReader.hasRecentFix() && fusionFix != null
         val loc = if (hasFix) fusionFix else locationReader.lastLocation
         val hasRoughFix = hasFix || (locationReader.hasAnyRecentFix() && loc != null)
+        stillness.add(sensorReader.lastAccel, sensorReader.lastGyro)
         val speed = if (loc != null) {
-            stationaryFilteredSpeed(
-                loc.speed,
-                if (loc.hasSpeedAccuracy()) loc.speedAccuracyMetersPerSecond else Float.NaN,
+            speedWhileStill(
+                stationaryFilteredSpeed(
+                    loc.speed,
+                    if (loc.hasSpeedAccuracy()) loc.speedAccuracyMetersPerSecond else Float.NaN,
+                ),
+                stillness.isStill,
             )
         } else 0f
         return Sample(
