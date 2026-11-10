@@ -5,6 +5,7 @@
     <string name="calibrating_short">Calibrating…</string>
     <string name="simulate_blackout">Simulate GNSS blackout (demo)</string>
     <string name="replay_real_drive">Replay real recorded drive (demo)</string>
+    <string name="replay_loading">Loading the recorded drive…</string>
     <string name="replay_fallback_title">No GPS signal here?</string>
     <string name="replay_fallback_body">Run the tracker on a real recorded drive instead.</string>
     <string name="demo_1_label">Demo 1 — Jalandhar, Sept 9 · 19:08 (24 min)</string>

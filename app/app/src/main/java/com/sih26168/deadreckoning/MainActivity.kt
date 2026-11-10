@@ -85,7 +85,9 @@ class MainActivity : AppCompatActivity() {
     private var calibration = CalibrationManager()
     private lateinit var model: BiasCorrectionModel
     private lateinit var fusion: FusionEngine
-    private lateinit var mapMatcher: MapMatcher
+    // Null until the road graph (about 460 KB of JSON) has been parsed on a
+    // background thread at startup; until then nothing is map-matched.
+    private var mapMatcher: MapMatcher? = null
 
     // ---- Top bar ----
     private lateinit var headerIcon: ImageView
@@ -416,7 +418,10 @@ class MainActivity : AppCompatActivity() {
             activityScope.launch { ModelUpdater.checkForUpdate(applicationContext) }
         }
         fusion = FusionEngine(model)
-        mapMatcher = MapMatcher(RoadGraph(this))
+        Thread({
+            val matcher = MapMatcher(RoadGraph(applicationContext))
+            runOnUiThread { mapMatcher = matcher }
+        }, "road-graph-load").start()
         devRecorder = DevRecorder(this)
 
         replayToggle.setOnCheckedChangeListener { _, checked ->
@@ -508,7 +513,7 @@ class MainActivity : AppCompatActivity() {
      * filter" button semantics exactly, just also reachable from the nav. */
     private fun performResetFilter() {
         fusion.reset()
-        mapMatcher.reset()
+        mapMatcher?.reset()
         roadMapView.clear()
         previousFusionMode = null
         blackoutStartUptimeMs = null
@@ -725,10 +730,19 @@ class MainActivity : AppCompatActivity() {
         // +1 turns that into 0, coerced back up to a safe Demo 1 default
         // rather than an invalid replaySources[-1] index.
         val demo = (demoRadioIds.indexOf(demoSelector.checkedRadioButtonId) + 1).coerceAtLeast(1)
+        // A drive picked before the prefetch thread has parsed it: parse it
+        // on its own thread and wait for it here, instead of letting
+        // readSample's .value parse it (or wait for the prefetch thread to
+        // work through the drives before it) on the main thread.
+        if (usingReplay && !replaySources[demo - 1].isInitialized()) {
+            loadReplayInBackground(demo - 1)
+            tickHandler.postDelayed(::tick, tickIntervalMs)
+            return
+        }
         if (usingReplay != wasReplaying || (usingReplay && demo != wasDemo)) {
             calibration = CalibrationManager()
             fusion.reset()
-            mapMatcher.reset()
+            mapMatcher?.reset()
             roadMapView.clear()
             replayIndex = 0
             wasReplaying = usingReplay
@@ -882,7 +896,7 @@ class MainActivity : AppCompatActivity() {
         val s = fusion.state
         fusion.localXYToLatLon(s.x, s.y)?.let { (lat, lon) ->
             roadMapView.addPoint(lat, lon, s.mode)
-            mapMatcher.match(lat, lon, s.heading)?.let { m ->
+            mapMatcher?.match(lat, lon, s.heading)?.let { m ->
                 roadMapView.addMatchedPoint(m.lat, m.lon)
             }
         }
@@ -891,6 +905,15 @@ class MainActivity : AppCompatActivity() {
         updateTelemetryTiles(s.speed, s.heading)
 
         tickHandler.postDelayed(::tick, tickIntervalMs)
+    }
+
+    private val replayLoadsStarted = mutableSetOf<Int>()
+
+    private fun loadReplayInBackground(index: Int) {
+        if (!replayLoadsStarted.add(index)) return
+        val source = replaySources[index]
+        Thread({ source.value }, "replay-load-$index").start()
+        Toast.makeText(this, R.string.replay_loading, Toast.LENGTH_SHORT).show()
     }
 
     private fun showCalibrating(detail: String) {
