@@ -90,6 +90,7 @@
     <string name="banner_gnss_body">Live position from GPS</string>
     <string name="banner_blackout_title">GPS signal dropped</string>
     <string name="banner_blackout_body">Tracking your path with motion sensors</string>
+    <string name="banner_blackout_body_on_foot">On foot: holding your walking pace, turning with the gyroscope</string>
     <string name="banner_blend_title">GPS reconnecting</string>
     <string name="banner_blend_body">Blending back to GPS over 2s</string>
     <string name="badge_simulated">Simulated</string>
