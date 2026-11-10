@@ -60,6 +60,18 @@ def leveling_rotation(gravity_phone: np.ndarray) -> np.ndarray:
     target = np.array([0.0, 0.0, 1.0])
     v = gravity_phone / np.linalg.norm(gravity_phone)
 
+    # A sensor mounted z-down (comma2k19's x-forward / y-right / z-down
+    # device, a phone lying face down) reads gravity near -z. The shortest
+    # rotation from there to +z is a ~180 degree turn about a horizontal axis
+    # set by the tiny tilt components, so the yaw it leaves is arbitrary:
+    # tilts of 0.01 gave 180, 0, -90 or 147 degrees. Turning 180 degrees
+    # about x first makes the rest a small tilt with no yaw. Only well below
+    # the horizon, so a phone standing upright in a holder (gravity near
+    # the x-y plane, z either sign) keeps the continuous shortest rotation.
+    if v[2] < -0.5:
+        flip_x = np.diag([1.0, -1.0, -1.0])
+        return leveling_rotation(flip_x @ v) @ flip_x
+
     axis = np.cross(v, target)
     s = np.linalg.norm(axis)
     c = np.dot(v, target)
