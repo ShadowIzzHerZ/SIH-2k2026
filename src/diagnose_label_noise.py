@@ -35,11 +35,20 @@ from pathlib import Path
 
 import numpy as np
 
-from src.data.io_vnbd_loader import load_sequence
+from src.data.io_vnbd_loader import compass_deg_to_xy_unit, load_sequence
 
 
 def wrap_deg(d: np.ndarray) -> np.ndarray:
     return (d + 180.0) % 360.0 - 180.0
+
+
+def label_heading_ccw_deg(heading_gt: np.ndarray) -> np.ndarray:
+    """heading_gt is a compass bearing (0=N, clockwise); gz is positive
+    counter-clockwise. Convert the bearing to a CCW math angle the same way
+    the rest of src/ does (compass_deg_to_xy_unit, then atan2), so a left
+    turn makes both deltas positive."""
+    unit = compass_deg_to_xy_unit(heading_gt)
+    return np.degrees(np.arctan2(unit[..., 1], unit[..., 0]))
 
 
 def main():
@@ -81,7 +90,8 @@ def main():
         gz = seq.gyro[:-1, 2][valid_dt]  # yaw rate at step start, rad/s
         gyro_delta_deg = np.degrees(gz * dt[valid_dt])
 
-        label_delta_deg = wrap_deg(seq.heading_gt[1:][valid_dt] - seq.heading_gt[:-1][valid_dt])
+        label_ccw_deg = label_heading_ccw_deg(seq.heading_gt)
+        label_delta_deg = wrap_deg(label_ccw_deg[1:][valid_dt] - label_ccw_deg[:-1][valid_dt])
 
         speed_at_step = seq.speed_gt[:-1][valid_dt]
 
