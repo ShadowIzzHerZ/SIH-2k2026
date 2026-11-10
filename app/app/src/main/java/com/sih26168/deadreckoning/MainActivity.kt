@@ -765,6 +765,12 @@ class MainActivity : AppCompatActivity() {
             calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
         }
 
+        // Yaw timed out to a best-effort estimate: keep offering it real
+        // moving samples so it can still lock in properly mid-trip.
+        if (!calibration.yawLocked && sample.hasFix && sample.hasBearing) {
+            calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
+        }
+
         val calAccel = calibration.calibrate(sample.rawAccel)
         val calGyro = calibration.calibrate(sample.rawGyro)
 
