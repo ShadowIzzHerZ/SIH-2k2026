@@ -14,8 +14,8 @@ Needs a secret key with Storage write access in the environment. Never
 commit it, and never put it in the app; phones only read the public bucket.
 
     export SUPABASE_SECRET_KEY=...   # Project Settings > API Keys > Secret keys
-    python scripts/publish_model.py checkpoints/dead_reckoning_model_v3.onnx --version 3
-    python scripts/publish_model.py <model.onnx> --version 3 --dry-run   # check only
+    python scripts/publish_model.py path/to/model.onnx --version 3
+    python scripts/publish_model.py path/to/model.onnx --version 3 --dry-run   # check only
 
 To roll back, publish the older model again under a new, higher version.
 """
