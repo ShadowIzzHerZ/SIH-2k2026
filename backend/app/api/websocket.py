@@ -278,7 +278,8 @@ async def queue_worker():
                 "movement_state": fused_state.get("movement_state", "REST"),
                 "step_count": fused_state.get("step_count", 0),
                 "is_backlog": is_backlog,
-                "is_verified": True
+                # Samples older than the filter state are stored but not fused (see process_sample)
+                "is_verified": not fused_state.get("stale", False)
             }
             await _send_to_observers(device_id, json.dumps(payload_out))
 
