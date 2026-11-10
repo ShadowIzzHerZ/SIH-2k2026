@@ -3,4 +3,7 @@
     <!-- Exposes only DevRecorder's own recordings/ subfolder, not the
          app's whole external-files area. -->
     <external-files-path name="recordings" path="recordings/" />
+    <!-- Internal-storage fallback DevRecorder uses when external storage
+         is unavailable. -->
+    <files-path name="recordings_internal" path="recordings/" />
 </paths>
