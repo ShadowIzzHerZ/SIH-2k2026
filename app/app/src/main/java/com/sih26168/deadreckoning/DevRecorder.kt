@@ -76,12 +76,7 @@ class DevRecorder(private val context: Context) {
     ) {
         val w = writer ?: return
         val t = (System.nanoTime() - startNanos) / 1e9
-        val fix = if (hasFix) "%.7f,%.7f,%.3f,%.2f".format(lat, lon, speed, bearingDeg) else ",,,"
-        w.append(
-            "%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%s\n".format(
-                t, accel[0], accel[1], accel[2], gyro[0], gyro[1], gyro[2], fix,
-            )
-        )
+        w.append(formatRecordingRow(t, accel, gyro, hasFix, lat, lon, speed, bearingDeg))
         sampleCount++
     }
 
@@ -93,4 +88,26 @@ class DevRecorder(private val context: Context) {
         writer = null
         return currentFile
     }
+}
+
+/** One CSV row of DevRecorder's recording, newline included. Always
+ * formatted with Locale.US: String.format uses the phone's default locale,
+ * and on a comma-decimal locale (de, fr, es, id, ...) "%.5f" writes
+ * "9,81000", which splits every number into two columns and breaks
+ * io_vnbd_loader.py's parsing of the file. */
+internal fun formatRecordingRow(
+    t: Double,
+    accel: FloatArray,
+    gyro: FloatArray,
+    hasFix: Boolean,
+    lat: Double,
+    lon: Double,
+    speed: Float,
+    bearingDeg: Float,
+): String {
+    val fix = if (hasFix) String.format(Locale.US, "%.7f,%.7f,%.3f,%.2f", lat, lon, speed, bearingDeg) else ",,,"
+    return String.format(
+        Locale.US, "%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%s\n",
+        t, accel[0], accel[1], accel[2], gyro[0], gyro[1], gyro[2], fix,
+    )
 }
