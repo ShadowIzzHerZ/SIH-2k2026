@@ -1,0 +1,35 @@
+# Keep secrets, local state and dev artifacts out of the image (`COPY . .`).
+# Runtime config comes from environment variables (docker-compose / host).
+
+# Secrets
+.env
+**/.env
+.env.*
+!.env.example
+
+# Local databases
+**/*.db
+**/*.sqlite3
+
+# Python caches / virtualenvs
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+venv/
+.venv/
+env/
+
+# Tests, docs and repo/editor metadata (not needed at runtime)
+tests/
+*.pdf
+.git/
+.github/
+.gitignore
+.vscode/
+.idea/
+*.swp
+**/*.log
