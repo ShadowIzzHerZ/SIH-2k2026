@@ -136,7 +136,9 @@ class IMUKalmanFilter:
     def update_magnetometer(self, mag_body: np.ndarray):
         """Measurement update using tilt-compensated compass heading."""
         roll, pitch = float(self.x[6, 0]), float(self.x[7, 0])
-        mag_yaw = calculate_tilt_compensated_heading(mag_body, roll, pitch)
+        # The magnetometer heading is measured from North; the state yaw is measured
+        # from East (vx = cos(yaw) is East), so shift by +90 deg into the state frame.
+        mag_yaw = calculate_tilt_compensated_heading(mag_body, roll, pitch) + np.pi / 2
 
         H = np.zeros((1, 9))
         H[0, 8] = 1.0
