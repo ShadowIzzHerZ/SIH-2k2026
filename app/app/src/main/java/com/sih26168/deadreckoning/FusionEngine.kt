@@ -157,6 +157,27 @@ data class FusionState(
  * device is stationary, tick() now keeps the position where the hold
  * started and ignores fixes that stay inside the fix's own accuracy
  * radius. See [staticHold].
+ *
+ * On foot: every rule above patches one symptom of the same cause. The
+ * network and the forward-acceleration integral describe a phone fixed in
+ * a vehicle; in a walker's hand the "forward" axis is not the direction of
+ * travel and the accelerometer mostly sees steps and the swinging arm.
+ * Measured on the recordings in data/own_recordings (all on foot, under
+ * 2.3 m/s) with 60 s blackouts: the network path ends a median 55-80% of
+ * the distance walked away from the truth, and plain integration over
+ * 150%. A walker's speed barely changes, though, and the turn rate about
+ * the vertical does not care how the phone is held. So a blackout that
+ * starts at walking pace with a walking signature in the IMU (see
+ * [looksOnFoot]) skips the network: speed stays at the last GNSS speed
+ * while the steps go on and decays when they stop, and heading follows the
+ * gyro projected on the low-passed gravity direction. The same blackouts
+ * then end a median 24-39% off (the lower figure on the 9 September
+ * recordings, the higher on the six bundled as replays, which
+ * FusionEngineTest replays through this class). Much of what is left is
+ * the GNSS heading and position noise at walking pace, which both the
+ * starting heading and the comparison rest on.
+ * A blackout entered above [onFootMaxSpeed], or without the signature, is
+ * handled exactly as before.
  */
 class FusionEngine(
     private val model: Predictor,
@@ -220,6 +241,28 @@ class FusionEngine(
     private val staticHoldMinRadiusM: Float = 10f,
     private val staticHoldAccuracyFactor: Float = 1.5f,
     private val staticHoldMaxRadiusM: Float = 60f,
+    // On-foot mode (see class doc). A blackout entered below this speed
+    // (and above zuptForceRestSpeed, where the device was parked) is
+    // checked for a walking signature. 3 m/s is a jog; the recordings top
+    // out at 2.3 m/s.
+    private val onFootMaxSpeed: Float = 3.0f,
+    // The walking signature, both over the same samples: standard
+    // deviation of the accel magnitude (m/s^2) and RMS of the gyro
+    // magnitude (rad/s). Neither depends on how the phone is held. In the
+    // recordings, 2 s windows while walking measure 0.97-4.6 and 0.42-2.1
+    // (1st-99th percentile); the bundled highway drive 0.24-1.09 and under
+    // 0.06, so a mounted phone fails the gyro test by a wide margin even
+    // on a rough road.
+    private val onFootAccelStd: Float = 0.8f,
+    private val onFootGyroRms: Float = 0.25f,
+    // Samples behind the per-sample "still walking?" check during an
+    // on-foot blackout (2 s). The decision to enter on-foot mode uses the
+    // whole rolling window instead, so one bump can't trigger it.
+    private val onFootActivitySamples: Int = 20,
+    // Time constant of the gravity low-pass the on-foot heading uses.
+    // Long enough to average over steps, short enough to follow a change
+    // of grip; 2-5 s measured the same on the recordings.
+    private val gravityTauSeconds: Float = 2.0f,
 ) {
     var state = FusionState()
         private set
@@ -254,6 +297,18 @@ class FusionEngine(
     private var chunkBlendFrom = FusionState()
 
     private var wasAvailable = true
+
+    // On-foot mode. rollingYaw holds, for each rollingWindow sample, the
+    // turn rate about the vertical (see verticalYawRate); gravity is the
+    // low-passed accel that defines the vertical.
+    private val rollingYaw = ArrayDeque<Float>(windowSize)
+    private val gravity = FloatArray(3)
+    private var gravitySeeded = false
+
+    /** True while the current (or last) blackout is being handled as a
+     * walk rather than a drive. Decided once, when the blackout starts. */
+    var onFootBlackout = false
+        private set
 
     // Static hold: where the position is pinned while stationary, and the
     // accuracy of the fix it was pinned on (0 = unknown).
@@ -402,6 +457,8 @@ class FusionEngine(
 
         if (rollingWindow.size >= windowSize) rollingWindow.removeFirst()
         rollingWindow.addLast(calibratedAccel + calibratedGyro)
+        if (rollingYaw.size >= windowSize) rollingYaw.removeFirst()
+        rollingYaw.addLast(verticalYawRate(calibratedAccel, calibratedGyro))
 
         if (!effectiveAvailable && wasAvailable) {
             // Blackout just started fresh (from GNSS_TRACKING or BLEND) —
@@ -418,6 +475,11 @@ class FusionEngine(
             // doc for the real runaway-speed bug this fixes (ZUPT gating
             // on the live *integrated* v instead of this).
             blackoutEntrySpeed = state.speed
+            // Also frozen here: whether this blackout is a walk (see class
+            // doc). The window is full by now and ends on this sample, so
+            // it is the 5 s that led into the blackout.
+            onFootBlackout = blackoutEntrySpeed >= zuptForceRestSpeed && blackoutEntrySpeed < onFootMaxSpeed &&
+                looksOnFoot(rollingWindow, 0, rollingWindow.size)
             pending = 0
             chunkBlendRemaining = 0
         }
@@ -518,6 +580,10 @@ class FusionEngine(
      * GNSS-reconnect blend.
      */
     private fun resolveChunk() {
+        if (onFootBlackout) {
+            resolveOnFootChunk()
+            return
+        }
         val window = rollingWindow.toTypedArray()  // always windowSize once filled
         val corrections = model.predict(window)     // (windowSize, 2)
         val startIdx = window.size - pending
@@ -554,15 +620,91 @@ class FusionEngine(
             x += v * cos(th.toDouble()).toFloat() * dt
             y += v * sin(th.toDouble()).toFloat() * dt
         }
-        val resolved = FusionState(FusionMode.BLACKOUT, x, y, th, v)
+        finishChunk(FusionState(FusionMode.BLACKOUT, x, y, th, v))
+    }
 
-        // `state` right now is wherever the last tick's straight-line
-        // guess landed (see class/tick() docs) — ease the display from
-        // there toward the true resolved endpoint instead of snapping.
+    /** `state` right now is wherever the last tick's straight-line guess
+     * landed (see class/tick() docs) — ease the display from there toward
+     * the true resolved endpoint instead of snapping. */
+    private fun finishChunk(resolved: FusionState) {
         chunkBlendFrom = state.copy()
         chunkAnchor = resolved
         chunkBlendRemaining = chunkBlendSamples
         pending = 0
+    }
+
+    /**
+     * The on-foot counterpart of [resolveChunk] (see class doc): no
+     * network and no accelerometer integration. For each of the `pending`
+     * new samples, speed is the last GNSS speed while the 2 s ending on
+     * that sample still look like walking and decays as in ZUPT once they
+     * don't (the walker stopped), and heading turns by the gyro about the
+     * vertical. Heading is integrated in both cases: someone standing can
+     * still turn round.
+     */
+    private fun resolveOnFootChunk() {
+        val window = rollingWindow.toTypedArray()
+        val yaw = rollingYaw.toTypedArray()
+        var v = chunkAnchor.speed
+        var th = chunkAnchor.heading
+        var x = chunkAnchor.x
+        var y = chunkAnchor.y
+        for (i in window.size - pending until window.size) {
+            // The activity window ends on this sample; the first samples
+            // of the buffer share its first onFootActivitySamples.
+            val to = maxOf(i + 1, minOf(onFootActivitySamples, window.size))
+            val from = maxOf(0, to - onFootActivitySamples)
+            if (looksOnFoot(window.asList(), from, to)) v = blackoutEntrySpeed else v *= 0.7f
+            th = wrapAngle(th + yaw[i] * dt)
+            x += v * cos(th.toDouble()).toFloat() * dt
+            y += v * sin(th.toDouble()).toFloat() * dt
+        }
+        finishChunk(FusionState(FusionMode.BLACKOUT, x, y, th, v))
+    }
+
+    /** The walking signature over samples [from, to) of [samples] (rows of
+     * [ax,ay,az,gx,gy,gz]): the accel magnitude varies by more than
+     * [onFootAccelStd] (steps) and the gyro magnitude's RMS is above
+     * [onFootGyroRms] (a hand, not a mount). Magnitudes only, so the
+     * answer is the same in any frame. */
+    private fun looksOnFoot(samples: List<FloatArray>, from: Int, to: Int): Boolean {
+        val n = to - from
+        if (n < 2) return false
+        var sum = 0.0
+        var sumSq = 0.0
+        var gyroSq = 0.0
+        for (i in from until to) {
+            val s = samples[i]
+            val a2 = (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).toDouble()
+            sum += sqrt(a2)
+            sumSq += a2
+            gyroSq += (s[3] * s[3] + s[4] * s[4] + s[5] * s[5]).toDouble()
+        }
+        val mean = sum / n
+        val accelStd = sqrt(maxOf(0.0, sumSq / n - mean * mean))
+        val gyroRms = sqrt(gyroSq / n)
+        return accelStd > onFootAccelStd && gyroRms > onFootGyroRms
+    }
+
+    /** Turn rate about the vertical for one sample: the gyro projected on
+     * the low-passed accel direction, which is gravity however the phone
+     * is held (the frame the two are given in cancels out). With a level,
+     * z-up phone this is plain gz, the yaw rate [resolveChunk] uses.
+     * Falls back to gz while there is no usable gravity (free fall, or
+     * the all-zero accel some tests feed). */
+    private fun verticalYawRate(accel: FloatArray, gyro: FloatArray): Float {
+        if (accel[0].isFinite() && accel[1].isFinite() && accel[2].isFinite()) {
+            if (!gravitySeeded) {
+                accel.copyInto(gravity)
+                gravitySeeded = true
+            } else {
+                val alpha = (dt / gravityTauSeconds).coerceIn(0f, 1f)
+                for (i in 0 until 3) gravity[i] += alpha * (accel[i] - gravity[i])
+            }
+        }
+        val norm = sqrt((gravity[0] * gravity[0] + gravity[1] * gravity[1] + gravity[2] * gravity[2]).toDouble()).toFloat()
+        if (norm < 1f) return gyro[2]
+        return (gyro[0] * gravity[0] + gyro[1] * gravity[1] + gyro[2] * gravity[2]) / norm
     }
 
     /** True if a raw (pre-correction) calibrated sample [ax,ay,az,gx,gy,gz]
@@ -626,5 +768,9 @@ class FusionEngine(
         wasAvailable = true
         holdXY = null
         holdAccuracyM = 0f
+        rollingYaw.clear()
+        gravity.fill(0f)
+        gravitySeeded = false
+        onFootBlackout = false
     }
 }

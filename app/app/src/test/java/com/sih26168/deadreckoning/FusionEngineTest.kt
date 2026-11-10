@@ -471,4 +471,187 @@ class FusionEngineTest {
         val moved = sqrt(((engine.state.y - heldY) * (engine.state.y - heldY) + engine.state.x * engine.state.x).toDouble())
         assertTrue("drifted $moved m during a blackout entered at rest", moved < 0.5)
     }
+
+    // ------------------------------------------------------------ on foot
+
+    /** One tick of a phone carried by a walker heading east at the engine's
+     * heading 0: gravity plus a 1.8 Hz step bounce in the accel, the hand's
+     * wobble on the two horizontal gyro axes, and [turnRate] about the
+     * vertical. [tiltRad] turns the whole phone about its x axis, as when
+     * the grip changes after calibration. */
+    private fun walkTick(
+        engine: FusionEngine, i: Int, available: Boolean,
+        speed: Float = 1.2f, turnRate: Float = 0f, tiltRad: Float = 0f,
+    ) {
+        val phase = 2.0 * Math.PI * 1.8 * i * 0.1
+        val a = floatArrayOf((0.6 * sin(phase + 1.0)).toFloat(), (0.4 * sin(2 * phase)).toFloat(), (9.81 + 2.5 * sin(phase)).toFloat())
+        val g = floatArrayOf((0.6 * sin(phase)).toFloat(), (0.5 * cos(phase)).toFloat(), turnRate)
+        engine.tick(
+            calibratedAccel = tiltAboutX(a, tiltRad), calibratedGyro = tiltAboutX(g, tiltRad),
+            available = available, lat = 0.0, lon = 0.0, gnssSpeed = speed, gnssHeadingRad = 0f,
+        )
+    }
+
+    private fun tiltAboutX(v: FloatArray, rad: Float): FloatArray {
+        val c = cos(rad.toDouble()).toFloat()
+        val s = sin(rad.toDouble()).toFloat()
+        return floatArrayOf(v[0], c * v[1] - s * v[2], s * v[1] + c * v[2])
+    }
+
+    /** The reported runaway: walking pace when GNSS drops, and a network
+     * (out of its depth on a hand-held phone) adding 3 m/s^2 and a turn.
+     * On foot the network is not asked. */
+    @Test
+    fun `a walk carries on at its GNSS speed through a blackout whatever the network says`() {
+        val engine = FusionEngine(FakePredictor(deltaV = 3f, deltaTheta = 0.3f))
+        repeat(windowSize + 10) { walkTick(engine, it, available = true) }
+        repeat(6 * windowSize) { walkTick(engine, windowSize + 10 + it, available = false) }
+        assertTrue("expected an on-foot blackout", engine.onFootBlackout)
+        assertTrue("walked 36 m east, got x=${engine.state.x}", abs(engine.state.x - 36f) < 1.5f)
+        assertTrue("walked straight, got y=${engine.state.y}", abs(engine.state.y) < 2f)
+        assertTrue("speed should still be 1.2 m/s, got ${engine.state.speed}", abs(engine.state.speed - 1.2f) < 0.05f)
+    }
+
+    /** Heading comes from the gyro about gravity, so it survives a phone
+     * that is no longer held the way it was calibrated: here it is tilted
+     * 40 degrees, and the 0.157 rad/s turn is about the true vertical. */
+    @Test
+    fun `a turn on foot is followed with the phone tilted away from its calibration`() {
+        val tilt = Math.toRadians(40.0).toFloat()
+        val engine = FusionEngine(FakePredictor(0f, 0f))
+        repeat(windowSize + 10) { walkTick(engine, it, available = true, tiltRad = tilt) }
+        var i = windowSize + 10
+        repeat(2 * windowSize) { walkTick(engine, i++, available = false, turnRate = 0.157f, tiltRad = tilt) }
+        repeat(2 * windowSize) { walkTick(engine, i++, available = false, tiltRad = tilt) }
+        assertTrue("expected an on-foot blackout", engine.onFootBlackout)
+        val turned = angleDiff(engine.state.heading, (Math.PI / 2).toFloat())
+        assertTrue("expected a quarter turn left, heading is ${engine.state.heading} rad", turned < 0.15f)
+        assertTrue("after the turn the walk heads north, got y=${engine.state.y}", engine.state.y > 12f)
+    }
+
+    /** The walker stops (the steps end), then sets off again. */
+    @Test
+    fun `standing still on foot stops the position until the steps resume`() {
+        val engine = FusionEngine(FakePredictor(deltaV = 1f, deltaTheta = 0f))
+        repeat(windowSize + 10) { walkTick(engine, it, available = true) }
+        var i = windowSize + 10
+        repeat(2 * windowSize) { walkTick(engine, i++, available = false) }
+        val xWalked = engine.state.x
+        repeat(2 * windowSize) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0f, 0f, 9.81f), calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = false, lat = 0.0, lon = 0.0, gnssSpeed = 0f, gnssHeadingRad = 0f,
+            )
+        }
+        val xStopped = engine.state.x
+        // The 2 s activity window takes about 1.6 s to notice, then speed decays.
+        assertTrue("kept going ${xStopped - xWalked} m after stopping", xStopped - xWalked < 3.5f)
+        assertTrue("speed should be ~0 while standing, got ${engine.state.speed}", engine.state.speed < 0.05f)
+        repeat(2 * windowSize) { walkTick(engine, i++, available = false) }
+        assertTrue("should be walking again, moved ${engine.state.x - xStopped} m", engine.state.x - xStopped > 8f)
+    }
+
+    /** Slow, but smooth: a mounted phone in a vehicle pulling away has no
+     * walking signature, so the network path handles it as before. */
+    @Test
+    fun `a slow vehicle is not taken for a walk`() {
+        val engine = FusionEngine(FakePredictor(deltaV = 0.5f, deltaTheta = 0f))
+        val accel = floatArrayOf(0.6f, 0f, 9.81f)  // above the ZUPT quiet threshold
+        val gyro = floatArrayOf(0f, 0f, 0f)
+        repeat(windowSize + 10) { engine.tick(accel, gyro, true, 0.0, 0.0, 2f, 0f) }
+        // One chunk, then a second so the display has caught up with it.
+        repeat(windowSize + 10) { engine.tick(accel, gyro, false, 0.0, 0.0, 0f, 0f) }
+        assertTrue("a smooth signal must not enter on-foot mode", !engine.onFootBlackout)
+        assertTrue("the network's acceleration should have been integrated, speed is ${engine.state.speed}", engine.state.speed > 4f)
+    }
+
+    /** A phone being handled while its owner stands still shakes like a
+     * walk, but GNSS said it was parked: the forced-rest rule still wins. */
+    @Test
+    fun `a parked phone being handled does not walk off`() {
+        val engine = FusionEngine(FakePredictor(deltaV = 1f, deltaTheta = 0.2f))
+        repeat(windowSize + 10) { walkTick(engine, it, available = true, speed = 0f) }
+        repeat(4 * windowSize) { walkTick(engine, windowSize + 10 + it, available = false, speed = 0f) }
+        assertTrue("a blackout entered at rest must not be on foot", !engine.onFootBlackout)
+        assertTrue("moved ${distanceFromOrigin(engine)} m while parked", distanceFromOrigin(engine) < 0.5)
+    }
+
+    /** The bundled walking recordings (assets/replay_demo_*.json, real
+     * DevRecorder captures at walking pace): blackouts of [blackoutS]
+     * seconds, a new one every 15 s, scored as end-point error over distance
+     * walked. Returns the per-blackout drift in percent. */
+    private fun walkingReplayDrifts(asset: String, blackoutS: Int, engineFor: () -> FusionEngine): List<Double> {
+        val file = listOf(java.io.File("src/main/assets/$asset"), java.io.File("app/app/src/main/assets/$asset"), java.io.File("app/src/main/assets/$asset"))
+            .firstOrNull { it.exists() } ?: error("can't find asset $asset from ${java.io.File(".").absolutePath}")
+        val rows = org.json.JSONObject(file.readText()).getJSONArray("rows")
+        val n = rows.length()
+        fun f(i: Int, k: String) = rows.getJSONObject(i).getDouble(k).toFloat()
+        // Leveling from the first minute, as the app has it by then.
+        val rLevel = Calibration.levelingRotation(
+            Calibration.estimateGravityVector(List(600) { floatArrayOf(f(it, "ax"), f(it, "ay"), f(it, "az")) })
+        )
+        val blackout = blackoutS * 10
+        // The assets repeat the last fix on rows without one. Ticks since
+        // the position last changed, to leave out blackouts whose "truth"
+        // is a held fix (fixes normally arrive every second).
+        val held = IntArray(n)
+        for (i in 1 until n) {
+            val same = rows.getJSONObject(i).getDouble("lat") == rows.getJSONObject(i - 1).getDouble("lat") &&
+                rows.getJSONObject(i).getDouble("lon") == rows.getJSONObject(i - 1).getDouble("lon")
+            held[i] = if (same) held[i - 1] + 1 else 0
+        }
+        val drifts = ArrayList<Double>()
+        var start = 900
+        while (start + blackout < n) {
+            if ((start - 300 until start + blackout).any { held[it] > 30 }) {
+                start += 150
+                continue
+            }
+            val engine = engineFor()
+            var path = 0.0
+            var truthStart: FloatArray? = null
+            var prev: FloatArray? = null
+            for (i in start - 300 until start + blackout) {
+                val row = rows.getJSONObject(i)
+                val lat = row.getDouble("lat"); val lon = row.getDouble("lon")
+                engine.tick(
+                    calibratedAccel = Calibration.calibrateSample(floatArrayOf(f(i, "ax"), f(i, "ay"), f(i, "az")), rLevel, 0f),
+                    calibratedGyro = Calibration.calibrateSample(floatArrayOf(f(i, "gx"), f(i, "gy"), f(i, "gz")), rLevel, 0f),
+                    available = i < start, lat = lat, lon = lon,
+                    gnssSpeed = f(i, "speed"), gnssHeadingRad = Calibration.compassDegToMathRad(f(i, "bearing")),
+                )
+                val truth = engine.latLonToLocalXY(lat, lon)!!
+                if (i == start - 1) truthStart = truth
+                if (i >= start) path += sqrt(((truth[0] - prev!![0]) * (truth[0] - prev[0]) + (truth[1] - prev[1]) * (truth[1] - prev[1])).toDouble())
+                prev = truth
+            }
+            // Only blackouts spent walking: under 0.4 m/s on average is standing about.
+            if (path >= 0.4 * blackoutS) {
+                val ex = engine.state.x - prev!![0]
+                val ey = engine.state.y - prev[1]
+                drifts.add(100.0 * sqrt((ex * ex + ey * ey).toDouble()) / path)
+            }
+            start += 150
+        }
+        return drifts
+    }
+
+    private fun median(v: List<Double>): Double = v.sorted().let { (it[(it.size - 1) / 2] + it[it.size / 2]) / 2 }
+
+    /** On the real walking recordings, on-foot mode against the vehicle
+     * path with a network that adds nothing (plain integration, which the
+     * low-speed cap keeps within 4 m/s of the entry speed). */
+    @Test
+    fun `on the bundled walking recordings on-foot mode drifts far less than the vehicle path`() {
+        val assets = listOf("replay_demo1.json", "replay_demo2.json", "replay_demo_1305.json", "replay_demo_1332.json", "replay_demo_2117.json", "replay_demo_2142.json")
+        val onFoot = assets.flatMap { a -> walkingReplayDrifts(a, 60) { FusionEngine(FakePredictor(0f, 0f)) } }
+        val vehicle = assets.flatMap { a -> walkingReplayDrifts(a, 60) { FusionEngine(FakePredictor(0f, 0f), onFootMaxSpeed = 0f) } }
+        assertTrue("expected a fair number of walking blackouts, got ${onFoot.size}", onFoot.size >= 20)
+        val mOnFoot = median(onFoot)
+        val mVehicle = median(vehicle)
+        println("walking recordings, 60 s blackouts: on foot median ${"%.1f".format(mOnFoot)}% of ${onFoot.size}, vehicle path median ${"%.1f".format(mVehicle)}% of ${vehicle.size}")
+        // Measured: 39% on foot against 168% (and 68-79% for the real networks, scored offline).
+        assertTrue("on-foot median drift $mOnFoot% should be under 50%", mOnFoot < 50.0)
+        assertTrue("on-foot median $mOnFoot% should be under half the vehicle path's $mVehicle%", mOnFoot < 0.5 * mVehicle)
+    }
 }

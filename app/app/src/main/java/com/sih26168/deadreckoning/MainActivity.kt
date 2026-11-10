@@ -1031,7 +1031,13 @@ class MainActivity : AppCompatActivity() {
         val iconChipBg = modeIconChip.background.mutate()
         val (icon, chipTint, titleRes, bodyRes) = when (mode) {
             FusionMode.GNSS_TRACKING -> IconTintText(getString(R.string.ic_gps_not_fixed), R.color.status_gnss, R.string.banner_gnss_title, R.string.banner_gnss_body)
-            FusionMode.BLACKOUT -> IconTintText(getString(R.string.ic_gps_off), R.color.status_blackout, R.string.banner_blackout_title, R.string.banner_blackout_body)
+            // On foot the engine holds walking pace and follows the gyro
+            // instead of running the network (see FusionEngine); say so,
+            // so it can be told apart on the phone.
+            FusionMode.BLACKOUT -> IconTintText(
+                getString(R.string.ic_gps_off), R.color.status_blackout, R.string.banner_blackout_title,
+                if (fusion.onFootBlackout) R.string.banner_blackout_body_on_foot else R.string.banner_blackout_body,
+            )
             FusionMode.BLEND -> IconTintText(getString(R.string.ic_sync), R.color.status_blend, R.string.banner_blend_title, R.string.banner_blend_body)
         }
         modeIconText.text = icon
