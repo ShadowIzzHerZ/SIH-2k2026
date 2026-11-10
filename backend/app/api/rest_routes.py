@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db_session
 from app.core.auth import create_access_token
 from app.cache.redis_client import cache_manager
-from app.api.websocket import queue_mgr, active_connections, device_kalman_filters
+from app.api.websocket import queue_mgr, active_connections, device_kalman_filters, device_mode_overrides
 from app.db.crud import get_trajectory_history, get_last_known_position
 
 router = APIRouter()
@@ -171,12 +171,19 @@ async def get_device_latest_state(
 async def set_device_mode(device_id: str, req: SetModeRequest):
     """
     Switches operational mode between 'stationary' (rest ZUPT), 'moving', and 'adaptive'.
+    'stationary' and 'moving' are forced on every later packet, whatever mode the
+    packet itself carries; 'adaptive' clears the override.
     """
     valid_modes = {"stationary", "moving", "adaptive"}
     mode_clean = req.mode.lower().strip()
     if mode_clean not in valid_modes:
         return {"error": f"Invalid mode '{req.mode}'. Choose from: {list(valid_modes)}"}
     
+    if mode_clean == "adaptive":
+        device_mode_overrides.pop(device_id, None)
+    else:
+        device_mode_overrides[device_id] = mode_clean
+
     kf = device_kalman_filters.get(device_id)
     if kf:
         if mode_clean == "stationary":

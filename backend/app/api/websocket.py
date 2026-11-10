@@ -24,6 +24,9 @@ settings = get_settings()
 queue_mgr = IngestionQueueManager()
 active_connections: Dict[str, WebSocket] = {}
 device_kalman_filters: Dict[str, IMUKalmanFilter] = {}
+# Mode forced via POST /device/{id}/mode ('stationary' or 'moving'). It wins over
+# the per-packet "mode" until it is cleared by setting the mode back to 'adaptive'.
+device_mode_overrides: Dict[str, str] = {}
 
 # Per-device in-memory state is freed after DEVICE_IDLE_TTL_SEC with no traffic and
 # no open socket. The filter state is also cached (Redis / memory fallback) after
@@ -206,6 +209,10 @@ async def queue_worker():
                 kf = await restore_or_init_filter(device_id)
                 device_kalman_filters[device_id] = kf
             _touch_device(device_id)
+
+            forced_mode = device_mode_overrides.get(device_id)
+            if forced_mode:
+                packet = {**packet, "mode": forced_mode}
 
             # 2. 9-DOF IMU Kalman Filter Statistical Sensor Fusion
             fused_state = kf.process_sample(packet)
