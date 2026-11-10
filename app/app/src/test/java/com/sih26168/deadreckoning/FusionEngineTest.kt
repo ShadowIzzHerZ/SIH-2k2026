@@ -291,4 +291,43 @@ class FusionEngineTest {
             angleDiff(engine.state.heading, realHeading) < 0.01f,
         )
     }
+
+    /** The GNSS-reconnect blend has to take the short way round the
+     * circle. Blending linearly in raw radians from just under +pi to just
+     * over -pi (two headings 0.28 rad apart, both pointing west) swept
+     * through 0 — the displayed heading spun to due east mid-blend. */
+    @Test
+    fun `reconnect blend across the plus-minus pi seam stays pointing the same way`() {
+        val engine = FusionEngine(FakePredictor(deltaV = 0f, deltaTheta = 0f))
+        val westish = 3.0f
+        repeat(windowSize + 5) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0f, 0f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = true,
+                lat = 0.0, lon = 0.0, gnssSpeed = 10f, gnssHeadingRad = westish,
+            )
+        }
+        repeat(10) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0f, 0f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = false,
+                lat = 0.0, lon = 0.0, gnssSpeed = 10f, gnssHeadingRad = westish,
+            )
+        }
+        val otherSideOfSeam = -3.0f
+        repeat(25) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0f, 0f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = true,
+                lat = 0.0, lon = 0.0, gnssSpeed = 10f, gnssHeadingRad = otherSideOfSeam,
+            )
+            assertTrue(
+                "blend heading ${engine.state.heading} left the short arc between $westish and $otherSideOfSeam",
+                angleDiff(engine.state.heading, Math.PI.toFloat()) <= 0.3f,
+            )
+        }
+    }
 }
