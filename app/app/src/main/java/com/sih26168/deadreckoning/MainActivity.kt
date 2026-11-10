@@ -559,6 +559,7 @@ class MainActivity : AppCompatActivity() {
 
         activityScope.launch {
             SupabaseAuthClient.recordDriveSession(
+                context = applicationContext,
                 session = session,
                 deviceId = deviceId,
                 startedAt = startedAt,
