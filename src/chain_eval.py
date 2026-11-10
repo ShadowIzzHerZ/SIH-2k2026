@@ -24,6 +24,8 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from src.models.strapdown_ins import path_length
+
 
 def build_chains(dataset, window_size: int, n_chunks: int, chain_stride_chunks: int = 2,
                  max_chains: int | None = 800, seed: int = 0,
@@ -106,7 +108,7 @@ def chained_drift(model, dataset, device, dt: float, window_size: int = 50, n_ch
             p = p + step.sum(dim=1)
             v, th = speed[:, -1], heading[:, -1]
             gt_end = gt_end + pos_gt[:, -1, :]
-            dist = dist + torch.linalg.norm(pos_gt[:, 1:] - pos_gt[:, :-1], dim=-1).sum(dim=1)
+            dist = dist + path_length(pos_gt)
         drifts.extend((100.0 * torch.linalg.norm(p - gt_end, dim=-1) / dist.clamp(min=1e-6)).cpu().tolist())
     d = np.array(drifts)
     return {"n_chains": int(len(d)), "chain_seconds": n_chunks * window_size * dt,
