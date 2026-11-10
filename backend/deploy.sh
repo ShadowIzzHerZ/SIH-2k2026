@@ -6,6 +6,10 @@
 
 set -e
 
+# Run from the backend/ directory (where .env.example and docker-compose.yml live)
+# no matter where the script is invoked from, e.g. `bash backend/deploy.sh`.
+cd "$(dirname "$0")"
+
 echo "========================================================="
 echo " Starting SIH Dead Reckoning Backend Deployment..."
 echo "========================================================="
