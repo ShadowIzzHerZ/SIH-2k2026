@@ -194,7 +194,8 @@ def build_windows(seq: ImuSequence, window_size: int, stride: int, dt: float,
     # first sample, one step behind the prediction: a perfect constant-
     # velocity prediction scored ~2% drift at T=50, and chained windows
     # dropped one true step per chunk boundary.)
-    for start in range(1, n - window_size, stride):
+    # + 1 so the last window that fits exactly (end == n) is kept.
+    for start in range(1, n - window_size + 1, stride):
         end = start + window_size
         anchor = start - 1
         w_accel = seq.accel[start:end]
