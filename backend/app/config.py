@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     IMU_SAMPLING_RATE_HZ: float = 10.0         # 10 Hz sampling frequency (100ms intervals)
     BACKLOG_CHUNK_SIZE: int = 20               # Max packets to yield per backlog chunk
     MAX_QUEUE_SIZE: int = 50000
+    DEVICE_IDLE_TTL_SEC: int = 900             # Free in-memory per-device state after this long with no traffic or connection
 
     class Config:
         env_file = ".env"

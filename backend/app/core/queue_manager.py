@@ -3,7 +3,6 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
-from collections import defaultdict
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -36,13 +35,14 @@ class IngestionQueueManager:
     """
     def __init__(self, maxsize: int = 50000):
         self._queue: asyncio.PriorityQueue[IngestionItem] = asyncio.PriorityQueue(maxsize=maxsize)
-        self._device_seq_counters: Dict[str, int] = defaultdict(int)
-        self._reorder_buffers: Dict[str, List[IngestionItem]] = defaultdict(list)
+        # Last seq seen per device, used to number live frames that arrive without one
+        self._device_seq_counters: Dict[str, int] = {}
         self._is_running = False
 
     async def enqueue_live(self, device_id: str, packet: Dict[str, Any]) -> bool:
         """Enqueue single real-time frame with Priority 0."""
-        seq = packet.get("seq", self._device_seq_counters[device_id] + 1)
+        seq = packet.get("seq", self._device_seq_counters.get(device_id, 0) + 1)
+        self._device_seq_counters[device_id] = seq
         ts = packet.get("timestamp", 0.0)
         item = IngestionItem(
             priority=0,
@@ -98,6 +98,10 @@ class IngestionQueueManager:
     async def get_next_item(self) -> IngestionItem:
         """Fetch next item strictly by priority (Live first, Backlog second)."""
         return await self._queue.get()
+
+    def forget_device(self, device_id: str):
+        """Drop per-device bookkeeping once the device has gone idle."""
+        self._device_seq_counters.pop(device_id, None)
 
     def task_done(self):
         self._queue.task_done()
