@@ -8,8 +8,8 @@ that question for the core navigation feature. But **user accounts and a
 fleet/control-room view** are a different concern, and that's what this piece answers:
 a managed, autoscaling Postgres database (Supabase) handling sign-up/login and device
 ownership, separate from the high-frequency 10Hz telemetry service
-([Sih-Backend](Sih-Backend/), being migrated to AWS Lambda/DynamoDB — see
-[Sih-Backend/AMPLIFY_MIGRATION.md](Sih-Backend/AMPLIFY_MIGRATION.md)).
+([backend/](backend/), being migrated to AWS Lambda/DynamoDB; the migration
+notes, `AMPLIFY_MIGRATION.md`, are not in this repo).
 
 **Why two databases, not one**: user accounts (sign-up, profile, "which device does
 this person own") are low-frequency, relational, and exactly what Postgres+Auth is
@@ -72,7 +72,7 @@ separate scope:
    no code yet writes to `devices`/`drive_sessions`. The app today has zero network
    dependency for its core dead-reckoning pipeline (by design) — adding this means
    deciding how much of the account/upload flow is required vs. optional-when-online.
-2. **AWS backend deployment**: [Sih-Backend](Sih-Backend/)'s Amplify/Lambda/DynamoDB
+2. **AWS backend deployment**: [backend/](backend/)'s Amplify/Lambda/DynamoDB
    migration is code-complete through Phase 3 but not yet deployed — needs AWS
    credentials connected, still pending.
 3. **Fleet/control-room dashboard**: nothing built yet — would read `admin`-role
