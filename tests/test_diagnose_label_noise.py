@@ -43,3 +43,30 @@ def test_perfect_sensors_agree(monkeypatch, capsys):
     assert n == 599
     assert rms < 1e-6
     assert corr > 0.999
+
+
+def _bin_row(monkeypatch, capsys, seq, argv):
+    monkeypatch.setattr(dln.glob, "glob", lambda *a, **k: ["synthetic.csv"])
+    monkeypatch.setattr(dln, "load_sequence", lambda p: seq)
+    monkeypatch.setattr(sys, "argv", ["diagnose_label_noise", *argv])
+    dln.main()
+    out = capsys.readouterr().out
+    rows = [l.split() for l in out.splitlines() if l.startswith("[6.0, 10.0)")]
+    assert len(rows) == 1, out
+    return float(rows[0][3]), float(rows[0][4]), out
+
+
+def test_recover_yaw_is_opt_in(monkeypatch, capsys):
+    """The yaw rate sits on the "wrong" gyro channel, as in IO-VNBD's phone
+    logs. By default the script reads gz as-is (and finds no agreement);
+    --recover-yaw rebuilds it with recover_yaw_axis first."""
+    seq = _synthetic_drive()
+    seq.gyro = seq.gyro[:, [2, 0, 1]]
+    rms, _, out = _bin_row(monkeypatch, capsys, seq, [])
+    assert rms > 0.5 and "recover_yaw_axis" not in out
+
+    seq = _synthetic_drive()
+    seq.gyro = seq.gyro[:, [2, 0, 1]]
+    rms, corr, out = _bin_row(monkeypatch, capsys, seq, ["--recover-yaw"])
+    assert rms < 0.05 and corr > 0.99, (rms, corr)
+    assert "0 files skipped" in out
