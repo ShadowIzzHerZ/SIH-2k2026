@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android 12+ (API 31+) backup and device-transfer rules. Same
-     exclusions as backup_rules.xml; see that file for why. -->
+     exclusions as backup_rules.xml; see that file for why. Recordings
+     are only kept out of cloud backup (quota); a device-to-device
+     transfer has no such limit and still copies them. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="device_identity_prefs.xml" />
         <exclude domain="sharedpref" path="supabase_session_prefs.xml" />
+        <exclude domain="external" path="recordings/" />
+        <exclude domain="file" path="recordings/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="device_identity_prefs.xml" />
