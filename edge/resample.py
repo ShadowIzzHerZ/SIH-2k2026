@@ -22,8 +22,13 @@ Two ways to do that, both offered:
 
 Bins sit on an absolute clock (k * dt from the first sample), so irregular
 or duplicated timestamps (comma2k19's gyro stream has many) are fine: a bin
-just averages whatever arrived in it. A bin that receives nothing repeats
-the previous bin's value.
+just averages whatever arrived in it. A bin that receives nothing (an IMU
+dropout of 100 ms or more) is bridged the way "interp" bridges it: a
+straight line from the last bin's mean to the first sample after the gap.
+Repeating the last mean instead would hold, say, a braking deceleration
+for the whole dropout. Every tick is still emitted, because the 10 Hz
+fusion integrates a fixed dt per tick and a missing tick would drop that
+time from the track.
 """
 from __future__ import annotations
 
@@ -41,7 +46,8 @@ class BlockAverager:
         self.bin_idx = 0
         self._sum = np.zeros(channels)
         self._count = 0
-        self._last = np.zeros(channels)
+        self._last: tuple[float, np.ndarray] | None = None  # (bin centre, mean) of the last non-empty bin
+        self.empty_bins = 0
 
     def push(self, t: float, x: np.ndarray) -> list[tuple[float, np.ndarray]]:
         if self.t0 is None:
@@ -49,7 +55,7 @@ class BlockAverager:
         out = []
         k = int(np.floor((t - self.t0) / self.dt + 1e-9))
         while k > self.bin_idx:
-            out.append(self._close())
+            out.append(self._close(t, x))
         self._sum += x
         self._count += 1
         return out
@@ -57,14 +63,20 @@ class BlockAverager:
     def flush(self) -> list[tuple[float, np.ndarray]]:
         return [self._close()] if self._count else []
 
-    def _close(self) -> tuple[float, np.ndarray]:
-        if self._count:
-            self._last = self._sum / self._count
+    def _close(self, t_next: float | None = None, x_next: np.ndarray | None = None) -> tuple[float, np.ndarray]:
         t_end = self.t0 + (self.bin_idx + 1) * self.dt
+        if self._count:
+            mean = self._sum / self._count
+            self._last = (t_end - 0.5 * self.dt, mean)
+        else:  # empty bin, only reachable from push(): bridge to the sample that ended the gap
+            tc, m = self._last
+            w = (t_end - 0.5 * self.dt - tc) / (t_next - tc)
+            mean = m + w * (np.asarray(x_next, dtype=np.float64) - m)
+            self.empty_bins += 1
         self.bin_idx += 1
         self._sum = np.zeros(self.channels)
         self._count = 0
-        return t_end, self._last.copy()
+        return t_end, mean.copy()
 
 
 class PointSampler:
