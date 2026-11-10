@@ -1,7 +1,7 @@
 """
 The edge engine's file format, and the small coordinate helpers it needs.
 
-One CSV, one row per sensor event, sorted by time:
+One CSV, one row per sensor event, sorted by time (load_csv raises if not):
 
     t,ax,ay,az,gx,gy,gz,lat,lon,speed,heading
 
@@ -80,7 +80,23 @@ def load_csv(path: str, accel_unit: str = "m/s2", gyro_unit: str = "rad/s") -> E
         raise ValueError(f"{path}: missing column(s) {missing}; see edge/io.py for the format")
 
     t = _col(rows, header, "t")
-    imu = np.stack([_col(rows, header, c) for c in IMU_COLS], axis=1)
+    # The engine replays rows in file order, like a live stream, so the file
+    # has to be in time order already. Raise rather than sort: a backward step
+    # is either rows merged out of order (sorting would fix that) or a sensor
+    # clock restart (sorting would silently interleave two time bases into
+    # one nonsense drive), and from the file alone the two look the same.
+    if not np.isfinite(t).all():
+        i = int(np.flatnonzero(~np.isfinite(t))[0])
+        raise ValueError(f"{path}: data row {i + 1} has no t; every row needs a timestamp")
+    back = np.flatnonzero(np.diff(t) < 0)
+    if len(back):
+        i = int(back[0])
+        raise ValueError(
+            f"{path}: rows are not sorted by t: data row {i + 2} has t={t[i + 1]!r} after t={t[i]!r} "
+            f"({len(back)} backward step(s) in all). If the rows were only merged out of order, sort the "
+            f"file by t (e.g. pandas sort_values('t', kind='stable')); if the sensor clock restarted, "
+            f"split the file at the restart")
+    imu =np.stack([_col(rows, header, c) for c in IMU_COLS], axis=1)
     has_imu = np.isfinite(imu).all(axis=1)
     accel, gyro = imu[has_imu, :3], imu[has_imu, 3:]
     if accel_unit == "g":
