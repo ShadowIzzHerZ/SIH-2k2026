@@ -57,3 +57,31 @@ jobs:
         with:
           name: android-test-reports
           path: app/app/build/reports/tests/
+
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # Throwaway key for the test run only; config.py refuses to start without one.
+      SECRET_KEY: ci-only-secret-key-not-used-anywhere-else
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # No Redis or Postgres service: the app falls back to its in-memory
+      # cache and a local SQLite file, which is what the tests exercise.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: python -m pytest -q tests
