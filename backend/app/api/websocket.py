@@ -7,7 +7,7 @@ import time
 import numpy as np
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
-from app.core.auth import authenticate_ws
+from app.core.auth import authenticate_ws, ws_accept_subprotocol
 from app.core.time_sync import TimeSyncManager
 from app.core.queue_manager import IngestionQueueManager
 from app.fusion.kalman_filter import IMUKalmanFilter
@@ -139,7 +139,7 @@ async def websocket_track_endpoint(websocket: WebSocket, device_id: str):
         await _observe_device(websocket, device_id)
         return
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=ws_accept_subprotocol(websocket))
     active_connections[device_id] = websocket
     _touch_device(device_id)
     logger.info(f"WebSocket client connected: {device_id}")
@@ -210,7 +210,7 @@ async def _observe_device(websocket: WebSocket, device_id: str):
     position updates alongside the device itself. It does not replace the device
     in active_connections, reset its filter, or inject sensor frames.
     """
-    await websocket.accept()
+    await websocket.accept(subprotocol=ws_accept_subprotocol(websocket))
     device_observers.setdefault(device_id, set()).add(websocket)
     logger.info(f"Admin observer connected to {device_id}")
     try:
