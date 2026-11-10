@@ -28,8 +28,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: sih_redis_cache
+    # Host-local only: Redis has no password, and Docker's published ports bypass
+    # UFW, so "6379:6379" exposed it to the internet on a VPS. The backend reaches
+    # it over sih_network; 127.0.0.1 still allows host-side debugging.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
@@ -46,8 +49,9 @@ services:
   timescaledb:
     image: timescale/timescaledb:latest-pg16
     container_name: sih_timescaledb
+    # Host-local only (default postgres/postgres credentials); see redis above
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
