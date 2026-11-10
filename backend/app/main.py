@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.cache.redis_client import cache_manager
 from app.db.database import init_db
-from app.api.websocket import router as ws_router, queue_worker
+from app.api.websocket import router as ws_router, queue_worker, drain_pending_writes
 from app.api.rest_routes import router as rest_router
 
 logging.basicConfig(
@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI):
         await worker_task
     except asyncio.CancelledError:
         pass
+    await drain_pending_writes()
     await cache_manager.disconnect()
     logger.info("Shutdown complete.")
 
