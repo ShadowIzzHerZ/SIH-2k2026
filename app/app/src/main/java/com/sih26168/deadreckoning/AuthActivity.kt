@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.io.IOException
 
 /**
  * Optional sign-up/sign-in screen for the Supabase-backed account layer
@@ -71,8 +72,12 @@ class AuthActivity : AppCompatActivity() {
         signUpButton = findViewById(R.id.signUpButton)
         val skipButton: TextView = findViewById(R.id.skipButton)
 
-        // Already signed in from a previous launch — nothing to do here.
-        if (SupabaseAuthClient.getStoredSession(this) != null) {
+        // Already signed in and set up from a previous launch — nothing to
+        // do here. A stored session whose setup never finished falls through
+        // to the form so signing in again retries it.
+        if (SupabaseAuthClient.getStoredSession(this) != null &&
+            SupabaseAuthClient.isSetupComplete(this)
+        ) {
             finish()
             return
         }
@@ -136,10 +141,15 @@ class AuthActivity : AppCompatActivity() {
 
     private suspend fun onAuthenticated(session: SupabaseAuthClient.Session) {
         val deviceId = DeviceIdentity.get(this)
-        // Best-effort: device registration/consent failing shouldn't strand
-        // the user on this screen after a real, successful sign-in/sign-up.
+        // Both must succeed before sign-in counts as done: on failure the
+        // error is shown and the screen stays open (and reopens on the next
+        // launch, see onCreate) so the user can sign in again to retry.
+        // Both calls are idempotent upserts, so retrying is safe.
         SupabaseAuthClient.registerDevice(session, deviceId, vehicleLabel = null)
+            .getOrElse { throw IOException(getString(R.string.auth_error_setup_failed, it.message), it) }
         SupabaseAuthClient.setDataContributionOptIn(this, session, consentCheckbox.isChecked)
+            .getOrElse { throw IOException(getString(R.string.auth_error_setup_failed, it.message), it) }
+        SupabaseAuthClient.markSetupComplete(this)
         showStatus(getString(R.string.auth_signed_in))
     }
 

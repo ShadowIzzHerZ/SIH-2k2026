@@ -46,6 +46,9 @@ object SupabaseAuthClient {
     // getCachedConsent's doc for why this exists instead of a network
     // round-trip on every recording stop.
     private const val KEY_CACHED_CONSENT = "cached_data_contribution_opt_in"
+    // Set once AuthActivity's post-sign-in steps (device registration and
+    // the consent call) have both succeeded, see isSetupComplete.
+    private const val KEY_SETUP_COMPLETE = "setup_complete"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -75,6 +78,22 @@ object SupabaseAuthClient {
 
     fun clearStoredSession(context: Context) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+    }
+
+    /** True once registerDevice and setDataContributionOptIn have both
+     * succeeded after a sign-in. signIn/signUp store the session before
+     * those run, so a stored session alone doesn't mean the account is set
+     * up: if either call failed, or the screen closed mid-call, AuthActivity
+     * has to stay reachable so they can be retried. Cleared along with the
+     * session by clearStoredSession. */
+    fun isSetupComplete(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SETUP_COMPLETE, false)
+
+    fun markSetupComplete(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_SETUP_COMPLETE, true)
+            .apply()
     }
 
     /** Local mirror of profiles.data_contribution_opt_in, written whenever
