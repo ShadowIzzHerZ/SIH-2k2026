@@ -41,8 +41,9 @@ private var modelUpdateCheckStarted = false
  * Live on-device demo of the whole pipeline this repo trains and
  * validates in Python: SensorReader (raw IMU) -> CalibrationManager
  * (Calibration.kt, matching src/calibration.py) -> FusionEngine (matching
- * the fixed src/fusion.py) -> BiasCorrectionModel (ONNX Runtime, the
- * checkpoints/dead_reckoning_model.onnx export) -> RoadMapView (a real
+ * the fixed src/fusion.py) -> EnsembleModel (two BiasCorrectionModels on
+ * ONNX Runtime, the checkpoints/model_slow.onnx and model_fast.onnx exports,
+ * gated on speed) -> RoadMapView (a real
  * OpenStreetMap-tile map).
  *
  * UI is a pixel-match of the Stitch "Zen Civic" mockups (each screen's
@@ -88,7 +89,7 @@ class MainActivity : AppCompatActivity() {
     private var replayRestarted = false
 
     private var calibration = CalibrationManager()
-    private lateinit var model: BiasCorrectionModel
+    private lateinit var model: EnsembleModel
     private lateinit var fusion: FusionEngine
     // Null until the road graph (about 460 KB of JSON) has been parsed on a
     // background thread at startup; until then nothing is map-matched.
@@ -419,8 +420,8 @@ class MainActivity : AppCompatActivity() {
             "replay_drive.json",
         ).map { name -> lazy { ReplayDataSource(applicationContext, name) } }
         Thread({ replaySources.forEach { it.value } }, "replay-prefetch").start()
-        model = BiasCorrectionModel(this)
-        // Fetches a newer model if one is published; it takes effect on the
+        model = BiasCorrectionModel.loadEnsemble(this)
+        // Fetches newer models if any are published; they take effect on the
         // next app start. See ModelUpdater.
         if (!modelUpdateCheckStarted) {
             modelUpdateCheckStarted = true
