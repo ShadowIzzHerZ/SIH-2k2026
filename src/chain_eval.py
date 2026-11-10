@@ -114,6 +114,111 @@ def chained_drift(model, dataset, device, dt: float, window_size: int = 50, n_ch
             "p90_drift_pct": float(np.percentile(d, 90)), "pass_rate_pct": float((d < 10.0).mean() * 100)}
 
 
+def _check_time_s(check: dict) -> float:
+    """Time budget of one eval.example_checks entry: max_time_s, else the
+    time distance_m takes at speed_kmph."""
+    if check.get("max_time_s") is not None:
+        return float(check["max_time_s"])
+    if check.get("speed_kmph"):
+        return float(check["distance_m"]) / (float(check["speed_kmph"]) / 3.6)
+    raise ValueError(f"example check needs max_time_s or speed_kmph: {check}")
+
+
+@torch.no_grad()
+def example_checks(model, dataset, device, dt: float, checks: list[dict], window_size: int = 50,
+                   v_clamp_max: float = 50.0, batch_size: int = 256) -> list[dict]:
+    """The PS's worked examples (eval.example_checks in the config), e.g.
+    "<5 m drift over 50 m in under a minute", "<100 m over 1 km at 60 km/h".
+
+    Each check is run as a chained blackout, the way run_fusion /
+    chained_drift integrate (chunk 0 from the true state, later chunks from
+    the model's own end state), over back-to-back windows of one recording.
+    A blackout counts only if the vehicle really covers distance_m within the
+    check's time (max_time_s, or distance_m at speed_kmph): the position
+    error is read at the first step where the true distance travelled
+    reaches distance_m, and the blackout passes if it is at most
+    max_drift_m. Chain starts follow build_chains (every other window_size
+    block); a chain is cut at the first missing window, never bridged.
+
+    Returns one dict per check: the check itself, n_blackouts (how many
+    reached distance_m in time), and pass rate / median / p90 error in
+    metres when n_blackouts > 0."""
+    if not checks:
+        return []
+    by_src: dict[str, dict[int, int]] = {}
+    for idx, w in enumerate(dataset.windows):
+        if w.start >= 0:
+            by_src.setdefault(w.src, {})[w.start] = idx
+    max_chunks = max(int(np.ceil(_check_time_s(c) / (window_size * dt) - 1e-9)) for c in checks)
+    runs = []
+    for starts in by_src.values():
+        for st in sorted(starts):
+            if (st // window_size) % 2:
+                continue
+            ids = []
+            for j in range(max_chunks):
+                i = starts.get(st + j * window_size)
+                if i is None:
+                    break
+                ids.append(i)
+            runs.append(ids)
+    if not runs:
+        return [dict(c, n_blackouts=0) for c in checks]
+
+    model.eval()
+    needed = sorted({i for ids in runs for i in ids})
+    corr = {}
+    for b0 in range(0, len(needed), batch_size):
+        ids = needed[b0:b0 + batch_size]
+        imu = torch.stack([dataset[i]["imu"] for i in ids]).to(device)
+        out = model(imu).cpu().numpy()
+        corr.update(zip(ids, out))
+
+    # One integration per run, kept per step: predicted and true position,
+    # and the true distance travelled so far.
+    tracks = []
+    for ids in runs:
+        first = dataset[ids[0]]
+        v, th = float(first["v0"]), float(first["theta0"])
+        p = np.zeros(2)
+        gt_off = np.zeros(2)
+        pred_steps, gt_steps = [], []
+        for i in ids:
+            item = dataset[i]
+            raw = item["imu_raw"].numpy()
+            pos_gt = item["pos_gt"].numpy().astype(np.float64)
+            acc = raw[:, 0] + corr[i][:, 0]
+            yaw = raw[:, 5] + corr[i][:, 1]
+            for k in range(len(acc)):
+                v = min(max(v + float(acc[k]) * dt, 0.0), v_clamp_max)
+                th = th + float(yaw[k]) * dt
+                p = p + np.array([np.cos(th), np.sin(th)]) * v * dt
+                pred_steps.append(p)
+            gt_steps.append(gt_off + pos_gt)
+            gt_off = gt_off + pos_gt[-1]
+        pred = np.array(pred_steps)
+        gt = np.concatenate(gt_steps)
+        dist = np.cumsum(np.linalg.norm(np.diff(np.vstack([np.zeros(2), gt]), axis=0), axis=1))
+        tracks.append((pred, gt, dist))
+
+    results = []
+    for c in checks:
+        n_steps = int(np.floor(_check_time_s(c) / dt + 1e-9))
+        errors = []
+        for pred, gt, dist in tracks:
+            reached = np.nonzero(dist[:n_steps] >= c["distance_m"])[0]
+            if len(reached):
+                k = reached[0]
+                errors.append(float(np.linalg.norm(pred[k] - gt[k])))
+        r = dict(c, n_blackouts=len(errors))
+        if errors:
+            e = np.array(errors)
+            r.update({"pass_rate_pct": float((e <= c["max_drift_m"]).mean() * 100),
+                      "median_error_m": float(np.median(e)), "p90_error_m": float(np.percentile(e, 90))})
+        results.append(r)
+    return results
+
+
 class ChainTrainDataset(torch.utils.data.Dataset):
     """K back-to-back windows of one recording per item, for chained-chunk
     training (train.py --chain_train_chunks). Chunk 0 starts from the true
