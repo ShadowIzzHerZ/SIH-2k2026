@@ -1111,10 +1111,17 @@ class MainActivity : AppCompatActivity() {
      * updates an hour (Android 8+), so the loop kept feeding fusion,
      * calibration and any open recording the same frozen sample at 10 Hz,
      * while still holding both sensors and GPS. The pipeline (calibration,
-     * fusion state, an open recording) is kept and carries on in onStart. */
+     * fusion state, an open recording) is kept and carries on in onStart.
+     *
+     * A running recording is the exception: RecordingService holds a
+     * location foreground service and a wake lock for it, so sensors and
+     * GPS keep arriving in the background and the loop must keep writing
+     * rows. Pausing here would freeze the recording the moment the phone
+     * is pocketed, which is what that service exists to prevent. */
     override fun onStop() {
         super.onStop()
         if (!::sensorReader.isInitialized || !ticking) return
+        if (devRecorder.isRecording) return
         pausedInBackground = true
         ticking = false
         tickHandler.removeCallbacksAndMessages(null)
