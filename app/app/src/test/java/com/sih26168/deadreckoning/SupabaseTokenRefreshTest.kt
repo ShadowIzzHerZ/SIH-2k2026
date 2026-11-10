@@ -2,7 +2,9 @@ package com.sih26168.deadreckoning
 
 import java.io.IOException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The refresh-and-retry-once rule SupabaseAuthClient applies to uploads. */
@@ -79,5 +81,26 @@ class SupabaseTokenRefreshTest {
         val body = """{"access_token":"a1","token_type":"bearer","expires_in":3600,
             "refresh_token":"r1","user":{"id":"u1","email":"x@example.com"}}"""
         assertEquals(SupabaseAuthClient.Session("a1", "r1", "u1"), parseSession(body))
+    }
+
+    @Test
+    fun `a revoked or reused refresh token is recognised`() {
+        // Older GoTrue: OAuth-style invalid_grant.
+        assertTrue(isRevokedRefreshToken(400,
+            """{"error":"invalid_grant","error_description":"Invalid Refresh Token: Already Used"}"""))
+        // Newer GoTrue: error_code.
+        assertTrue(isRevokedRefreshToken(400,
+            """{"code":400,"error_code":"refresh_token_not_found","msg":"Invalid Refresh Token: Refresh Token Not Found"}"""))
+        assertTrue(isRevokedRefreshToken(401, """{"code":401,"error_code":"session_not_found","msg":"Session not found"}"""))
+    }
+
+    @Test
+    fun `other refresh failures keep the session`() {
+        // Server errors, rate limits, other 400s and unparsable bodies.
+        assertFalse(isRevokedRefreshToken(500, """{"error":"invalid_grant"}"""))
+        assertFalse(isRevokedRefreshToken(503, ""))
+        assertFalse(isRevokedRefreshToken(400, "<html>Bad gateway</html>"))
+        assertFalse(isRevokedRefreshToken(429, """{"error_code":"over_request_rate_limit"}"""))
+        assertFalse(isRevokedRefreshToken(400, """{"error_code":"validation_failed","msg":"bad json"}"""))
     }
 }
