@@ -120,7 +120,8 @@ def load_drive_phone(imu_path: Path, gt_path: Path, target_hz: float = 10.0,
     heading_i = np.degrees(np.arctan2(s, c)) % 360.0
 
     if not (np.isfinite(accel_i).all() and np.isfinite(gyro_i).all() and np.isfinite(speed_i).all()
-            and np.isfinite(lat_i).all() and np.isfinite(lon_i).all()):
+            and np.isfinite(lat_i).all() and np.isfinite(lon_i).all()
+            and np.isfinite(heading_i).all()):  # a NaN bearing would become a NaN theta0
         return None
 
     return ImuSequence(
