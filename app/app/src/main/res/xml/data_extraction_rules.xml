@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ (API 31+) backup and device-transfer rules. Same
+     exclusions as backup_rules.xml; see that file for why. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="device_identity_prefs.xml" />
+        <exclude domain="sharedpref" path="supabase_session_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="device_identity_prefs.xml" />
+        <exclude domain="sharedpref" path="supabase_session_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>

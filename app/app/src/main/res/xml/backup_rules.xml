@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto Backup rules for Android 8-11 (API 26-30); data_extraction_rules.xml
+     is the Android 12+ equivalent and must list the same exclusions.
+     Everything else keeps the default (backed up). Excluded:
+     - device_identity_prefs: DeviceIdentity's per-install ID. Restored
+       onto a new phone, two installs would share one devices.device_id.
+     - supabase_session_prefs: the Supabase access/refresh tokens. A
+       restore shouldn't sign another device into the account. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="device_identity_prefs.xml" />
+    <exclude domain="sharedpref" path="supabase_session_prefs.xml" />
+</full-backup-content>
