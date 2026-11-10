@@ -11,6 +11,7 @@ import random
 import time
 import httpx
 import websockets
+from client_auth import token_request_body
 
 BACKEND_HTTP = "http://127.0.0.1:8000"
 BACKEND_WS = "ws://127.0.0.1:8000"
@@ -20,8 +21,9 @@ async def get_token() -> str:
     async with httpx.AsyncClient() as client:
         res = await client.post(
             f"{BACKEND_HTTP}/auth/token",
-            json={"device_id": DEVICE_ID, "expires_minutes": 60}
+            json=token_request_body(DEVICE_ID, 60)
         )
+        res.raise_for_status()
         data = res.json()
         token = data["access_token"]
         print(f"[AUTH] Obtained JWT Token: {token[:25]}...")
