@@ -263,7 +263,10 @@ def run_fusion(
                 # when the next blackout starts.
                 w = 1.0 - blend_remaining / blend_samples
                 position[t] = (1 - w) * blend_from_pos + w * gnss_xy[t]
-                heading[t] = _wrap_angle((1 - w) * blend_from_heading + w * heading[t])
+                # Blend along the shorter arc: a straight weighted average of
+                # e.g. 3.13 and -3.13 rad (both ~due west) passes through 0,
+                # swinging the displayed heading east and back mid-blend.
+                heading[t] = _wrap_angle(blend_from_heading + w * _wrap_angle(heading[t] - blend_from_heading))
                 speed[t] = (1 - w) * blend_from_speed + w * speed[t]
                 modes[t] = FusionMode.BLEND
                 blend_remaining -= 1
