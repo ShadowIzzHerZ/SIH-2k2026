@@ -21,6 +21,7 @@ This repository contains the **pure backend service** for the Smart India Hackat
 - **Sensor Fusion:** 9-DOF IMU Extended Kalman Filter (Accelerometer, Gyroscope, Magnetometer with Zero Velocity Updates).
 - **Transport Protocols:** Full-duplex WebSocket (`/ws/track/{device_id}`) with REST fallback (`/sensor-data`).
 - **Security:** HMAC-SHA256 JWT handshake authentication.
+- **CORS:** Allowed browser origins come from `CORS_ORIGINS` (comma-separated, default `*`). With `*`, cross-origin requests are allowed without credentials; list explicit origins to allow credentials.
 - **Clock Drift Compensation:** 3-way NTP handshake calculating $\Delta t_{\text{offset}}$ and RTT.
 - **Starvation-Free Queue:** `asyncio.PriorityQueue` prioritizing Live 10Hz frames (`P0`) over Backlog recovery dumps (`P1`).
 - **State Caching:** Redis 7+ for live positions and calibration constants with 1-hour TTL.
