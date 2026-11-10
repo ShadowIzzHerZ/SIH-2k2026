@@ -64,7 +64,7 @@ def _find_clean_span(seq: ImuSequence, sample_rate_hz: float, lead_in_s: float, 
 
     xy = latlon_to_local_xy(seq.lat, seq.lon)
     step = np.linalg.norm(np.diff(xy, axis=0), axis=1)
-    for window_start in range(0, seq.n - need_n, slide_n):
+    for window_start in range(0, seq.n - need_n + 1, slide_n):
         window_end = window_start + need_n
         if step[window_start:window_end - 1].max() > max_step_m:
             continue  # a GPS jump/glitch falls inside this candidate span
