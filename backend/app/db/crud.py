@@ -4,7 +4,19 @@ import json
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
-from app.db.models import TrajectoryPoint, DeviceSession
+from app.db.models import TrajectoryPoint, DeviceSession, utc_now
+
+def _epoch_to_db_time(ts: Optional[float]) -> datetime:
+    """Epoch seconds -> naive UTC datetime, as stored in the TIMESTAMP (no tz) column."""
+    if not ts:
+        return utc_now()
+    return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
+
+def db_time_to_epoch(dt: datetime) -> float:
+    """Stored naive UTC datetime -> epoch seconds (independent of the server's local timezone)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
 
 async def get_last_known_position(db: AsyncSession, device_id: str) -> Optional[Dict[str, Any]]:
     """
@@ -26,7 +38,7 @@ async def get_last_known_position(db: AsyncSession, device_id: str) -> Optional[
     return {
         "device_id": point.device_id,
         "seq": point.seq_num,
-        "timestamp": point.time.timestamp(),
+        "timestamp": db_time_to_epoch(point.time),
         "x": point.x,
         "y": point.y,
         "z": point.z,
@@ -44,8 +56,7 @@ async def get_last_known_position(db: AsyncSession, device_id: str) -> Optional[
 
 async def save_trajectory_point(db: AsyncSession, point_data: Dict[str, Any]) -> TrajectoryPoint:
     """Insert a single verified trajectory point."""
-    ts = point_data.get("timestamp")
-    dt = datetime.fromtimestamp(ts, tz=timezone.utc) if ts else datetime.now(timezone.utc)
+    dt = _epoch_to_db_time(point_data.get("timestamp"))
 
     point = TrajectoryPoint(
         time=dt,
@@ -79,8 +90,7 @@ async def save_trajectory_batch(db: AsyncSession, points_data: List[Dict[str, An
 
     points = []
     for p in points_data:
-        ts = p.get("timestamp")
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc) if ts else datetime.now(timezone.utc)
+        dt = _epoch_to_db_time(p.get("timestamp"))
         points.append(
             TrajectoryPoint(
                 time=dt,
