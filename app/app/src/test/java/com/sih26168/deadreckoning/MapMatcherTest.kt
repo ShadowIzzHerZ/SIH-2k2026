@@ -74,4 +74,41 @@ class MapMatcherTest {
         val r = m.match(deg(1100.0), deg(5.0), headingRad = (PI / 2).toFloat())
         assertEquals(1, r!!.edgeIdx)
     }
+
+    /** Two consecutive 100 m eastbound edges, 0 -> 1 -> 2. */
+    private fun straightRoad() = RoadGraph(
+        nodes = listOf(MapNode(0.0, 0.0), MapNode(0.0, deg(100.0)), MapNode(0.0, deg(200.0))),
+        edges = listOf(MapEdge(0, 1), MapEdge(1, 2)),
+    )
+
+    @Test
+    fun `a stationary fix jittering back a little stays on the current edge`() {
+        val m = MapMatcher(straightRoad())
+        // Stopped 95 m along the first edge, then a fix 1 m behind and
+        // 2 m to the side of it: GPS noise, not the vehicle reversing.
+        assertEquals(0, m.match(0.0, deg(95.0), headingRad = 0f)!!.edgeIdx)
+        val r = m.match(deg(2.0), deg(94.0), headingRad = 0f)!!
+        assertEquals(0, r.edgeIdx)
+        assertEquals(0.94, r.t, 1e-6)
+    }
+
+    @Test
+    fun `a stationary fix keeps matching the same edge over many jittery fixes`() {
+        val m = MapMatcher(straightRoad())
+        m.match(0.0, deg(95.0), headingRad = 0f)
+        val rng = java.util.Random(7)
+        repeat(50) {
+            val r = m.match(deg(rng.nextGaussian() * 2.0), deg(95.0 + rng.nextGaussian() * 2.0), headingRad = 0f)!!
+            assertEquals(0, r.edgeIdx)
+        }
+    }
+
+    @Test
+    fun `a backward step well beyond GPS noise is still penalised`() {
+        val m = MapMatcher(straightRoad())
+        assertEquals(0, m.match(0.0, deg(95.0), headingRad = 0f)!!.edgeIdx)
+        // 15 m back along the first edge is more than jitter, so the
+        // non-holonomic penalty applies and the connected next edge wins.
+        assertEquals(1, m.match(deg(4.0), deg(80.0), headingRad = 0f)!!.edgeIdx)
+    }
 }

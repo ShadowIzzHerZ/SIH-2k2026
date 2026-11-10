@@ -53,6 +53,13 @@ data class MapMatchResult(val lat: Double, val lon: Double, val edgeIdx: Int, va
  */
 class MapMatcher(private val graph: RoadGraph, private val maxDistM: Double = 60.0) {
 
+    /** A step back along the current edge shorter than this is GPS/fusion
+     * jitter, not the vehicle reversing, and counts as staying put. Without
+     * it a stopped vehicle's fix wobbling a metre backwards cost +15 on its
+     * own edge against -5 for the next connected edge, so the match hopped
+     * forward onto the next road while standing still. */
+    private val jitterToleranceM = 10.0
+
     private val refLat = graph.nodes[0].lat
     private val refLon = graph.nodes[0].lon
     private val nodeXY: Array<DoubleArray> = Array(graph.nodes.size) { i -> toXY(graph.nodes[i].lat, graph.nodes[i].lon) }
@@ -88,6 +95,9 @@ class MapMatcher(private val graph: RoadGraph, private val maxDistM: Double = 60
         return Triple(dist, t, doubleArrayOf(projX, projY))
     }
 
+    private fun segmentLength(a: DoubleArray, b: DoubleArray): Double =
+        kotlin.math.sqrt((b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]))
+
     private fun angleDiff(a: Double, b: Double): Double {
         var d = a - b
         while (d > Math.PI) d -= 2 * Math.PI
@@ -121,8 +131,9 @@ class MapMatcher(private val graph: RoadGraph, private val maxDistM: Double = 60
             cost += 12.0 * misalignment
 
             if (lastEdgeIdx >= 0) {
+                val backwardM = if (i == lastEdgeIdx) (lastT - t) * segmentLength(a, b) else 0.0
                 when {
-                    i == lastEdgeIdx && t < lastT -> cost += 15.0  // backward on the same edge — non-holonomic penalty
+                    i == lastEdgeIdx && backwardM > jitterToleranceM -> cost += 15.0  // backward on the same edge — non-holonomic penalty
                     i == lastEdgeIdx -> cost -= 5.0                // staying on the same edge — mild continuity bonus
                     graph.edges[lastEdgeIdx].to == e.from -> cost -= 5.0  // directly connected, forward
                     else -> cost += 25.0                            // disconnected jump
