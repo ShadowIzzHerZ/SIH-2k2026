@@ -16,9 +16,9 @@ Two-stage estimate, standard for this problem:
      between that and the raw phone reading gives roll/pitch.
   2. Yaw (heading) misalignment: the phone's x-axis heading offset from
      the vehicle's forward direction isn't observable from gravity alone.
-     We estimate it by comparing the direction of horizontal acceleration
-     during a straightish accelerating/braking segment against the
-     GPS-derived heading (or, at inference in the field with no GPS yet,
+     We estimate it by matching the horizontal acceleration against the
+     acceleration GPS speed and course imply in the vehicle frame (or, at
+     inference in the field with no GPS yet,
      we require a short calibration drive/segment before blackout, same
      as the PS's "instant seamless mode-switching" implies: leveling
      happens continuously, yaw-alignment happens once at trip start).
@@ -88,31 +88,58 @@ def yaw_rotation(psi: float) -> np.ndarray:
     ])
 
 
-def estimate_yaw_misalignment(level_accel_xy: np.ndarray, gt_heading_xy: np.ndarray) -> float:
-    """Estimate constant yaw offset between the leveled phone frame and the
-    vehicle forward direction, using a segment with known GT heading
-    (e.g. GPS course-over-ground during a straight accelerating run).
+def estimate_yaw_misalignment(level_accel_xy: np.ndarray, gt_heading_xy: np.ndarray, speed_mps: np.ndarray,
+                              dt: float, min_speed_mps: float = 2.0, min_horiz_accel: float = 0.3,
+                              min_fit_quality: float = 0.5) -> float:
+    """Estimate the constant yaw offset between the leveled phone frame and
+    the vehicle forward direction, against GPS speed and course.
+
+    The leveled phone frame has an unknown yaw, so its accel direction can't
+    be compared with a world-frame course directly (that used to return the
+    mount offset plus the average course). Instead both sides are put in the
+    vehicle frame: GPS says the car had longitudinal accel dv/dt and lateral
+    accel v * d(course)/dt, and psi is the least-squares 2D rotation taking
+    the measured horizontal accel onto that. Braking counts the same as
+    accelerating instead of voting for a 180 degree flip. Same method as
+    edge/mounting.py's estimate_mount.
 
     Args:
-        level_accel_xy: (N, 2) horizontal accel in the *leveled* phone frame.
-        gt_heading_xy: (N, 2) unit forward-direction vectors from GT (e.g.
-            GPS bearing converted to a unit vector) for the same samples.
+        level_accel_xy: (N, 2) horizontal accel in the *leveled* phone frame,
+            consecutive samples dt apart.
+        gt_heading_xy: (N, 2) unit direction-of-travel vectors from GT (GPS
+            course converted with compass_deg_to_xy_unit), same samples.
+        speed_mps: (N,) GT speed, same samples.
+        dt: sample period, s.
+        min_speed_mps: samples slower than this are ignored (course is noise).
+        min_horiz_accel: samples whose GPS-implied accel is smaller than this
+            (m/s^2) are ignored; near-zero accel has no direction.
+        min_fit_quality: |sum m.e| / sum |m||e| over the used samples (1.0 when
+            they all agree on the angle). Below it, or with no usable sample,
+            returns 0.0 (uncalibrated) rather than a guess.
 
     Returns:
         psi: yaw offset in radians such that yaw_rotation(psi) applied to
         the leveled frame aligns it with the vehicle forward axis.
     """
-    # Use the accel direction during the highest-magnitude (most confident)
-    # samples only — near-zero accel gives an ill-defined direction.
-    mag = np.linalg.norm(level_accel_xy, axis=1)
-    keep = mag > np.percentile(mag, 75)
-    a = level_accel_xy[keep]
-    g = gt_heading_xy[keep]
-
-    a_ang = np.arctan2(a[:, 1], a[:, 0])
-    g_ang = np.arctan2(g[:, 1], g[:, 0])
-    diff = np.arctan2(np.sin(g_ang - a_ang), np.cos(g_ang - a_ang))
-    return float(np.median(diff))
+    if len(level_accel_xy) < 3:
+        return 0.0
+    v = np.asarray(speed_mps, dtype=np.float64)
+    crs = np.arctan2(gt_heading_xy[:, 1], gt_heading_xy[:, 0])  # math angle, counter-clockwise
+    a_lon = (v[2:] - v[:-2]) / (2 * dt)
+    a_lat = v[1:-1] * np.arctan2(np.sin(crs[2:] - crs[:-2]), np.cos(crs[2:] - crs[:-2])) / (2 * dt)
+    expect = np.stack([a_lon, a_lat], axis=1)
+    meas = np.asarray(level_accel_xy, dtype=np.float64)[1:-1]
+    ok = (np.isfinite(expect).all(axis=1) & np.isfinite(meas).all(axis=1)
+          & (np.nan_to_num(v[1:-1]) > min_speed_mps) & (np.linalg.norm(expect, axis=1) > min_horiz_accel))
+    if not ok.any():
+        return 0.0
+    m, e = meas[ok], expect[ok]
+    cross = np.sum(m[:, 0] * e[:, 1] - m[:, 1] * e[:, 0])
+    dot = np.sum(m[:, 0] * e[:, 0] + m[:, 1] * e[:, 1])
+    norm = np.sum(np.linalg.norm(m, axis=1) * np.linalg.norm(e, axis=1))
+    if norm <= 0 or np.hypot(cross, dot) / norm < min_fit_quality:
+        return 0.0
+    return float(np.arctan2(cross, dot))
 
 
 def calibrate(accel: np.ndarray, gyro: np.ndarray, R_level: np.ndarray, psi_yaw: float = 0.0):

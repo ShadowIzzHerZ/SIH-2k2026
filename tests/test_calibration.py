@@ -72,30 +72,62 @@ def test_calibrate_applies_level_then_yaw_to_both_streams():
     assert np.allclose(np.linalg.norm(a_v, axis=1), np.linalg.norm(accel, axis=1))
 
 
-def _forward_accel_segment(psi_true: float, course: float, n: int = 400):
-    """Leveled-phone horizontal accel of a car accelerating along its own
-    forward axis, where yaw_rotation(psi_true) takes the phone frame to the
-    vehicle frame; plus the GPS course as a world-frame unit vector."""
-    rng = np.random.default_rng(0)
-    a_fwd = rng.uniform(0.2, 2.0, n)
-    fwd_in_phone = np.array([np.cos(-psi_true), np.sin(-psi_true)])
-    accel_xy = a_fwd[:, None] * fwd_in_phone
-    heading_xy = np.tile([np.cos(course), np.sin(course)], (n, 1))
-    return accel_xy, heading_xy
+def _drive_segment(psi_true: float, course0: float, n: int = 600, dt: float = 0.1):
+    """Leveled-phone horizontal accel of a car that speeds up, brakes and
+    turns, where yaw_rotation(psi_true) takes the phone frame to the vehicle
+    frame; plus its GPS course (world-frame unit vectors) and speed."""
+    t = np.arange(n) * dt
+    a_lon = 1.5 * np.sin(2 * np.pi * t / 20.0)            # accelerate, then brake
+    yaw_rate = 0.15 * np.sin(2 * np.pi * t / 13.0)        # weave left and right
+    v = 12.0 + np.cumsum(a_lon) * dt
+    crs = course0 + np.cumsum(yaw_rate) * dt
+    a_vehicle = np.stack([a_lon, v * yaw_rate], axis=1)   # [forward, left]
+    accel_xy = (yaw_rotation(-psi_true)[:2, :2] @ a_vehicle.T).T
+    heading_xy = np.stack([np.cos(crs), np.sin(crs)], axis=1)
+    return accel_xy, heading_xy, v, dt
 
 
 def test_yaw_misalignment_recovered_when_driving_along_world_x():
-    accel_xy, heading_xy = _forward_accel_segment(np.radians(30), course=0.0)
-    psi = estimate_yaw_misalignment(accel_xy, heading_xy)
-    assert np.isclose(psi, np.radians(30), atol=1e-6)
+    accel_xy, heading_xy, v, dt = _drive_segment(np.radians(30), course0=0.0)
+    psi = estimate_yaw_misalignment(accel_xy, heading_xy, v, dt)
+    assert np.isclose(psi, np.radians(30), atol=np.radians(1))
+    # rotating by psi puts braking back on -x and turns back on y
     a_vehicle = (yaw_rotation(psi)[:2, :2] @ accel_xy.T).T
-    assert np.all(a_vehicle[:, 0] > 0) and np.allclose(a_vehicle[:, 1], 0, atol=1e-9)
+    a_lon = 1.5 * np.sin(2 * np.pi * np.arange(len(v)) * dt / 20.0)
+    assert np.allclose(a_vehicle[:, 0], a_lon, atol=0.05)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Known issue: estimate_yaw_misalignment subtracts the sensor-frame accel angle from the "
-    "WORLD-frame GPS course, so the estimate is offset by the course itself (psi + course) "
-    "whenever the car is not heading along world +x."))
-def test_yaw_misalignment_does_not_depend_on_course():
-    accel_xy, heading_xy = _forward_accel_segment(np.radians(30), course=np.radians(90))
-    assert np.isclose(estimate_yaw_misalignment(accel_xy, heading_xy), np.radians(30), atol=1e-3)
+@pytest.mark.parametrize("course_deg", [90, 180, -135, 17])
+@pytest.mark.parametrize("psi_deg", [30, -100, 170])
+def test_yaw_misalignment_does_not_depend_on_course(course_deg, psi_deg):
+    rng = np.random.default_rng(0)
+    accel_xy, heading_xy, v, dt = _drive_segment(np.radians(psi_deg), course0=np.radians(course_deg))
+    accel_xy = accel_xy + rng.normal(0, 0.2, accel_xy.shape)
+    psi = estimate_yaw_misalignment(accel_xy, heading_xy, v, dt)
+    assert abs(np.angle(np.exp(1j * (psi - np.radians(psi_deg))))) < np.radians(2), np.degrees(psi)
+
+
+def test_yaw_misalignment_without_usable_samples_is_zero_not_nan():
+    n = 400
+    accel_xy = np.tile([0.4, 0.3], (n, 1))                # every magnitude equal
+    heading_xy = np.tile([1.0, 0.0], (n, 1))
+    for v in (np.full(n, 15.0), np.full(n, 0.5)):        # steady cruise / crawling
+        assert estimate_yaw_misalignment(accel_xy, heading_xy, v, 0.1) == 0.0
+    assert estimate_yaw_misalignment(accel_xy[:2], heading_xy[:2], np.full(2, 15.0), 0.1) == 0.0
+
+
+def test_calibrate_sequence_finds_the_mount_yaw():
+    from pathlib import Path
+
+    from src.data.io_vnbd_loader import ImuSequence
+    from src.data.windowing import calibrate_sequence
+
+    n, psi_true = 4000, np.radians(-70)
+    accel_xy, heading_xy, v, dt = _drive_segment(psi_true, course0=np.radians(200), n=n)
+    accel = np.concatenate([accel_xy, np.full((n, 1), 9.81)], axis=1)
+    bearing = (90.0 - np.degrees(np.arctan2(heading_xy[:, 1], heading_xy[:, 0]))) % 360.0
+    seq = ImuSequence(path=Path("synthetic.csv"), time=np.arange(n) * dt, accel=accel.copy(),
+                      gyro=np.zeros((n, 3)), speed_gt=v, lat=None, lon=None, heading_gt=bearing)
+    calibrate_sequence(seq)
+    a_lon = 1.5 * np.sin(2 * np.pi * np.arange(n) * dt / 20.0)
+    assert np.corrcoef(seq.accel[:, 0], a_lon)[0, 1] > 0.99
