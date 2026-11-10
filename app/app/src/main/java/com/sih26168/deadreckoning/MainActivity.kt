@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -231,6 +232,9 @@ class MainActivity : AppCompatActivity() {
     private var ticking = false
     // Live ticks since the calibration prior was last saved.
     private var ticksSincePriorSave = 0
+    // Which model ran and how far each blackout drifted, to logcat
+    // (`adb logcat -s DriveSelfCheck`). Reset with the fusion engine.
+    private var selfCheck = newSelfCheck()
 
     // How long calibration can run before we tell the user it's taking a
     // while. NOT 2s: leveling alone (CalibrationManager's levelSamples=20
@@ -523,6 +527,7 @@ class MainActivity : AppCompatActivity() {
      * filter" button semantics exactly, just also reachable from the nav. */
     private fun performResetFilter() {
         fusion.reset()
+        selfCheck = newSelfCheck()
         mapMatcher?.reset()
         roadMapView.clear()
         previousFusionMode = null
@@ -765,6 +770,7 @@ class MainActivity : AppCompatActivity() {
             saveCalibrationPrior()
             calibration = newCalibration(usingReplay)
             fusion.reset()
+            selfCheck = newSelfCheck()
             mapMatcher?.reset()
             roadMapView.clear()
             replayIndex = 0
@@ -924,6 +930,11 @@ class MainActivity : AppCompatActivity() {
         )
 
         val s = fusion.state
+        // The real fix, when there is one, in fusion's local frame: during
+        // a demo blackout or a replay GNSS is still there, so the
+        // self-check can score the drift live.
+        val truth = if (sample.hasFix) fusion.latLonToLocalXY(sample.lat, sample.lon) else null
+        selfCheck.tick(s.mode, floatArrayOf(s.x, s.y), truth, model)
         fusion.localXYToLatLon(s.x, s.y)?.let { (lat, lon) ->
             roadMapView.addPoint(lat, lon, s.mode)
             mapMatcher?.match(lat, lon, s.heading)?.let { m ->
@@ -1239,6 +1250,8 @@ class MainActivity : AppCompatActivity() {
         // uploads run in AppScope instead, so this doesn't cut them off.
         activityScope.cancel()
     }
+
+    private fun newSelfCheck() = DriveSelfCheck({ Log.i("DriveSelfCheck", it) })
 
     companion object {
         private const val PRIOR_SAVE_TICKS = 300  // 30 s at 10 Hz
