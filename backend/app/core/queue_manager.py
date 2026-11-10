@@ -33,7 +33,9 @@ class IngestionQueueManager:
     Ensures real-time live streams are never starved by multi-thousand backlog floods.
     Maintains per-device sequence tracking to guarantee chronological processing.
     """
-    def __init__(self, maxsize: int = 50000):
+    def __init__(self, maxsize: Optional[int] = None):
+        if maxsize is None:
+            maxsize = settings.MAX_QUEUE_SIZE
         self._queue: asyncio.PriorityQueue[IngestionItem] = asyncio.PriorityQueue(maxsize=maxsize)
         # Last seq seen per device, used to number live frames that arrive without one
         self._device_seq_counters: Dict[str, int] = {}
@@ -84,11 +86,13 @@ class IngestionQueueManager:
                     is_backlog=True
                 )
                 try:
-                    await self._queue.put(item)
+                    # put_nowait: a blocking put() never raises QueueFull and would
+                    # hang this request until the worker drains the queue.
+                    self._queue.put_nowait(item)
                     enqueued_count += 1
                 except asyncio.QueueFull:
                     logger.warning(f"Ingestion queue saturated during backlog ingestion for {device_id}")
-                    break
+                    return enqueued_count
 
             # Cooperative yield so live WebSockets can process uninterrupted
             await asyncio.sleep(0)

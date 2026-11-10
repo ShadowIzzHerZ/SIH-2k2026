@@ -162,6 +162,13 @@ class TestIngestionPriorityQueue(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_item.priority, 1)
         self.assertEqual(second_item.device_id, "device_A")
 
+    async def test_backlog_on_full_queue_returns_instead_of_blocking(self):
+        queue = IngestionQueueManager(maxsize=3)
+        chunk = [{"seq": i, "timestamp": float(i)} for i in range(5)]
+        enqueued = await asyncio.wait_for(queue.enqueue_backlog_chunk("device_A", chunk), timeout=2.0)
+        self.assertEqual(enqueued, 3)
+        self.assertEqual(queue.queue_size, 3)
+
 
 class TestCacheManager(unittest.IsolatedAsyncioTestCase):
     async def test_in_memory_cache_ttl(self):
