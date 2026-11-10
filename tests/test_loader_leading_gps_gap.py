@@ -46,4 +46,5 @@ def test_build_windows_after_leading_gap():
     windows = build_windows(seq, window_size=50, stride=10, dt=dt)
     assert windows, "every window dropped after a leading GPS gap"
     assert all(w.start >= gap for w in windows)
-    assert abs(windows[0].pos_gt[-1, 1] - 49 * dt * 10.0) < 0.5
+    # 50 steps from the anchor (the sample before the window's first)
+    assert abs(windows[0].pos_gt[-1, 1] - 50 * dt * 10.0) < 0.5
