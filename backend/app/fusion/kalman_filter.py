@@ -51,6 +51,11 @@ class IMUKalmanFilter:
         self._last_step_time = 0.0
         self._step_length = 0.68  # Standard pedestrian stride (meters)
 
+        # Complementary roll/pitch correction from gravity: only used while |a| is within
+        # _tilt_gate (m/s^2) of g, pulling toward the accel tilt with time constant _tilt_tau (s)
+        self._tilt_gate = 0.5
+        self._tilt_tau = 2.0
+
     def predict(self, accel_body: np.ndarray, gyro_body: np.ndarray, dt: float, mode: str = "adaptive"):
         """
         Kinematic prediction step over elapsed time dt (seconds).
@@ -67,6 +72,16 @@ class IMUKalmanFilter:
         self.x[7, 0] += gy * dt
         self.x[8, 0] += gz * dt
         self.x[8, 0] = (self.x[8, 0] + np.pi) % (2 * np.pi) - np.pi
+
+        # 1b. Roll/pitch would otherwise be gyro-only and drift with any gyro bias. When the
+        # accelerometer reads about 1 g it is measuring mostly gravity, so blend toward its tilt.
+        ax, ay, az = accel_body[0], accel_body[1], accel_body[2]
+        if abs(float(np.linalg.norm(accel_body)) - GRAVITY) < self._tilt_gate:
+            roll_acc = np.arctan2(ay, az)
+            pitch_acc = np.arctan2(-ax, np.hypot(ay, az))
+            alpha = dt / (self._tilt_tau + dt)
+            self.x[6, 0] += alpha * ((roll_acc - self.x[6, 0] + np.pi) % (2 * np.pi) - np.pi)
+            self.x[7, 0] += alpha * (pitch_acc - self.x[7, 0])
 
         # 2. Transform body acceleration into world navigation frame (gravity-free)
         a_nav = body_to_nav_acceleration(accel_body, roll, pitch, yaw)
