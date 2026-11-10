@@ -149,6 +149,14 @@ data class FusionState(
  * via zuptMaxSpeed) — it only forces the decay a device that was already
  * at a dead stop should obviously get, regardless of how its particular
  * noise happens to compare to a threshold tuned for a different mounting.
+ *
+ * Static hold: all of the above is about a blackout. With GNSS available
+ * the position used to be the raw fix, every fix, so a phone that wasn't
+ * moving still drew a wandering trail: fixes at rest scatter by a few
+ * metres outdoors and by tens of metres indoors. While the caller says the
+ * device is stationary, tick() now keeps the position where the hold
+ * started and ignores fixes that stay inside the fix's own accuracy
+ * radius. See [staticHold].
  */
 class FusionEngine(
     private val model: Predictor,
@@ -203,6 +211,15 @@ class FusionEngine(
     // dial it to 0 and confirm the kink it's meant to fix actually
     // reappears without it — see FusionEngineTest.
     private val chunkBlendSeconds: Float = 0.5f,
+    // Static hold (see class doc). A stationary fix has to land further
+    // than this from the held position before it is believed: the fix's
+    // reported 68% accuracy times the factor, never less than the minimum
+    // (accuracy is often optimistic, and replay/tests pass none) and never
+    // more than the maximum (so a hold started on a wild first fix can't
+    // pin the marker a street away for good).
+    private val staticHoldMinRadiusM: Float = 10f,
+    private val staticHoldAccuracyFactor: Float = 1.5f,
+    private val staticHoldMaxRadiusM: Float = 60f,
 ) {
     var state = FusionState()
         private set
@@ -237,6 +254,40 @@ class FusionEngine(
     private var chunkBlendFrom = FusionState()
 
     private var wasAvailable = true
+
+    // Static hold: where the position is pinned while stationary, and the
+    // accuracy of the fix it was pinned on (0 = unknown).
+    private var holdXY: FloatArray? = null
+    private var holdAccuracyM = 0f
+
+    /** The position to use for a GNSS fix at local [raw], given whether
+     * the device is [stationary] and the fix's horizontal accuracy in
+     * metres ([accuracyM], 0 or NaN when unknown).
+     *
+     * Moving: the fix itself, and any hold ends. Stationary: the position
+     * the hold started on, for as long as new fixes stay within the hold
+     * radius of it. The hold moves to the new fix when that fix is clearly
+     * better than the one held (accuracy under 70% of it: a cold start
+     * that is still converging) or lands outside the radius (the device
+     * did move, or the held fix was the outlier). */
+    private fun staticHold(raw: FloatArray, stationary: Boolean, accuracyM: Float): FloatArray {
+        if (!stationary) {
+            holdXY = null
+            return raw
+        }
+        val acc = if (accuracyM.isFinite() && accuracyM > 0f) accuracyM else 0f
+        val held = holdXY
+        if (held != null) {
+            val dx = raw[0] - held[0]
+            val dy = raw[1] - held[1]
+            val radius = (acc * staticHoldAccuracyFactor).coerceIn(staticHoldMinRadiusM, staticHoldMaxRadiusM)
+            val clearlyBetter = acc > 0f && holdAccuracyM > 0f && acc < 0.7f * holdAccuracyM
+            if (!clearlyBetter && sqrt((dx * dx + dy * dy).toDouble()) <= radius) return held
+        }
+        holdXY = raw
+        holdAccuracyM = acc
+        return raw
+    }
 
     /** East/north metres from the first-ever fix — same formula as
      * src/data/io_vnbd_loader.py's latlon_to_local_xy. */
@@ -308,6 +359,13 @@ class FusionEngine(
         // keeps its prior behavior; MainActivity's real tick() passes the
         // real Location.hasBearing() explicitly.
         gnssHasBearing: Boolean = true,
+        // Static hold inputs (see staticHold). Both default to "off", so
+        // replay and every existing call site keep following each fix.
+        // `stationary` is the caller's judgement that the device isn't
+        // moving (MainActivity: the filtered GNSS speed is 0);
+        // `gnssAccuracyM` is Location.getAccuracy().
+        stationary: Boolean = false,
+        gnssAccuracyM: Float = 0f,
     ) {
         // The model can only ever be called with a full windowSize buffer
         // (see class doc) — force GNSS_TRACKING behavior, real or
@@ -365,7 +423,7 @@ class FusionEngine(
         }
 
         if (effectiveAvailable) {
-            val xy = toLocalXY(lat, lon)
+            val xy = staticHold(toLocalXY(lat, lon), stationary, gnssAccuracyM)
             // Only lock heading to this fix's bearing when it's actually
             // meaningful (see minHeadingLockSpeedMps's doc) — otherwise
             // hold the last fused heading. Position/speed still update from
@@ -566,5 +624,7 @@ class FusionEngine(
         chunkAnchor = FusionState()
         blackoutEntrySpeed = 0f
         wasAvailable = true
+        holdXY = null
+        holdAccuracyM = 0f
     }
 }

@@ -380,4 +380,95 @@ class FusionEngineTest {
             harvested == (firstBlackoutTick until reconnectTick).toList(),
         )
     }
+
+    // ---- static hold (GNSS available, device not moving) ----
+
+    private val metresPerDegLat = 111_194.9 // 6371000 m * pi / 180
+
+    /** One GNSS-available tick at [northM] metres north of the origin. */
+    private fun fixTick(
+        engine: FusionEngine, northM: Double, speed: Float, stationary: Boolean, accuracyM: Float = 0f,
+    ) {
+        engine.tick(
+            calibratedAccel = floatArrayOf(0f, 0f, 0f),
+            calibratedGyro = floatArrayOf(0f, 0f, 0f),
+            available = true,
+            lat = northM / metresPerDegLat, lon = 0.0,
+            gnssSpeed = speed, gnssHeadingRad = 0f,
+            stationary = stationary, gnssAccuracyM = accuracyM,
+        )
+    }
+
+    /** The wandering dot: a phone at rest whose fixes scatter by a few
+     * metres. Without the hold every fix moved the position. */
+    @Test
+    fun `stationary fixes scattering inside the hold radius do not move the position`() {
+        val engine = FusionEngine(FakePredictor(0f, 0f))
+        fixTick(engine, 0.0, speed = 0f, stationary = true, accuracyM = 5f)
+        val scatter = doubleArrayOf(4.0, -6.0, 8.0, -3.0, 7.5, -7.0, 2.0)
+        for (m in scatter) {
+            fixTick(engine, m, speed = 0f, stationary = true, accuracyM = 5f)
+            assertTrue("position moved to ${engine.state.y} m on a stationary fix at $m m", abs(engine.state.y) < 0.01f)
+        }
+    }
+
+    @Test
+    fun `without the stationary flag every fix is followed as before`() {
+        val engine = FusionEngine(FakePredictor(0f, 0f))
+        fixTick(engine, 0.0, speed = 0f, stationary = false)
+        fixTick(engine, 6.0, speed = 0f, stationary = false)
+        assertTrue("expected the raw fix at 6 m, got ${engine.state.y}", abs(engine.state.y - 6f) < 0.01f)
+    }
+
+    @Test
+    fun `a stationary fix outside the hold radius moves the hold to it`() {
+        val engine = FusionEngine(FakePredictor(0f, 0f))
+        fixTick(engine, 0.0, speed = 0f, stationary = true, accuracyM = 5f)
+        fixTick(engine, 40.0, speed = 0f, stationary = true, accuracyM = 5f)
+        assertTrue("expected the hold to move to 40 m, got ${engine.state.y}", abs(engine.state.y - 40f) < 0.01f)
+        fixTick(engine, 44.0, speed = 0f, stationary = true, accuracyM = 5f)
+        assertTrue("expected the new hold to stay at 40 m, got ${engine.state.y}", abs(engine.state.y - 40f) < 0.01f)
+    }
+
+    /** A cold start: the first fix is 50 m accurate and off, the next is
+     * 8 m accurate. Holding the first one would pin the marker on the
+     * worse position for as long as the phone stays put. */
+    @Test
+    fun `a clearly more accurate stationary fix replaces the held one`() {
+        val engine = FusionEngine(FakePredictor(0f, 0f))
+        fixTick(engine, 0.0, speed = 0f, stationary = true, accuracyM = 50f)
+        fixTick(engine, 30.0, speed = 0f, stationary = true, accuracyM = 8f)
+        assertTrue("expected the better fix at 30 m, got ${engine.state.y}", abs(engine.state.y - 30f) < 0.01f)
+    }
+
+    @Test
+    fun `moving off ends the hold and follows the fixes again`() {
+        val engine = FusionEngine(FakePredictor(0f, 0f))
+        fixTick(engine, 0.0, speed = 0f, stationary = true, accuracyM = 5f)
+        fixTick(engine, 3.0, speed = 0f, stationary = true, accuracyM = 5f)
+        fixTick(engine, 4.0, speed = 2f, stationary = false, accuracyM = 5f)
+        assertTrue("expected the raw fix at 4 m once moving, got ${engine.state.y}", abs(engine.state.y - 4f) < 0.01f)
+    }
+
+    /** Hold, then lose GNSS: the blackout starts from the held position at
+     * speed 0, so the forced-rest ZUPT keeps it there whatever the network
+     * says. */
+    @Test
+    fun `a blackout that starts from a static hold stays on the held position`() {
+        val engine = FusionEngine(FakePredictor(deltaV = 1.0f, deltaTheta = 0.2f))
+        repeat(windowSize + 5) { i ->
+            fixTick(engine, if (i % 2 == 0) 5.0 else -5.0, speed = 0f, stationary = true, accuracyM = 5f)
+        }
+        val heldY = engine.state.y
+        repeat(3 * windowSize) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0.8f, 0.3f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0.1f),
+                available = false,
+                lat = 0.0, lon = 0.0, gnssSpeed = 0f, gnssHeadingRad = 0f,
+            )
+        }
+        val moved = sqrt(((engine.state.y - heldY) * (engine.state.y - heldY) + engine.state.x * engine.state.x).toDouble())
+        assertTrue("drifted $moved m during a blackout entered at rest", moved < 0.5)
+    }
 }

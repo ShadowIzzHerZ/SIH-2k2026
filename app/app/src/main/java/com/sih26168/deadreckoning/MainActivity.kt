@@ -62,6 +62,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var locationReader: LocationReader
     // Raw-IMU stillness over the last 2 s, so GNSS speed noise at rest reads as 0.
     private val stillness = StillnessDetector()
+    // GNSS speed the fixes' own positions don't back up reads as 0 too.
+    private val gnssSpeedCheck = GnssSpeedCheck()
     // 6 real recorded drives (Demo 1-6) — every one a genuine DevRecorder
     // capture from live testing in Jalandhar, Punjab (see
     // data/own_recordings/), not comma2k19/synthetic data — plus Demo 7,
@@ -687,6 +689,9 @@ class MainActivity : AppCompatActivity() {
         // never the live provider's own guess. See FusionEngine.tick's
         // minHeadingLockSpeedMps doc for the bug this exists to avoid.
         val hasBearing: Boolean,
+        // Location.getAccuracy() of the fix in metres, 0 when unknown
+        // (replay rows, no fix). Sizes FusionEngine's static hold.
+        val accuracyM: Float = 0f,
     )
 
     private fun readSample(usingReplay: Boolean, demo: Int): Sample {
@@ -704,7 +709,7 @@ class MainActivity : AppCompatActivity() {
         val loc = if (hasFix) fusionFix else locationReader.lastLocation
         val hasRoughFix = hasFix || (locationReader.hasAnyRecentFix() && loc != null)
         stillness.add(sensorReader.lastAccel, sensorReader.lastGyro)
-        val speed = if (loc != null) {
+        var speed = if (loc != null) {
             speedWhileStill(
                 stationaryFilteredSpeed(
                     loc.speed,
@@ -713,11 +718,19 @@ class MainActivity : AppCompatActivity() {
                 stillness.isStill,
             )
         } else 0f
+        // Only GPS fixes go through the position check: a window must hold
+        // one provider's fixes and no gap.
+        if (hasFix && loc != null) {
+            speed = gnssSpeedCheck.filter(loc.latitude, loc.longitude, speed)
+        } else {
+            gnssSpeedCheck.reset()
+        }
         return Sample(
             sensorReader.lastAccel, sensorReader.lastGyro, hasFix, hasRoughFix,
             loc?.latitude ?: 0.0, loc?.longitude ?: 0.0, speed,
             if (loc != null) Calibration.compassDegToMathRad(loc.bearing) else 0f,
             loc?.hasBearing() == true,
+            if (loc != null && loc.hasAccuracy()) loc.accuracy else 0f,
         )
     }
 
@@ -891,6 +904,9 @@ class MainActivity : AppCompatActivity() {
             gnssSpeed = sample.speed,
             gnssHeadingRad = sample.bearingRad,
             gnssHasBearing = sample.hasBearing,
+            // Live only: a replay follows its recorded fixes exactly.
+            stationary = !usingReplay && sample.hasFix && sample.speed == 0f,
+            gnssAccuracyM = sample.accuracyM,
         )
 
         val s = fusion.state
