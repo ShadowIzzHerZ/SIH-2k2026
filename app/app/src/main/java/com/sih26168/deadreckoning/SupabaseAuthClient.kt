@@ -46,6 +46,9 @@ object SupabaseAuthClient {
     // getCachedConsent's doc for why this exists instead of a network
     // round-trip on every recording stop.
     private const val KEY_CACHED_CONSENT = "cached_data_contribution_opt_in"
+    // Set once AuthActivity's post-sign-in steps (device registration and
+    // the consent call) have both succeeded, see isSetupComplete.
+    private const val KEY_SETUP_COMPLETE = "setup_complete"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -75,6 +78,22 @@ object SupabaseAuthClient {
 
     fun clearStoredSession(context: Context) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
+    }
+
+    /** True once registerDevice and setDataContributionOptIn have both
+     * succeeded after a sign-in. signIn/signUp store the session before
+     * those run, so a stored session alone doesn't mean the account is set
+     * up: if either call failed, or the screen closed mid-call, AuthActivity
+     * has to stay reachable so they can be retried. Cleared along with the
+     * session by clearStoredSession. */
+    fun isSetupComplete(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SETUP_COMPLETE, false)
+
+    fun markSetupComplete(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_SETUP_COMPLETE, true)
+            .apply()
     }
 
     /** Local mirror of profiles.data_contribution_opt_in, written whenever
@@ -120,7 +139,9 @@ object SupabaseAuthClient {
 
                 client.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string().orEmpty()
-                    Log.d(TAG, "signUp: HTTP ${response.code}, body=$responseBody")
+                    // Status only: a successful body carries the access and
+                    // refresh tokens, which must never reach logcat.
+                    Log.d(TAG, "signUp: HTTP ${response.code}")
                     if (!response.isSuccessful) {
                         throw IOException(extractErrorMessage(responseBody, response.code))
                     }
@@ -162,7 +183,7 @@ object SupabaseAuthClient {
 
                 client.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string().orEmpty()
-                    Log.d(TAG, "signIn: HTTP ${response.code}, body=$responseBody")
+                    Log.d(TAG, "signIn: HTTP ${response.code}")
                     if (!response.isSuccessful) {
                         throw IOException(extractErrorMessage(responseBody, response.code))
                     }
@@ -177,6 +198,45 @@ object SupabaseAuthClient {
                 }
             }.onFailure { Log.e(TAG, "signIn failed", it) }
         }
+
+    /** POST {url}/auth/v1/token?grant_type=refresh_token — trades the
+     * session's refresh token for a fresh access token (Supabase's expire
+     * after an hour by default). Supabase rotates the refresh token on every
+     * use, so the new session is stored straight away; the old refresh token
+     * stops working. If GoTrue says the refresh token itself is no longer
+     * valid (revoked, already used, signed out elsewhere), the stored
+     * session is cleared too: it can never work again, and keeping it made
+     * every later upload fail the same way without anything changing.
+     * Blocking: call from Dispatchers.IO. */
+    fun refreshSession(context: Context, session: Session): Session {
+        val body = JSONObject().apply {
+            put("refresh_token", session.refreshToken)
+        }.toString().toRequestBody(jsonMediaType)
+
+        val request = Request.Builder()
+            .url("$SUPABASE_URL/auth/v1/token?grant_type=refresh_token")
+            .addHeader("apikey", SUPABASE_ANON_KEY)
+            .post(body)
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                // Only if it's still the stored session, so a newer sign-in
+                // or refresh isn't thrown away.
+                if (isRevokedRefreshToken(response.code, responseBody) &&
+                    getStoredSession(context)?.refreshToken == session.refreshToken
+                ) {
+                    Log.w(TAG, "refresh token rejected, clearing the stored session")
+                    clearStoredSession(context)
+                }
+                throw SupabaseHttpException(response.code, extractErrorMessage(responseBody, response.code))
+            }
+            val refreshed = parseSession(responseBody)
+            storeSession(context, refreshed)
+            return refreshed
+        }
+    }
 
     /** Upserts this install's DeviceIdentity.get(context) value into the
      * `devices` table under the signed-in user — RLS's devices_insert_own/
@@ -256,8 +316,10 @@ object SupabaseAuthClient {
      * rather than re-checked here. `raw_data_ref`/`used_for_training` are
      * left at their column defaults (null/false) — nothing yet uploads the
      * actual raw IMU log this row would point at (see SUPABASE.md's
-     * "what's NOT built yet" #4). */
+     * "what's NOT built yet" #4). A 401 (the stored access token expired)
+     * refreshes the session once and retries, see refreshSession. */
     suspend fun recordDriveSession(
+        context: Context,
         session: Session,
         deviceId: String,
         startedAt: Instant,
@@ -282,18 +344,20 @@ object SupabaseAuthClient {
                 put("contribute_to_training", contributeToTraining)
             }.toString().toRequestBody(jsonMediaType)
 
-            val request = Request.Builder()
-                .url("$SUPABASE_URL/rest/v1/drive_sessions")
-                .addHeader("apikey", SUPABASE_ANON_KEY)
-                .addHeader("Authorization", "Bearer ${session.accessToken}")
-                .addHeader("Prefer", "return=minimal")
-                .post(body)
-                .build()
+            retryOnceOnUnauthorized(session, refresh = { refreshSession(context, it) }) { current ->
+                val request = Request.Builder()
+                    .url("$SUPABASE_URL/rest/v1/drive_sessions")
+                    .addHeader("apikey", SUPABASE_ANON_KEY)
+                    .addHeader("Authorization", "Bearer ${current.accessToken}")
+                    .addHeader("Prefer", "return=minimal")
+                    .post(body)
+                    .build()
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    val responseBody = response.body?.string().orEmpty()
-                    throw IOException(extractErrorMessage(responseBody, response.code))
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        val responseBody = response.body?.string().orEmpty()
+                        throw SupabaseHttpException(response.code, extractErrorMessage(responseBody, response.code))
+                    }
                 }
             }
         }.onFailure { Log.e(TAG, "recordDriveSession failed", it) }
@@ -305,3 +369,46 @@ object SupabaseAuthClient {
             json.optString("msg", json.optString("message", "HTTP $httpCode"))
         }.getOrDefault("HTTP $httpCode")
 }
+
+/** A non-2xx Supabase response, keeping the HTTP status so an expired
+ * access token (401) can be told apart from other failures. */
+internal class SupabaseHttpException(val code: Int, message: String) : IOException(message)
+
+/** True when a refresh_token grant failed because the refresh token itself
+ * is dead: HTTP 400/401 with `"error": "invalid_grant"` (older GoTrue) or an
+ * `error_code` saying the refresh token, session or user is gone (newer
+ * GoTrue). Network errors, 5xx and anything else keep the session so a
+ * later refresh can still succeed. */
+internal fun isRevokedRefreshToken(httpCode: Int, responseBody: String): Boolean {
+    if (httpCode != 400 && httpCode != 401) return false
+    val json = runCatching { JSONObject(responseBody) }.getOrNull() ?: return false
+    val errorCode = json.optString("error_code")
+    return json.optString("error") == "invalid_grant" ||
+        errorCode.startsWith("refresh_token_") ||
+        errorCode in setOf("session_not_found", "session_expired", "user_not_found", "user_banned")
+}
+
+/** A GoTrue token response (sign-in or refresh) as a Session. */
+internal fun parseSession(responseBody: String): SupabaseAuthClient.Session {
+    val json = JSONObject(responseBody)
+    return SupabaseAuthClient.Session(
+        accessToken = json.getString("access_token"),
+        refreshToken = json.getString("refresh_token"),
+        userId = json.getJSONObject("user").getString("id"),
+    )
+}
+
+/** Runs [call] with [session]; if it fails with a 401, gets a new session
+ * from [refresh] and runs [call] once more with that. Any other failure,
+ * or a second 401, is thrown as is. */
+internal fun <T> retryOnceOnUnauthorized(
+    session: SupabaseAuthClient.Session,
+    refresh: (SupabaseAuthClient.Session) -> SupabaseAuthClient.Session,
+    call: (SupabaseAuthClient.Session) -> T,
+): T =
+    try {
+        call(session)
+    } catch (e: SupabaseHttpException) {
+        if (e.code != 401) throw e
+        call(refresh(session))
+    }

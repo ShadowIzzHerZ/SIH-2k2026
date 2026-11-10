@@ -296,7 +296,7 @@ close to the deadline.
   - **IO-VNBD-only test drift: 62.33%** — flat vs. the 62.76% IO-VNBD-only baseline, i.e. mixing in comma2k19 did **not** measurably help IO-VNBD itself.
   - **comma2k19-only test drift: 16.49% mean / 8.94% median** — meaningfully better than the zero-shot 29.27%/15.64% above, and the median now clears the PS's <10% target. Training on comma2k19 (not just evaluating on it) genuinely helps comma2k19 performance; it just doesn't transfer back to IO-VNBD's harder scenario.
   - Along the way, found and fixed a real bug in the warm-restart LR schedule (`src/train.py`): `CosineAnnealingLR`'s `T_max` was always the full config epoch budget (60), but `early_stop_patience=8` was cutting every resumed cycle off after only 8-16 real epochs — so LR barely moved off its peak before each cycle ended, and every restart was retracing almost the same high-LR trajectory. Fixed by sizing `T_max` to the guaranteed cycle length on resume (`early_stop_patience + 2`) so LR actually reaches a fine-tuning-scale value even in the worst case. Confirmed via the checkpoint's own history that this was a real inefficiency, not the reason for the plateau: even after the fix, **9 more warm-restart cycles all still failed to beat the pre-fix 63.26% best val drift** — this is a genuine ceiling for this architecture + data combination, not an LR artifact.
-- [x] **Per-window drift diagnostics** ([src/diagnose_drift.py](src/diagnose_drift.py), [results/drift_diagnostics.csv](results/drift_diagnostics.csv)) — checked whether the 60%+ mean / 809% worst-case test drift is driven by a small number of outlier windows or one identifiable failure mode (e.g. tight turns, as earlier bullets assumed), before trying another blind architecture/data change. It's neither:
+- [x] **Per-window drift diagnostics** ([src/diagnose_drift.py](src/diagnose_drift.py), which writes the per-window table to `results/drift_diagnostics.csv`; generated, not committed) — checked whether the 60%+ mean / 809% worst-case test drift is driven by a small number of outlier windows or one identifiable failure mode (e.g. tight turns, as earlier bullets assumed), before trying another blind architecture/data change. It's neither:
   - Removing the worst 1% of windows only drops mean drift 60.92% → 59.25%; removing the worst 5% only gets to 57.83% — the tail isn't dominating the average.
   - Correlation of drift-% with distance travelled (r=0.34), max yaw rate (r=0.22), mean yaw rate (r=0.26), and starting speed (r≈-0.04) are all weak — no single factor explains per-window error.
   - The actual pattern: median drift (66.96%) sits *above* the mean, i.e. bimodal — a cluster of easy, long, high-speed highway-like windows near 0% drift (matching comma2k19's strength) pulling the mean down, against a majority of short, low-speed, urban stop-and-go windows sitting around 60-90%.
@@ -328,15 +328,16 @@ python src/data/inspect_dataset.py
 # 2. train (cold start)
 python -m src.train --config configs/default.yaml
 
-# 2b. or resume/warm-restart from the current best checkpoint instead of
-# random init — measures the loaded weights' real val drift first so
-# checkpoints/best.pt only gets overwritten if this run actually beats it.
-# Backs up the previous checkpoints/best.pt -> best_prev.pt and
-# results/train_history.json -> train_history_prev.json before it starts.
-python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
+# 2b. or resume/warm-restart from the shipped checkpoint (best_v3chain.pt)
+# instead of random init — measures the loaded weights' real val drift first
+# so checkpoints/best_v3chain.pt only gets overwritten if this run actually
+# beats it. --run_name v3chain makes it save there instead of best.pt. Backs
+# up the previous checkpoints/best_v3chain.pt -> best_v3chain_prev.pt and
+# results/train_history_v3chain.json -> train_history_v3chain_prev.json first.
+python -m src.train --config configs/default.yaml --resume checkpoints/best_v3chain.pt --run_name v3chain
 
 # 3. evaluate against the PS's <10% drift benchmark
-python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
+python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best_v3chain.pt
 
 # 4. export for the mobile app
 python -m src.export_onnx --config configs/default.yaml --checkpoint checkpoints/best_v3chain.pt
@@ -355,7 +356,7 @@ python -m src.simulate_blackout --dataset iovnbd --blackout_duration_s 45
 python -m tests.test_map_matching
 
 # measure map-matching's real improvement on the trained model's predictions
-python -m src.evaluate_with_mapmatching --config configs/default.yaml --checkpoint checkpoints/best.pt
+python -m src.evaluate_with_mapmatching --config configs/default.yaml --checkpoint checkpoints/best_v3chain.pt
 ```
 
 ### Training on Colab

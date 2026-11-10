@@ -4,7 +4,19 @@ import json
 from typing import Optional, List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
-from app.db.models import TrajectoryPoint, DeviceSession
+from app.db.models import TrajectoryPoint, DeviceSession, utc_now
+
+def _epoch_to_db_time(ts: Optional[float]) -> datetime:
+    """Epoch seconds -> naive UTC datetime, as stored in the TIMESTAMP (no tz) column."""
+    if not ts:
+        return utc_now()
+    return datetime.fromtimestamp(ts, tz=timezone.utc).replace(tzinfo=None)
+
+def db_time_to_epoch(dt: datetime) -> float:
+    """Stored naive UTC datetime -> epoch seconds (independent of the server's local timezone)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
 
 async def get_last_known_position(db: AsyncSession, device_id: str) -> Optional[Dict[str, Any]]:
     """
@@ -26,7 +38,7 @@ async def get_last_known_position(db: AsyncSession, device_id: str) -> Optional[
     return {
         "device_id": point.device_id,
         "seq": point.seq_num,
-        "timestamp": point.time.timestamp(),
+        "timestamp": db_time_to_epoch(point.time),
         "x": point.x,
         "y": point.y,
         "z": point.z,
@@ -39,13 +51,36 @@ async def get_last_known_position(db: AsyncSession, device_id: str) -> Optional[
         "movement_state": point.movement_state or "REST",
         "step_count": point.step_count or 0,
         "is_verified": point.is_verified,
-        "covariance": json.loads(point.covariance_json) if point.covariance_json else None
+        "covariance": json.loads(point.covariance_json) if point.covariance_json else None,
+        "last_step_age_sec": await _last_step_age_sec(db, point)
     }
+
+async def _last_step_age_sec(db: AsyncSession, point: TrajectoryPoint) -> Optional[float]:
+    """
+    Seconds between the device's last detected step and `point`, or None with no steps.
+    A step increments step_count on the sample it is detected on, so the step happened at
+    the earliest fused row that already carries the final count. Rows not fused
+    (is_verified false) are skipped.
+    """
+    if not point.step_count:
+        return None
+    stmt = (
+        select(TrajectoryPoint.time)
+        .where(TrajectoryPoint.device_id == point.device_id)
+        .where(TrajectoryPoint.step_count == point.step_count)
+        .where(TrajectoryPoint.is_verified.is_(True))
+        .where(TrajectoryPoint.time <= point.time)
+        .order_by(TrajectoryPoint.time)
+        .limit(1)
+    )
+    step_time = (await db.execute(stmt)).scalar_one_or_none()
+    if step_time is None:
+        return None
+    return (point.time - step_time).total_seconds()
 
 async def save_trajectory_point(db: AsyncSession, point_data: Dict[str, Any]) -> TrajectoryPoint:
     """Insert a single verified trajectory point."""
-    ts = point_data.get("timestamp")
-    dt = datetime.fromtimestamp(ts, tz=timezone.utc) if ts else datetime.now(timezone.utc)
+    dt = _epoch_to_db_time(point_data.get("timestamp"))
 
     point = TrajectoryPoint(
         time=dt,
@@ -79,8 +114,7 @@ async def save_trajectory_batch(db: AsyncSession, points_data: List[Dict[str, An
 
     points = []
     for p in points_data:
-        ts = p.get("timestamp")
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc) if ts else datetime.now(timezone.utc)
+        dt = _epoch_to_db_time(p.get("timestamp"))
         points.append(
             TrajectoryPoint(
                 time=dt,
@@ -108,13 +142,13 @@ async def save_trajectory_batch(db: AsyncSession, points_data: List[Dict[str, An
     return len(points)
 
 async def get_trajectory_history(db: AsyncSession, device_id: str, limit: int = 500) -> List[TrajectoryPoint]:
-    """Fetch recent trajectory history for a device."""
+    """Fetch the most recent `limit` trajectory points for a device, oldest first."""
     stmt = (
         select(TrajectoryPoint)
         .where(TrajectoryPoint.device_id == device_id)
-        .order_by(TrajectoryPoint.time.asc())
+        .order_by(desc(TrajectoryPoint.time))
         .limit(limit)
     )
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    return list(reversed(result.scalars().all()))
 

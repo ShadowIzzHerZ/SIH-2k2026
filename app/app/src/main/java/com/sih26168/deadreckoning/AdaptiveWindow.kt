@@ -19,17 +19,18 @@ object AdaptiveWindow {
      * given views, on top of whatever padding they already declare. */
     fun applyInsets(activity: Activity, root: View, top: View? = null, bottom: View? = null) {
         WindowCompat.setDecorFitsSystemWindows(activity.window, false)
-        val topBase = top?.paddingTop ?: 0
+        val topBase = (top ?: root).paddingTop
         val bottomBase = (bottom ?: root).paddingBottom
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
-            if (top != null) {
-                top.setPadding(top.paddingLeft, topBase + bars.top, top.paddingRight, top.paddingBottom)
-            } else {
-                root.setPadding(root.paddingLeft, bars.top, root.paddingRight, root.paddingBottom)
-            }
+            // With no separate top view the root takes the status bar inset,
+            // still on top of its own declared padding (it used to replace it).
+            (top ?: root).setPadding(
+                (top ?: root).paddingLeft, topBase + bars.top,
+                (top ?: root).paddingRight, (top ?: root).paddingBottom
+            )
             (bottom ?: root).setPadding(
                 (bottom ?: root).paddingLeft, (bottom ?: root).paddingTop,
                 (bottom ?: root).paddingRight, bottomBase + bars.bottom
@@ -46,15 +47,25 @@ object AdaptiveWindow {
         c.isAppearanceLightNavigationBars = true
     }
 
-    /** Centers a scrolling form's content column and caps its width. */
+    /** Centers a scrolling form's content column and caps its width. Kept
+     * up to date when the view is resized without the Activity being
+     * recreated (MainActivity handles screen-size changes itself, see the
+     * manifest), so unfolding or leaving split screen doesn't leave the old
+     * margins behind. */
     fun capContentWidth(activity: Activity, content: View) {
         val dm = activity.resources.displayMetrics
-        val widthDp = dm.widthPixels / dm.density
-        if (widthDp <= MAX_CONTENT_DP) return
-        val extra = ((widthDp - MAX_CONTENT_DP) / 2f * dm.density).toInt()
-        content.setPadding(
-            content.paddingLeft + extra, content.paddingTop,
-            content.paddingRight + extra, content.paddingBottom
-        )
+        val maxPx = (MAX_CONTENT_DP * dm.density).toInt()
+        val baseLeft = content.paddingLeft
+        val baseRight = content.paddingRight
+        fun capTo(widthPx: Int) {
+            val extra = ((widthPx - maxPx) / 2).coerceAtLeast(0)
+            if (content.paddingLeft != baseLeft + extra || content.paddingRight != baseRight + extra) {
+                content.setPadding(baseLeft + extra, content.paddingTop, baseRight + extra, content.paddingBottom)
+            }
+        }
+        capTo(dm.widthPixels)
+        content.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            if (right - left != oldRight - oldLeft) capTo(right - left)
+        }
     }
 }

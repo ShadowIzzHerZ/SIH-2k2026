@@ -3,9 +3,18 @@ package com.sih26168.deadreckoning
 import android.content.Context
 import java.io.File
 import java.io.FileWriter
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
+
+/** The `recordings` folder under the first of [roots] that exists (non-null)
+ * and can be created, or null if none can. */
+internal fun recordingsDir(vararg roots: File?): File? =
+    roots.firstNotNullOfOrNull { root ->
+        root?.let { File(it, "recordings") }?.takeIf { it.isDirectory || it.mkdirs() }
+    }
 
 /**
  * Developer-mode data recorder — logs real sensor+GPS samples to a CSV in
@@ -30,7 +39,7 @@ import java.util.Locale
  * top of IO-VNBD/comma2k19.
  */
 class DevRecorder(private val context: Context) {
-    private var writer: FileWriter? = null
+    private var writer: BackgroundRowWriter? = null
     private var startNanos: Long = 0
 
     var sampleCount: Int = 0
@@ -42,15 +51,26 @@ class DevRecorder(private val context: Context) {
 
     /** Starts a new recording, closing any previous one first. `label`
      * becomes the filename prefix — "openroute" or "calib", matching
-     * data/own_recordings/README.md's naming convention. */
-    fun start(label: String): File {
+     * data/own_recordings/README.md's naming convention. Returns null if
+     * no file could be opened (no usable storage at all); the caller tells
+     * the user, nothing is recorded. */
+    fun start(label: String): File? {
         stop()
+        currentFile = null
         val ts = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
-        val dir = File(context.getExternalFilesDir(null), "recordings").apply { mkdirs() }
+        // getExternalFilesDir returns null while shared storage is
+        // unavailable (unmounted, or mid-mount right after boot); fall back
+        // to internal storage rather than crash. Both are listed in
+        // provider_paths.xml, so Share works for either.
+        val dir = recordingsDir(context.getExternalFilesDir(null), context.filesDir) ?: return null
         val file = File(dir, "${label}_$ts.csv")
-        val w = FileWriter(file)
+        val w = try {
+            FileWriter(file)
+        } catch (e: IOException) {
+            return null
+        }
         w.append("time_since_start,accel_x,accel_y,accel_z,gyro_x,gyro_y,gyro_z,lat,lon,speed_gt,heading_gt\n")
-        writer = w
+        writer = BackgroundRowWriter(w)
         currentFile = file
         sampleCount = 0
         startNanos = System.nanoTime()
@@ -76,21 +96,81 @@ class DevRecorder(private val context: Context) {
     ) {
         val w = writer ?: return
         val t = (System.nanoTime() - startNanos) / 1e9
-        val fix = if (hasFix) "%.7f,%.7f,%.3f,%.2f".format(lat, lon, speed, bearingDeg) else ",,,"
-        w.append(
-            "%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%s\n".format(
-                t, accel[0], accel[1], accel[2], gyro[0], gyro[1], gyro[2], fix,
-            )
-        )
+        w.write(formatRecordingRow(t, accel, gyro, hasFix, lat, lon, speed, bearingDeg))
         sampleCount++
     }
 
     /** Flushes and closes the current file, returning it (null if nothing
-     * was ever started). Safe to call when not recording. */
+     * was ever started). Safe to call when not recording. Waits for the
+     * rows still queued, so the file is complete once this returns. */
     fun stop(): File? {
-        writer?.flush()
         writer?.close()
         writer = null
         return currentFile
+    }
+}
+
+/** One CSV row of DevRecorder's recording, newline included. Always
+ * formatted with Locale.US: String.format uses the phone's default locale,
+ * and on a comma-decimal locale (de, fr, es, id, ...) "%.5f" writes
+ * "9,81000", which splits every number into two columns and breaks
+ * io_vnbd_loader.py's parsing of the file. */
+internal fun formatRecordingRow(
+    t: Double,
+    accel: FloatArray,
+    gyro: FloatArray,
+    hasFix: Boolean,
+    lat: Double,
+    lon: Double,
+    speed: Float,
+    bearingDeg: Float,
+): String {
+    val fix = if (hasFix) String.format(Locale.US, "%.7f,%.7f,%.3f,%.2f", lat, lon, speed, bearingDeg) else ",,,"
+    return String.format(
+        Locale.US, "%.3f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%s\n",
+        t, accel[0], accel[1], accel[2], gyro[0], gyro[1], gyro[2], fix,
+    )
+}
+
+/** Appends rows to [out] on its own single background thread, in the order
+ * they were given, so the 10 Hz tick on the main thread never waits on
+ * file I/O. close() flushes and closes [out] after every queued row and
+ * returns once that is done. A failed write stops further writes to this
+ * file (it would have a hole in it anyway) instead of crashing the app;
+ * [failure] keeps the error. */
+internal class BackgroundRowWriter(private val out: java.io.Writer) {
+    private val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "dev-recorder-writer") }
+
+    @Volatile var failure: IOException? = null
+        private set
+
+    fun write(row: String) {
+        executor.execute {
+            if (failure != null) return@execute
+            try {
+                out.write(row)
+            } catch (e: IOException) {
+                failure = e
+            }
+        }
+    }
+
+    fun close() {
+        try {
+            executor.submit {
+                try {
+                    out.flush()
+                } catch (e: IOException) {
+                    if (failure == null) failure = e
+                }
+                try {
+                    out.close()
+                } catch (e: IOException) {
+                    if (failure == null) failure = e
+                }
+            }.get()
+        } finally {
+            executor.shutdown()
+        }
     }
 }

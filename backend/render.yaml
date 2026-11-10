@@ -2,6 +2,10 @@ services:
   - type: web
     name: sih-dead-reckoning-backend
     runtime: python
+    # The backend lives in backend/ of the repo; the repo root holds the ML
+    # project (its own requirements.txt) and the Android app/ directory, which
+    # would shadow the app.main module path.
+    rootDir: backend
     region: oregon
     plan: starter
     buildCommand: pip install -r requirements.txt

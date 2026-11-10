@@ -251,6 +251,13 @@ class FusionEngine(
 
     private fun wrapAngle(a: Float): Float = atan2(sin(a.toDouble()), cos(a.toDouble())).toFloat()
 
+    /** Interpolates from heading `from` to `to` along the shorter arc.
+     * A plain (1-w)*from + w*to in raw radians goes the long way round
+     * whenever the two straddle the +-pi seam (e.g. 3.0 -> -3.0 swept
+     * through 0, spinning a west-facing heading east mid-blend). */
+    private fun lerpAngle(from: Float, to: Float, w: Float): Float =
+        wrapAngle(from + w * wrapAngle(to - from))
+
     /** Inverse of toLocalXY — lets a caller (e.g. MapMatcher, which works
      * in real lat/lon) convert the fused local position back to a real
      * coordinate, using this engine's own reference fix. Returns null
@@ -302,15 +309,13 @@ class FusionEngine(
         // real Location.hasBearing() explicitly.
         gnssHasBearing: Boolean = true,
     ) {
-        if (rollingWindow.size >= windowSize) rollingWindow.removeFirst()
-        rollingWindow.addLast(calibratedAccel + calibratedGyro)
-
         // The model can only ever be called with a full windowSize buffer
         // (see class doc) — force GNSS_TRACKING behavior, real or
         // simulated blackout ignored, until there's enough real history to
         // safely resolve a chunk. Only matters for the first ~5s right
-        // after calibration completes.
-        val effectiveAvailable = available || rollingWindow.size < windowSize
+        // after calibration completes. Counts this tick's own sample, which
+        // is only pushed into rollingWindow below.
+        val effectiveAvailable = available || rollingWindow.size + 1 < windowSize
 
         if (effectiveAvailable && !wasAvailable) {
             // GNSS just came back — fold in any pending (< windowSize)
@@ -323,11 +328,23 @@ class FusionEngine(
             // the true last blackout position yet — chunkAnchor always is,
             // updated immediately inside resolveChunk regardless of how
             // long the display takes to visually catch up to it.
+            //
+            // Flushed BEFORE this tick's sample joins rollingWindow: this
+            // sample is GNSS-available, not part of the blackout, so the
+            // window's last `pending` rows must still be exactly the
+            // blackout's own samples (same chunk fusion.py's run_fusion
+            // integrates). Pushing first shifted the harvest one sample
+            // late — dropping the first blackout sample and integrating
+            // this one instead.
             flushPending()
             blendRemaining = blendSamples
             blendFrom = chunkAnchor.copy()
             chunkBlendRemaining = 0  // superseded by the GNSS-reconnect blend starting now
         }
+
+        if (rollingWindow.size >= windowSize) rollingWindow.removeFirst()
+        rollingWindow.addLast(calibratedAccel + calibratedGyro)
+
         if (!effectiveAvailable && wasAvailable) {
             // Blackout just started fresh (from GNSS_TRACKING or BLEND) —
             // anchor to the real current state and start clean. Explicit
@@ -364,7 +381,7 @@ class FusionEngine(
                     FusionMode.BLEND,
                     (1 - w) * blendFrom.x + w * gnssState.x,
                     (1 - w) * blendFrom.y + w * gnssState.y,
-                    wrapAngle((1 - w) * blendFrom.heading + w * gnssState.heading),
+                    lerpAngle(blendFrom.heading, gnssState.heading, w),
                     (1 - w) * blendFrom.speed + w * gnssState.speed,
                 )
             } else {
@@ -386,7 +403,7 @@ class FusionEngine(
                     FusionMode.BLACKOUT,
                     (1 - w) * chunkBlendFrom.x + w * chunkAnchor.x,
                     (1 - w) * chunkBlendFrom.y + w * chunkAnchor.y,
-                    wrapAngle((1 - w) * chunkBlendFrom.heading + w * chunkAnchor.heading),
+                    lerpAngle(chunkBlendFrom.heading, chunkAnchor.heading, w),
                     (1 - w) * chunkBlendFrom.speed + w * chunkAnchor.speed,
                 )
             } else {

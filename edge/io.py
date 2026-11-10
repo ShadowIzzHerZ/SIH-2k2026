@@ -1,11 +1,13 @@
 """
 The edge engine's file format, and the small coordinate helpers it needs.
 
-One CSV, one row per sensor event, sorted by time:
+One CSV, one row per sensor event, sorted by time (load_csv raises if not):
 
     t,ax,ay,az,gx,gy,gz,lat,lon,speed,heading
 
-  t            seconds (any epoch; only differences matter)
+  t            seconds (any epoch; only differences matter). ms/us/ns stamps
+               need --time-unit; load_csv raises if the IMU rate they
+               imply is implausible.
   ax..gz       raw IMU, sensor frame. Units set on the command line
                (--accel-unit m/s2|g, --gyro-unit rad/s|deg/s).
   lat, lon     GNSS fix in degrees. Or give x, y in local metres instead.
@@ -27,6 +29,10 @@ import numpy as np
 
 EARTH_R = 6371000.0
 IMU_COLS = ["ax", "ay", "az", "gx", "gy", "gz"]
+TIME_UNITS = {"s": 1.0, "ms": 1e-3, "us": 1e-6, "ns": 1e-9}
+# Plausible IMU rates once t is in seconds. The model runs at 10 Hz, so a
+# slower "IMU" can't feed it; phone and automotive IMUs top out at a few kHz.
+IMU_HZ_RANGE = (5.0, 10000.0)
 
 
 @dataclass
@@ -70,7 +76,27 @@ def _col(rows, header, name):
     return np.array([float(r[i]) if i < len(r) and r[i].strip() not in ("", "nan", "NaN") else np.nan for r in rows])
 
 
-def load_csv(path: str, accel_unit: str = "m/s2", gyro_unit: str = "rad/s") -> EdgeRecording:
+def check_imu_rate(t_imu, path: str = "input") -> None:
+    """Raise if the IMU rate implied by t_imu (seconds) is implausible, which
+    almost always means t is in ms, us or ns. Uses the median step, so GNSS
+    gaps and dropped samples don't move it."""
+    dt = np.diff(np.asarray(t_imu, dtype=float))
+    dt = dt[dt > 0]
+    if not len(dt):
+        return
+    hz = 1.0 / float(np.median(dt))
+    lo, hi = IMU_HZ_RANGE
+    if lo <= hz <= hi:
+        return
+    guess = [u for u, k in TIME_UNITS.items() if u != "s" and lo <= hz / k <= hi]
+    hint = (f"t looks like it is in {guess[0]}: pass --time-unit {guess[0]} "
+            f"(load_csv(..., time_unit={guess[0]!r}))" if guess else "t must be in seconds")
+    raise ValueError(f"{path}: IMU rate from t comes out at {hz:.3g} Hz, outside the plausible "
+                     f"{lo:g}-{hi:g} Hz; {hint}")
+
+
+def load_csv(path: str, accel_unit: str = "m/s2", gyro_unit: str = "rad/s",
+             time_unit: str = "s") -> EdgeRecording:
     with open(path, newline="") as f:
         reader = csv.reader(f)
         header = [h.strip().lower() for h in next(reader)]
@@ -80,7 +106,23 @@ def load_csv(path: str, accel_unit: str = "m/s2", gyro_unit: str = "rad/s") -> E
         raise ValueError(f"{path}: missing column(s) {missing}; see edge/io.py for the format")
 
     t = _col(rows, header, "t")
-    imu = np.stack([_col(rows, header, c) for c in IMU_COLS], axis=1)
+    # The engine replays rows in file order, like a live stream, so the file
+    # has to be in time order already. Raise rather than sort: a backward step
+    # is either rows merged out of order (sorting would fix that) or a sensor
+    # clock restart (sorting would silently interleave two time bases into
+    # one nonsense drive), and from the file alone the two look the same.
+    if not np.isfinite(t).all():
+        i = int(np.flatnonzero(~np.isfinite(t))[0])
+        raise ValueError(f"{path}: data row {i + 1} has no t; every row needs a timestamp")
+    back = np.flatnonzero(np.diff(t) < 0)
+    if len(back):
+        i = int(back[0])
+        raise ValueError(
+            f"{path}: rows are not sorted by t: data row {i + 2} has t={t[i + 1]!r} after t={t[i]!r} "
+            f"({len(back)} backward step(s) in all). If the rows were only merged out of order, sort the "
+            f"file by t (e.g. pandas sort_values('t', kind='stable')); if the sensor clock restarted, "
+            f"split the file at the restart")
+    imu =np.stack([_col(rows, header, c) for c in IMU_COLS], axis=1)
     has_imu = np.isfinite(imu).all(axis=1)
     accel, gyro = imu[has_imu, :3], imu[has_imu, 3:]
     if accel_unit == "g":
@@ -109,6 +151,8 @@ def load_csv(path: str, accel_unit: str = "m/s2", gyro_unit: str = "rad/s") -> E
         c = _col(rows, header, name)
         return c[has_fix] if c is not None else np.full(int(has_fix.sum()), np.nan)
 
+    t = t * TIME_UNITS[time_unit]
+    check_imu_rate(t[has_imu], path)
     return EdgeRecording(t[has_imu], accel, gyro, t[has_fix], xy, opt("speed"), opt("heading"), origin)
 
 

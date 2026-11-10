@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -31,6 +32,11 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import java.time.Instant
 
+// Process-level, so ModelUpdater.checkForUpdate runs once per app start
+// rather than on every onCreate (a configuration change recreates the
+// Activity, and a second check could race the first one's download).
+private var modelUpdateCheckStarted = false
+
 /**
  * Live on-device demo of the whole pipeline this repo trains and
  * validates in Python: SensorReader (raw IMU) -> CalibrationManager
@@ -54,6 +60,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var sensorReader: SensorReader
     private lateinit var locationReader: LocationReader
+    // Raw-IMU stillness over the last 2 s, so GNSS speed noise at rest reads as 0.
+    private val stillness = StillnessDetector()
     // 6 real recorded drives (Demo 1-6) — every one a genuine DevRecorder
     // capture from live testing in Jalandhar, Punjab (see
     // data/own_recordings/), not comma2k19/synthetic data — plus Demo 7,
@@ -77,7 +85,9 @@ class MainActivity : AppCompatActivity() {
     private var calibration = CalibrationManager()
     private lateinit var model: BiasCorrectionModel
     private lateinit var fusion: FusionEngine
-    private lateinit var mapMatcher: MapMatcher
+    // Null until the road graph (about 460 KB of JSON) has been parsed on a
+    // background thread at startup; until then nothing is map-matched.
+    private var mapMatcher: MapMatcher? = null
 
     // ---- Top bar ----
     private lateinit var headerIcon: ImageView
@@ -147,6 +157,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var devRecordStatus: TextView
     private lateinit var devShareButton: Button
     private lateinit var devRecorder: DevRecorder
+    private lateinit var accountSignInButton: Button
     private lateinit var prefs: SharedPreferences
 
     // drive_sessions upload (see SUPABASE.md) — tracked alongside
@@ -234,14 +245,52 @@ class MainActivity : AppCompatActivity() {
 
     private val requestPermissions = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
-    ) { granted ->
-        if (granted.values.all { it }) {
+    ) { _ ->
+        // Checked against the real permission state, not the result map:
+        // a cancelled request (e.g. the activity was recreated while the
+        // dialog was up) returns an empty map, and `all { it }` on an
+        // empty map is true, which used to start the pipeline with no
+        // location access and no explanation.
+        if (locationPermissionGranted()) {
             locationRequiredCard.visibility = View.GONE
             startPipeline()
         } else {
-            locationRequiredCard.visibility = View.VISIBLE
+            showLocationRequired()
         }
     }
+
+    /** Shows locationRequiredCard. When only approximate location was
+     * granted (Android 12+ lets the user pick it in the permission dialog)
+     * the card says precise location is what's missing: approximate fixes
+     * have no speed or bearing, which hasRecentFix and yaw calibration both
+     * need, so live mode can't run on them. The card's settings button is
+     * where precise location can be turned on. */
+    private fun showLocationRequired() {
+        val approximateOnly =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+        findViewById<TextView>(R.id.locationNeededTitle).setText(
+            if (approximateOnly) R.string.location_precise_needed_title else R.string.location_needed_title
+        )
+        findViewById<TextView>(R.id.locationNeededBody).setText(
+            if (approximateOnly) R.string.location_precise_needed_body else R.string.location_needed_body
+        )
+        findViewById<TextView>(R.id.locationSettingsBody).setText(
+            if (approximateOnly) R.string.location_precise_needed_settings_body else R.string.location_needed_settings_body
+        )
+        locationRequiredCard.visibility = View.VISIBLE
+    }
+
+    private fun locationPermissionGranted(): Boolean =
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            .all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+
+    // Asked when a recording starts (see startRecordingService()). The
+    // answer needs no handling: RecordingService runs either way, this
+    // only decides whether its notification is visible.
+    private val requestNotificationPermission = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -330,6 +379,7 @@ class MainActivity : AppCompatActivity() {
         devRecordToggle = findViewById(R.id.devRecordToggle)
         devRecordStatus = findViewById(R.id.devRecordStatus)
         devShareButton = findViewById(R.id.devShareButton)
+        accountSignInButton = findViewById(R.id.accountSignInButton)
 
         liveMapContent = findViewById(R.id.liveMapContent)
         sensorsPanel = findViewById(R.id.sensorsPanel)
@@ -363,9 +413,15 @@ class MainActivity : AppCompatActivity() {
         model = BiasCorrectionModel(this)
         // Fetches a newer model if one is published; it takes effect on the
         // next app start. See ModelUpdater.
-        activityScope.launch { ModelUpdater.checkForUpdate(applicationContext) }
+        if (!modelUpdateCheckStarted) {
+            modelUpdateCheckStarted = true
+            activityScope.launch { ModelUpdater.checkForUpdate(applicationContext) }
+        }
         fusion = FusionEngine(model)
-        mapMatcher = MapMatcher(RoadGraph(this))
+        Thread({
+            val matcher = MapMatcher(RoadGraph(applicationContext))
+            runOnUiThread { mapMatcher = matcher }
+        }, "road-graph-load").start()
         devRecorder = DevRecorder(this)
 
         replayToggle.setOnCheckedChangeListener { _, checked ->
@@ -389,6 +445,8 @@ class MainActivity : AppCompatActivity() {
         setupDevRecording()
         setupLocationRequiredScreen()
         setupBottomNav()
+        accountSignInButton.setOnClickListener { AuthActivity.launch(this) }
+        updateAccountButton()
 
         val needed = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (needed.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
@@ -455,7 +513,7 @@ class MainActivity : AppCompatActivity() {
      * filter" button semantics exactly, just also reachable from the nav. */
     private fun performResetFilter() {
         fusion.reset()
-        mapMatcher.reset()
+        mapMatcher?.reset()
         roadMapView.clear()
         previousFusionMode = null
         blackoutStartUptimeMs = null
@@ -489,6 +547,12 @@ class MainActivity : AppCompatActivity() {
 
     /** Wires the dev-mode Record/Share controls. */
     private fun setupDevRecording() {
+        // Not restored after the Activity is recreated (by the config
+        // changes the manifest doesn't handle, e.g. a language change):
+        // onDestroy has already closed the recording, and a restored
+        // checked state fired the listener below, silently starting a new
+        // file the user never asked for.
+        devRecordToggle.isSaveEnabled = false
         devRecordToggle.setOnCheckedChangeListener { _, checked ->
             if (checked) {
                 if (replayToggle.isChecked) {
@@ -498,6 +562,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 devShareButton.visibility = View.GONE
                 val file = devRecorder.start("openroute")
+                if (file == null) {
+                    devRecordToggle.isChecked = false
+                    devRecordStatus.text = getString(R.string.dev_record_no_storage)
+                    Toast.makeText(this, R.string.dev_record_no_storage, Toast.LENGTH_LONG).show()
+                    return@setOnCheckedChangeListener
+                }
                 devRecordStatus.text = "Recording to ${file.name}…"
                 recordingSessionStartedAt = Instant.now()
                 recordingSessionStartLat = null
@@ -505,7 +575,9 @@ class MainActivity : AppCompatActivity() {
                 recordingSessionEndLat = null
                 recordingSessionEndLon = null
                 recordingSessionHadBlackout = false
+                startRecordingService()
             } else {
+                RecordingService.stop(this)
                 val file = devRecorder.stop()
                 devRecordStatus.text = if (file != null) {
                     "Saved ${file.name} — ${devRecorder.sampleCount} samples"
@@ -530,6 +602,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Keeps the recording running in the background / with the screen
+     * off — see RecordingService. */
+    private fun startRecordingService() {
+        fun granted(permission: String) =
+            ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+        if (RecordingForeground.shouldRequestNotificationPermission(
+                Build.VERSION.SDK_INT, granted(Manifest.permission.POST_NOTIFICATIONS))
+        ) {
+            requestNotificationPermission.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+        }
+        RecordingService.start(
+            this,
+            hasFineLocation = granted(Manifest.permission.ACCESS_FINE_LOCATION),
+            hasCoarseLocation = granted(Manifest.permission.ACCESS_COARSE_LOCATION),
+        )
+    }
+
     /** Fires once a real (non-replay) recording stops. Silent no-op unless
      * both conditions are real: a signed-in Supabase session on this
      * device (SupabaseAuthClient.getStoredSession) AND that user's own
@@ -551,8 +640,11 @@ class MainActivity : AppCompatActivity() {
         val endLon = recordingSessionEndLon
         val hadBlackout = recordingSessionHadBlackout
 
-        activityScope.launch {
+        // AppScope, not activityScope: the upload is a single request that
+        // must survive this Activity finishing or being recreated.
+        AppScope.launch {
             SupabaseAuthClient.recordDriveSession(
+                context = applicationContext,
                 session = session,
                 deviceId = deviceId,
                 startedAt = startedAt,
@@ -576,8 +668,13 @@ class MainActivity : AppCompatActivity() {
         val hasLocationPermission = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
             .all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
         if (hasLocationPermission) locationReader.start()
-        ticking = true
-        tickHandler.postDelayed(::tick, tickIntervalMs)
+        // Can run twice (e.g. "continue with demo", then granting location
+        // later): a second self-reposting tick loop would run fusion at
+        // 20 Hz while it assumes dt = 0.1 s, so only ever start one.
+        if (!ticking) {
+            ticking = true
+            tickHandler.postDelayed(::tick, tickIntervalMs)
+        }
     }
 
     private data class Sample(
@@ -599,12 +696,26 @@ class MainActivity : AppCompatActivity() {
             replayIndex = (replayIndex + 1) % replayData.rows.size
             return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad, true)
         }
-        val loc = locationReader.lastLocation
-        val hasFix = locationReader.hasRecentFix() && loc != null
-        val hasRoughFix = locationReader.hasAnyRecentFix() && loc != null
+        // While fusion has a live GPS fix, everything (marker included)
+        // comes from that fix; a newer network fix only matters for the
+        // rough marker when there's no GPS at all.
+        val fusionFix = locationReader.lastFusionFix
+        val hasFix = locationReader.hasRecentFix() && fusionFix != null
+        val loc = if (hasFix) fusionFix else locationReader.lastLocation
+        val hasRoughFix = hasFix || (locationReader.hasAnyRecentFix() && loc != null)
+        stillness.add(sensorReader.lastAccel, sensorReader.lastGyro)
+        val speed = if (loc != null) {
+            speedWhileStill(
+                stationaryFilteredSpeed(
+                    loc.speed,
+                    if (loc.hasSpeedAccuracy()) loc.speedAccuracyMetersPerSecond else Float.NaN,
+                ),
+                stillness.isStill,
+            )
+        } else 0f
         return Sample(
             sensorReader.lastAccel, sensorReader.lastGyro, hasFix, hasRoughFix,
-            loc?.latitude ?: 0.0, loc?.longitude ?: 0.0, loc?.speed ?: 0f,
+            loc?.latitude ?: 0.0, loc?.longitude ?: 0.0, speed,
             if (loc != null) Calibration.compassDegToMathRad(loc.bearing) else 0f,
             loc?.hasBearing() == true,
         )
@@ -619,10 +730,19 @@ class MainActivity : AppCompatActivity() {
         // +1 turns that into 0, coerced back up to a safe Demo 1 default
         // rather than an invalid replaySources[-1] index.
         val demo = (demoRadioIds.indexOf(demoSelector.checkedRadioButtonId) + 1).coerceAtLeast(1)
+        // A drive picked before the prefetch thread has parsed it: parse it
+        // on its own thread and wait for it here, instead of letting
+        // readSample's .value parse it (or wait for the prefetch thread to
+        // work through the drives before it) on the main thread.
+        if (usingReplay && !replaySources[demo - 1].isInitialized()) {
+            loadReplayInBackground(demo - 1)
+            tickHandler.postDelayed(::tick, tickIntervalMs)
+            return
+        }
         if (usingReplay != wasReplaying || (usingReplay && demo != wasDemo)) {
             calibration = CalibrationManager()
             fusion.reset()
-            mapMatcher.reset()
+            mapMatcher?.reset()
             roadMapView.clear()
             replayIndex = 0
             wasReplaying = usingReplay
@@ -759,12 +879,6 @@ class MainActivity : AppCompatActivity() {
             calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
         }
 
-        // Yaw timed out to a best-effort estimate: keep offering it real
-        // moving samples so it can still lock in properly mid-trip.
-        if (!calibration.yawLocked && sample.hasFix && sample.hasBearing) {
-            calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
-        }
-
         val calAccel = calibration.calibrate(sample.rawAccel)
         val calGyro = calibration.calibrate(sample.rawGyro)
 
@@ -782,7 +896,7 @@ class MainActivity : AppCompatActivity() {
         val s = fusion.state
         fusion.localXYToLatLon(s.x, s.y)?.let { (lat, lon) ->
             roadMapView.addPoint(lat, lon, s.mode)
-            mapMatcher.match(lat, lon, s.heading)?.let { m ->
+            mapMatcher?.match(lat, lon, s.heading)?.let { m ->
                 roadMapView.addMatchedPoint(m.lat, m.lon)
             }
         }
@@ -791,6 +905,15 @@ class MainActivity : AppCompatActivity() {
         updateTelemetryTiles(s.speed, s.heading)
 
         tickHandler.postDelayed(::tick, tickIntervalMs)
+    }
+
+    private val replayLoadsStarted = mutableSetOf<Int>()
+
+    private fun loadReplayInBackground(index: Int) {
+        if (!replayLoadsStarted.add(index)) return
+        val source = replaySources[index]
+        Thread({ source.value }, "replay-load-$index").start()
+        Toast.makeText(this, R.string.replay_loading, Toast.LENGTH_SHORT).show()
     }
 
     private fun showCalibrating(detail: String) {
@@ -974,14 +1097,75 @@ class MainActivity : AppCompatActivity() {
         return names[idx]
     }
 
+    /** The Simulation tab's account button: the only way into AuthActivity.
+     * Once signed in (and the device set up, see
+     * SupabaseAuthClient.isSetupComplete) AuthActivity would just close
+     * again, so the button says so instead. */
+    private fun updateAccountButton() {
+        val signedIn = SupabaseAuthClient.getStoredSession(this) != null &&
+            SupabaseAuthClient.isSetupComplete(this)
+        accountSignInButton.text = getString(if (signedIn) R.string.account_signed_in else R.string.account_sign_in)
+        accountSignInButton.isEnabled = !signedIn
+    }
+
+    // Back from AuthActivity (or anywhere else): the sign-in state may have
+    // changed.
+    override fun onRestart() {
+        super.onRestart()
+        updateAccountButton()
+    }
+
     override fun onResume() {
         super.onResume()
         roadMapView.onResume()
+        // Back from "Open settings" (or anywhere else) with location now
+        // granted: nothing else re-checks, so the location-required card
+        // would stay up until the app was restarted. The card is only
+        // showing while the pipeline hasn't been started.
+        if (locationRequiredCard.visibility == View.VISIBLE && locationPermissionGranted()) {
+            locationRequiredCard.visibility = View.GONE
+            startPipeline()
+        }
     }
 
     override fun onPause() {
         super.onPause()
         roadMapView.onPause()
+    }
+
+    // Set when onStop() paused a running pipeline, so onStart() resumes it.
+    private var pausedInBackground = false
+
+    override fun onStart() {
+        super.onStart()
+        if (pausedInBackground) {
+            pausedInBackground = false
+            startPipeline()
+        }
+    }
+
+    /** Stops the tick loop, sensors and GPS while the app isn't visible.
+     * They used to run until onDestroy, but a background app gets no
+     * accelerometer/gyroscope events (Android 9+) and only a few location
+     * updates an hour (Android 8+), so the loop kept feeding fusion,
+     * calibration and any open recording the same frozen sample at 10 Hz,
+     * while still holding both sensors and GPS. The pipeline (calibration,
+     * fusion state, an open recording) is kept and carries on in onStart.
+     *
+     * A running recording is the exception: RecordingService holds a
+     * location foreground service and a wake lock for it, so sensors and
+     * GPS keep arriving in the background and the loop must keep writing
+     * rows. Pausing here would freeze the recording the moment the phone
+     * is pocketed, which is what that service exists to prevent. */
+    override fun onStop() {
+        super.onStop()
+        if (!::sensorReader.isInitialized || !ticking) return
+        if (devRecorder.isRecording) return
+        pausedInBackground = true
+        ticking = false
+        tickHandler.removeCallbacksAndMessages(null)
+        sensorReader.stop()
+        locationReader.stop()
     }
 
     override fun onDestroy() {
@@ -1004,8 +1188,13 @@ class MainActivity : AppCompatActivity() {
         locationReader.stop()
         model.close()
         devRecorder.stop()
-        // Same cleanup AuthActivity's own activityScope gets — otherwise a
-        // recording-upload coroutine outlives the Activity that started it.
+        RecordingService.stop(this)
+        // A recording still running here ends now, so it gets the same
+        // upload as a Record-switch stop. No-op if none was running
+        // (recordingSessionStartedAt is cleared on every stop).
+        uploadRecordingSessionIfConsented()
+        // Same cleanup AuthActivity's own activityScope gets. Recording
+        // uploads run in AppScope instead, so this doesn't cut them off.
         activityScope.cancel()
     }
 }

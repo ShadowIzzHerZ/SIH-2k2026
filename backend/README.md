@@ -21,6 +21,7 @@ This repository contains the **pure backend service** for the Smart India Hackat
 - **Sensor Fusion:** 9-DOF IMU Extended Kalman Filter (Accelerometer, Gyroscope, Magnetometer with Zero Velocity Updates).
 - **Transport Protocols:** Full-duplex WebSocket (`/ws/track/{device_id}`) with REST fallback (`/sensor-data`).
 - **Security:** HMAC-SHA256 JWT handshake authentication.
+- **CORS:** Allowed browser origins come from `CORS_ORIGINS` (comma-separated, default `*`). With `*`, cross-origin requests are allowed without credentials; list explicit origins to allow credentials.
 - **Clock Drift Compensation:** 3-way NTP handshake calculating $\Delta t_{\text{offset}}$ and RTT.
 - **Starvation-Free Queue:** `asyncio.PriorityQueue` prioritizing Live 10Hz frames (`P0`) over Backlog recovery dumps (`P1`).
 - **State Caching:** Redis 7+ for live positions and calibration constants with 1-hour TTL.
@@ -35,6 +36,8 @@ This repository contains the **pure backend service** for the Smart India Hackat
 ws://<server_host>:8000/ws/track/{device_id}?token=<jwt_token>
 ```
 *Token can be obtained via `POST /auth/token` with body `{"device_id": "...", "expires_minutes": 60}`.*
+
+Prefer sending the token in a header rather than the URL (URLs end up in proxy access logs): `Authorization: Bearer <jwt_token>`, or, from a browser, the subprotocol pair `new WebSocket(url, ["bearer", token])`. The `?token=` query parameter still works for existing clients.
 
 ### 2. Handshake & NTP Clock Sync
 Immediately after connecting, the client sends:
@@ -70,6 +73,7 @@ When reconnecting after an outage, send buffered data in manageable chunks (max 
   ]
 }
 ```
+Live frames are always processed first, so backlog is usually older than the device's latest fused state. Such frames are stored and echoed back with `"is_verified": false` and the current position, but they are not fused: the live filter never steps backwards in time.
  
 ### 5. Position Feedback Stream (Server $\to$ Client)
 The backend pushes back fused Kalman coordinates:
@@ -136,13 +140,17 @@ run_windows.bat
 ```
 
 ### Local Python Run (Cross-Platform):
+Run from the `backend/` directory. `SECRET_KEY` is required, so create `.env` first
+(`copy .env.example .env` on Windows) and replace the placeholder secret:
 ```powershell
+cp .env.example .env
 pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 *(Automatically falls back to SQLite and in-memory LRU cache if Redis/Postgres are not installed).*
 
 ### Run Test Suite:
+From the `backend/` directory (the tests supply a throwaway `SECRET_KEY` if none is set):
 ```powershell
 python -m unittest tests/test_backend.py
 ```
@@ -150,8 +158,8 @@ python -m unittest tests/test_backend.py
 ### Production VPS / Cloud VM Deployment (AWS, DigitalOcean, Azure):
 On your remote Ubuntu/Debian server, run:
 ```bash
-git clone https://github.com/manishpathak2407-bot/Sih-Backend.git
-cd Sih-Backend
+git clone https://github.com/ShadowIzzHerZ/SIH-2k2026.git
+cd SIH-2k2026/backend
 chmod +x deploy.sh
 ./deploy.sh
 ```
@@ -162,3 +170,20 @@ chmod +x deploy.sh
 python tests/simulate_device.py
 ```
 
+
+---
+
+## 7. Authentication Settings
+
+Token checks are **off by default** so the dashboard and local demos keep working. Turn them on by setting these environment variables (in `.env` or the service environment):
+
+| Variable | Default | Effect when set |
+| :--- | :--- | :--- |
+| `DEVICE_ENROLL_SECRET` | empty | `POST /auth/token` needs `"secret": "<DEVICE_ENROLL_SECRET>"` in the body to mint a device token. `POST /sensor-data`, `GET /device/{id}/state`, `GET /device/{id}/trajectory` and `POST /device/{id}/mode` then need `Authorization: Bearer <token>` for that device (or an admin token). |
+| `ADMIN_SECRET` | empty | The only way to mint an `admin` token: `{"device_id": "admin", "secret": "<ADMIN_SECRET>"}`. It also works as the secret for device tokens. While `DEVICE_ENROLL_SECRET` is set and `ADMIN_SECRET` is not, admin tokens cannot be minted at all. |
+
+With `DEVICE_ENROLL_SECRET` unset, any caller can mint a token for any device id and the REST endpoints need no token; the server logs a warning the first time a token is minted that way. `/health` and the dashboard page are always open. The dashboard asks for the enrollment secret when the server requires one.
+
+`tests/simulate_device.py` and `tests/verify_deployment.py` read `DEVICE_ENROLL_SECRET` (or `ADMIN_SECRET`) from the environment or `backend/.env` and send it, plus the Bearer token, when it is set.
+
+Generate secrets with `openssl rand -hex 32`. `SECRET_KEY` (the JWT signing key) is separate and always required.

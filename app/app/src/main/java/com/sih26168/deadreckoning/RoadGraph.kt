@@ -20,27 +20,32 @@ data class MapEdge(val from: Int, val to: Int)
  * street's reverse direction genuinely doesn't exist as an edge here
  * either (see MapMatcher's non-holonomic reasoning).
  */
-class RoadGraph(context: Context, assetName: String = "road_graph.json") {
-    val nodes: List<MapNode>
-    val edges: List<MapEdge>
+class RoadGraph(val nodes: List<MapNode>, val edges: List<MapEdge>) {
 
-    init {
-        val text = context.assets.open(assetName).bufferedReader().use { it.readText() }
-        val root = JSONObject(text)
-        val nodesJson = root.getJSONArray("nodes")
-        val n = ArrayList<MapNode>(nodesJson.length())
-        for (i in 0 until nodesJson.length()) {
-            val o = nodesJson.getJSONObject(i)
-            n.add(MapNode(o.getDouble("lat"), o.getDouble("lon")))
-        }
-        nodes = n
+    constructor(context: Context, assetName: String = "road_graph.json") :
+        this(parse(context.assets.open(assetName).bufferedReader().use { it.readText() }))
 
-        val edgesJson = root.getJSONArray("edges")
-        val e = ArrayList<MapEdge>(edgesJson.length())
-        for (i in 0 until edgesJson.length()) {
-            val pair = edgesJson.getJSONArray(i)
-            e.add(MapEdge(pair.getInt(0), pair.getInt(1)))
+    private constructor(parsed: RoadGraph) : this(parsed.nodes, parsed.edges)
+
+    companion object {
+        /** Parses the bundled asset's JSON shape: {"nodes": [{"lat", "lon"}...],
+         * "edges": [[from, to]...]}. Separate from the Context constructor so
+         * MapMatcherTest can build graphs on the JVM. */
+        fun parse(json: String): RoadGraph {
+            val root = JSONObject(json)
+            val nodesJson = root.getJSONArray("nodes")
+            val n = ArrayList<MapNode>(nodesJson.length())
+            for (i in 0 until nodesJson.length()) {
+                val o = nodesJson.getJSONObject(i)
+                n.add(MapNode(o.getDouble("lat"), o.getDouble("lon")))
+            }
+            val edgesJson = root.getJSONArray("edges")
+            val e = ArrayList<MapEdge>(edgesJson.length())
+            for (i in 0 until edgesJson.length()) {
+                val pair = edgesJson.getJSONArray(i)
+                e.add(MapEdge(pair.getInt(0), pair.getInt(1)))
+            }
+            return RoadGraph(n, e)
         }
-        edges = e
     }
 }

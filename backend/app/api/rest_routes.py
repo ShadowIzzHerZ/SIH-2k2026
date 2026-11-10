@@ -1,20 +1,22 @@
 # 10Hz Dead Reckoning Backend Engine - SIH 2026
 from typing import List, Optional
 from datetime import timedelta
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_db_session
-from app.core.auth import create_access_token
+from app.core.auth import create_access_token, check_token_mint_allowed, get_rest_subject, ensure_device_access, require_device_access
 from app.cache.redis_client import cache_manager
-from app.api.websocket import queue_mgr, active_connections, device_kalman_filters
-from app.db.crud import get_trajectory_history, get_last_known_position
+from app.api.websocket import queue_mgr, active_connections, device_kalman_filters, device_mode_overrides
+from app.db.crud import get_trajectory_history, get_last_known_position, db_time_to_epoch
 
 router = APIRouter()
 
 class TokenRequest(BaseModel):
+    secret: Optional[str] = Field(default=None, description="DEVICE_ENROLL_SECRET, or ADMIN_SECRET for an 'admin' token, when the server sets them")
     device_id: str = Field(..., description="Unique hardware or app UUID")
-    expires_minutes: Optional[int] = Field(default=60 * 24 * 7, description="Token lifetime in minutes")
+    # Bounded: 0/negative minted already-expired tokens, null or huge values raised a 500
+    expires_minutes: int = Field(default=60 * 24 * 7, ge=1, le=60 * 24 * 30, description="Token lifetime in minutes")
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -46,6 +48,7 @@ class BatchUploadRequest(BaseModel):
 @router.post("/auth/token", response_model=TokenResponse, summary="Mint JWT token for a device")
 async def generate_device_token(req: TokenRequest):
     """Generates an authentication token for WebSocket handshake."""
+    check_token_mint_allowed(req.device_id, req.secret)
     token = create_access_token(
         data={"sub": req.device_id, "device_id": req.device_id},
         expires_delta=timedelta(minutes=req.expires_minutes)
@@ -57,11 +60,12 @@ async def generate_device_token(req: TokenRequest):
     )
 
 @router.post("/sensor-data", summary="Fallback REST batch upload endpoint")
-async def upload_batch_sensor_data(req: BatchUploadRequest):
+async def upload_batch_sensor_data(req: BatchUploadRequest, subject: Optional[str] = Depends(get_rest_subject)):
     """
     REST fallback when WebSockets are blocked by proxies or firewalls.
     Enqueues batch to the priority queue as backlog.
     """
+    ensure_device_access(subject, req.device_id)
     packets_dict = [p.model_dump() for p in req.packets]
     enqueued = await queue_mgr.enqueue_backlog_chunk(req.device_id, packets_dict)
     return {
@@ -76,12 +80,13 @@ async def health_check():
     """Returns status of cache layer, queues, and active connections."""
     return {
         "status": "healthy",
-        "redis_connected": cache_manager.is_redis_connected,
+        # Pinged on each call: the startup flag alone goes stale if Redis drops later
+        "redis_connected": await cache_manager.ping(),
         "active_websockets": len(active_connections),
         "queue_depth": queue_mgr.queue_size
     }
 
-@router.get("/device/{device_id}/trajectory", summary="Fetch stored trajectory history")
+@router.get("/device/{device_id}/trajectory", summary="Fetch stored trajectory history", dependencies=[Depends(require_device_access)])
 async def get_device_trajectory(
     device_id: str,
     limit: int = 500,
@@ -92,7 +97,7 @@ async def get_device_trajectory(
     return [
         {
             "seq": p.seq_num,
-            "timestamp": p.time.timestamp(),
+            "timestamp": db_time_to_epoch(p.time),
             "x": p.x,
             "y": p.y,
             "z": p.z,
@@ -110,7 +115,7 @@ async def get_device_trajectory(
         for p in points
     ]
 
-@router.get("/device/{device_id}/state", summary="Fetch latest live position & movement state")
+@router.get("/device/{device_id}/state", summary="Fetch latest live position & movement state", dependencies=[Depends(require_device_access)])
 async def get_device_latest_state(
     device_id: str,
     db: AsyncSession = Depends(get_db_session)
@@ -167,16 +172,23 @@ async def get_device_latest_state(
         "message": "No trajectory points recorded yet for this device."
     }
 
-@router.post("/device/{device_id}/mode", summary="Set operational mode for a device")
+@router.post("/device/{device_id}/mode", summary="Set operational mode for a device", dependencies=[Depends(require_device_access)])
 async def set_device_mode(device_id: str, req: SetModeRequest):
     """
     Switches operational mode between 'stationary' (rest ZUPT), 'moving', and 'adaptive'.
+    'stationary' and 'moving' are forced on every later packet, whatever mode the
+    packet itself carries; 'adaptive' clears the override.
     """
     valid_modes = {"stationary", "moving", "adaptive"}
     mode_clean = req.mode.lower().strip()
     if mode_clean not in valid_modes:
-        return {"error": f"Invalid mode '{req.mode}'. Choose from: {list(valid_modes)}"}
+        raise HTTPException(status_code=400, detail=f"Invalid mode '{req.mode}'. Choose from: {sorted(valid_modes)}")
     
+    if mode_clean == "adaptive":
+        device_mode_overrides.pop(device_id, None)
+    else:
+        device_mode_overrides[device_id] = mode_clean
+
     kf = device_kalman_filters.get(device_id)
     if kf:
         if mode_clean == "stationary":

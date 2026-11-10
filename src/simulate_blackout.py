@@ -64,7 +64,7 @@ def _find_clean_span(seq: ImuSequence, sample_rate_hz: float, lead_in_s: float, 
 
     xy = latlon_to_local_xy(seq.lat, seq.lon)
     step = np.linalg.norm(np.diff(xy, axis=0), axis=1)
-    for window_start in range(0, seq.n - need_n, slide_n):
+    for window_start in range(0, seq.n - need_n + 1, slide_n):
         window_end = window_start + need_n
         if step[window_start:window_end - 1].max() > max_step_m:
             continue  # a GPS jump/glitch falls inside this candidate span
@@ -294,8 +294,10 @@ def _plot_track(ax, gnss_xy, result, gnss_available, lo, hi):
     if len(blackout_idx):
         ax.scatter(*gnss_xy[lo + blackout_idx[0]], marker="x", s=140, color="#dc2626", zorder=3,
                    linewidths=3, label="blackout starts")
-        ax.scatter(*gnss_xy[lo + blackout_idx[-1]], marker="x", s=140, color="#16a34a", zorder=3,
-                   linewidths=3, label="GNSS reconnects")
+        back = lo + blackout_idx[-1] + 1  # first sample with GNSS again, not the last one without
+        if back < hi:
+            ax.scatter(*gnss_xy[back], marker="x", s=140, color="#16a34a", zorder=3,
+                       linewidths=3, label="GNSS reconnects")
     ax.set_aspect("equal", adjustable="datalim")
 
 

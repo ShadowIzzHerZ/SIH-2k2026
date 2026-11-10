@@ -162,6 +162,13 @@ class TestIngestionPriorityQueue(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_item.priority, 1)
         self.assertEqual(second_item.device_id, "device_A")
 
+    async def test_backlog_on_full_queue_returns_instead_of_blocking(self):
+        queue = IngestionQueueManager(maxsize=3)
+        chunk = [{"seq": i, "timestamp": float(i)} for i in range(5)]
+        enqueued = await asyncio.wait_for(queue.enqueue_backlog_chunk("device_A", chunk), timeout=2.0)
+        self.assertEqual(enqueued, 3)
+        self.assertEqual(queue.queue_size, 3)
+
 
 class TestCacheManager(unittest.IsolatedAsyncioTestCase):
     async def test_in_memory_cache_ttl(self):
@@ -217,6 +224,14 @@ class TestFastAPIRoutes(unittest.IsolatedAsyncioTestCase):
             res = await client.post("/device/test_bot_01/mode", json={"mode": "moving"})
             self.assertEqual(res.status_code, 200)
             self.assertEqual(res.json()["status"], "applied")
+
+            res = await client.post("/device/test_bot_01/mode", json={"mode": "flying"})
+            self.assertEqual(res.status_code, 400)
+
+            # Out-of-range or null token lifetimes are rejected instead of crashing / minting expired tokens
+            for bad in (0, -5, None, 10**12):
+                res = await client.post("/auth/token", json={"device_id": "test_bot_01", "expires_minutes": bad})
+                self.assertEqual(res.status_code, 422, bad)
 
             # 5. Trajectory
             res = await client.get("/device/test_bot_01/trajectory")

@@ -26,6 +26,11 @@ correlation between the two signals per bin.
 
 Run:
     python -m src.diagnose_label_noise --data_root data/IO-VNBD --variant "Synchronised V abd S datasets"
+    python -m src.diagnose_label_noise --recover-yaw   # gz from recover_yaw_axis, as training sees it
+
+Without --recover-yaw, gz is IO-VNBD's raw "Yaw" gyro column, which
+recover_yaw_axis's docstring shows is mostly not yaw, so the comparison
+mostly measures that broken axis rather than label noise.
 """
 from __future__ import annotations
 
@@ -35,11 +40,20 @@ from pathlib import Path
 
 import numpy as np
 
-from src.data.io_vnbd_loader import load_sequence
+from src.data.io_vnbd_loader import compass_deg_to_xy_unit, load_sequence, recover_yaw_axis
 
 
 def wrap_deg(d: np.ndarray) -> np.ndarray:
     return (d + 180.0) % 360.0 - 180.0
+
+
+def label_heading_ccw_deg(heading_gt: np.ndarray) -> np.ndarray:
+    """heading_gt is a compass bearing (0=N, clockwise); gz is positive
+    counter-clockwise. Convert the bearing to a CCW math angle the same way
+    the rest of src/ does (compass_deg_to_xy_unit, then atan2), so a left
+    turn makes both deltas positive."""
+    unit = compass_deg_to_xy_unit(heading_gt)
+    return np.degrees(np.arctan2(unit[..., 1], unit[..., 0]))
 
 
 def main():
@@ -52,6 +66,14 @@ def main():
         default=[0.0, 1.0, 3.0, 6.0, 10.0, 15.0, 100.0],
         help="m/s bin edges, matching FusionEngine's zuptMaxSpeed=3.0 m/s as one boundary",
     )
+    parser.add_argument(
+        "--recover-yaw", action="store_true",
+        help="resample each file to --sample_rate_hz and rebuild gz with recover_yaw_axis, as training does. "
+             "Caveat: that fit maps the gyro onto heading_gt's own 10 s heading changes, so gz is no longer "
+             "independent of the label and agreement is partly circular (the fit only uses spans above 3 m/s, "
+             "so the low-speed bins are less affected). Files the fit rejects are skipped.",
+    )
+    parser.add_argument("--sample_rate_hz", type=float, default=10.0, help="resample rate for --recover-yaw")
     args = parser.parse_args()
 
     paths = sorted(glob.glob(f"{args.data_root}/{args.variant}/**/{args.file_prefix}*.csv", recursive=True))
@@ -62,6 +84,7 @@ def main():
     gyro_heading_deg = [[] for _ in range(n_bins)]  # per-sample gyro-integrated delta heading, per bin
     label_heading_deg = [[] for _ in range(n_bins)]  # per-sample heading_gt delta, same samples
     n_files_used = 0
+    n_yaw_rejected = 0
 
     for p in paths:
         try:
@@ -72,6 +95,13 @@ def main():
             continue
         if len(seq.heading_gt) < 20:
             continue
+        if args.recover_yaw:
+            from src.data.windowing import resample_uniform
+            try:
+                seq = recover_yaw_axis(resample_uniform(seq, args.sample_rate_hz))
+            except ValueError:
+                n_yaw_rejected += 1
+                continue
 
         dt = np.diff(seq.time)
         valid_dt = (dt > 0) & (dt < 2.0)  # drop gaps (real blackout stretches, per protocol)
@@ -81,7 +111,8 @@ def main():
         gz = seq.gyro[:-1, 2][valid_dt]  # yaw rate at step start, rad/s
         gyro_delta_deg = np.degrees(gz * dt[valid_dt])
 
-        label_delta_deg = wrap_deg(seq.heading_gt[1:][valid_dt] - seq.heading_gt[:-1][valid_dt])
+        label_ccw_deg = label_heading_ccw_deg(seq.heading_gt)
+        label_delta_deg = wrap_deg(label_ccw_deg[1:][valid_dt] - label_ccw_deg[:-1][valid_dt])
 
         speed_at_step = seq.speed_gt[:-1][valid_dt]
 
@@ -103,7 +134,11 @@ def main():
 
         n_files_used += 1
 
-    print(f"used {n_files_used} files with usable heading_gt + speed_gt + gyro\n")
+    print(f"used {n_files_used} files with usable heading_gt + speed_gt + gyro")
+    if args.recover_yaw:
+        print(f"gz from recover_yaw_axis ({n_yaw_rejected} files skipped, yaw axis not recoverable); "
+              f"partly circular, see --help")
+    print()
 
     if n_files_used == 0:
         print("No usable files found -- check --data_root/--variant/--file_prefix.")

@@ -5,9 +5,9 @@ Evaluate a trained model against the actual SIH26168 benchmark criteria
     - example checks: <5m drift over 50m in <1min; <100m drift over 1km @60kmph
 
 Reports both the aggregate drift-% (same metric trained on) and the two
-named example scenarios, on the held-out test split, sequence by sequence
-so you can see which trip types the model struggles on (tight turns are
-usually the failure mode for heading-rate errors) before the demo.
+named example scenarios (eval.example_checks in the config, scored as
+chained blackouts by src/chain_eval.py's example_checks), on the held-out
+test split, overall and per dataset.
 
 Run:
     python -m src.evaluate --config configs/default.yaml --checkpoint checkpoints/best.pt
@@ -26,7 +26,7 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from src.chain_eval import chained_drift
+from src.chain_eval import chained_drift, example_checks
 from src.data.windowing import load_combined_dataset_splits
 from src.models.bias_correction_net import BiasCorrectionNet
 from src.train import forward_pass, pick_device
@@ -41,12 +41,22 @@ def eval_drift(model, dataset, dt, device, batch_size, target_pct=None):
             speed_pred, pos_pred, speed_gt, pos_gt = forward_pass(model, batch, dt, device)
             all_drift.extend(drift_metric(pos_pred, pos_gt).cpu().numpy().tolist())
     all_drift = np.array(all_drift)
+    if len(all_drift) == 0:
+        # e.g. a per-dataset test split that came out empty: report it as
+        # such instead of np.percentile raising IndexError mid-evaluation.
+        nan = float("nan")
+        report = {"n_windows": 0, "mean_drift_pct": nan, "median_drift_pct": nan,
+                  "p90_drift_pct": nan, "worst_drift_pct": nan}
+        if target_pct is not None:
+            report["target_pct"] = target_pct
+            report["pass_rate_pct"] = nan
+        return report
     report = {
         "n_windows": len(all_drift),
         "mean_drift_pct": float(all_drift.mean()),
         "median_drift_pct": float(np.median(all_drift)),
         "p90_drift_pct": float(np.percentile(all_drift, 90)),
-        "worst_drift_pct": float(all_drift.max()) if len(all_drift) else float("nan"),
+        "worst_drift_pct": float(all_drift.max()),
     }
     if target_pct is not None:
         report["target_pct"] = target_pct
@@ -144,6 +154,9 @@ def main():
     if chain_all:
         report["chained_30s"] = chain_all
         chain_report["all"] = chain_all
+    checks = cfg["eval"].get("example_checks") or []
+    if checks:
+        report["example_checks"] = example_checks(model, splits["test"], device, dt, checks, window_size=window_size)
 
     print(json.dumps(report, indent=2))
     json.dump(report, open(f"results/eval_report{suffix}.json", "w"), indent=2)
@@ -163,10 +176,17 @@ def main():
     per_dataset = {}
     for key in ("iovnbd_test_only", "comma2k19_test_only", "decimeter_test_only", "ppc_test_only", "pvs_test_only"):
         if key in splits:
+            if len(splits[key]) == 0:
+                print(f"{key}: empty test split, skipped")
+                per_dataset[key] = {"n_windows": 0}
+                continue
             per_dataset[key] = eval_drift(model, splits[key], dt, device, batch_size, target_pct=target)
             ch = chained_drift(model, splits[key], device, dt, window_size=window_size, n_chunks=6, max_chains=None)
             if ch:
                 per_dataset[key]["chained_30s"] = ch
+            if checks:
+                per_dataset[key]["example_checks"] = example_checks(model, splits[key], device, dt, checks,
+                                                                    window_size=window_size)
     if per_dataset:
         print("\n--- breakdown by dataset (same checkpoint) ---")
         print(json.dumps(per_dataset, indent=2))

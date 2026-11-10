@@ -291,4 +291,93 @@ class FusionEngineTest {
             angleDiff(engine.state.heading, realHeading) < 0.01f,
         )
     }
+
+    /** The GNSS-reconnect blend has to take the short way round the
+     * circle. Blending linearly in raw radians from just under +pi to just
+     * over -pi (two headings 0.28 rad apart, both pointing west) swept
+     * through 0 — the displayed heading spun to due east mid-blend. */
+    @Test
+    fun `reconnect blend across the plus-minus pi seam stays pointing the same way`() {
+        val engine = FusionEngine(FakePredictor(deltaV = 0f, deltaTheta = 0f))
+        val westish = 3.0f
+        repeat(windowSize + 5) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0f, 0f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = true,
+                lat = 0.0, lon = 0.0, gnssSpeed = 10f, gnssHeadingRad = westish,
+            )
+        }
+        repeat(10) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0f, 0f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = false,
+                lat = 0.0, lon = 0.0, gnssSpeed = 10f, gnssHeadingRad = westish,
+            )
+        }
+        val otherSideOfSeam = -3.0f
+        repeat(25) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0f, 0f, 0f),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = true,
+                lat = 0.0, lon = 0.0, gnssSpeed = 10f, gnssHeadingRad = otherSideOfSeam,
+            )
+            assertTrue(
+                "blend heading ${engine.state.heading} left the short arc between $westish and $otherSideOfSeam",
+                angleDiff(engine.state.heading, Math.PI.toFloat()) <= 0.3f,
+            )
+        }
+    }
+
+    /** Records every window handed to the model, so a test can check which
+     * samples a chunk resolution actually integrated. */
+    private class RecordingPredictor : Predictor {
+        val windows = ArrayList<Array<FloatArray>>()
+        override fun predict(window: Array<FloatArray>): Array<FloatArray> {
+            windows.add(window.map { it.copyOf() }.toTypedArray())
+            return Array(window.size) { floatArrayOf(0f, 0f) }
+        }
+    }
+
+    /** A short blackout resolved when GNSS returns must integrate exactly
+     * the blackout's own samples — the same chunk fusion.py's run_fusion
+     * builds (accel[t:t + chunk_len], stopping before the first available
+     * sample). The window's last `pending` rows used to include the
+     * reconnect tick's own (non-blackout) sample and drop the first
+     * blackout sample. */
+    @Test
+    fun `a short blackout resolved on GNSS return integrates only its own samples`() {
+        val predictor = RecordingPredictor()
+        val engine = FusionEngine(predictor)
+        // Tag every sample with its tick number in az so the window rows
+        // can be identified (az is never read by the integration).
+        var tickNo = 0
+        fun tick(available: Boolean) {
+            engine.tick(
+                calibratedAccel = floatArrayOf(0f, 0f, tickNo.toFloat()),
+                calibratedGyro = floatArrayOf(0f, 0f, 0f),
+                available = available,
+                lat = 0.0, lon = 0.0, gnssSpeed = 10f, gnssHeadingRad = 0f,
+            )
+            tickNo++
+        }
+        repeat(windowSize + 5) { tick(available = true) }
+        val firstBlackoutTick = tickNo
+        val blackoutTicks = 20
+        repeat(blackoutTicks) { tick(available = false) }
+        val reconnectTick = tickNo
+        tick(available = true)
+
+        assertTrue("expected exactly one chunk resolution, got ${predictor.windows.size}", predictor.windows.size == 1)
+        val window = predictor.windows[0]
+        assertTrue("model must always get a full window, got ${window.size}", window.size == windowSize)
+        val harvested = window.takeLast(blackoutTicks).map { it[2].toInt() }
+        assertTrue(
+            "harvested ticks $harvested should be exactly the blackout ticks " +
+                "$firstBlackoutTick..${reconnectTick - 1}",
+            harvested == (firstBlackoutTick until reconnectTick).toList(),
+        )
+    }
 }

@@ -94,6 +94,9 @@ def main():
                     "mean_speed": float(mean_speed[i]),
                 })
 
+    if not rows:
+        raise SystemExit("the test split has no windows; nothing to diagnose (check data paths and split settings)")
+
     with open(args.out_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()

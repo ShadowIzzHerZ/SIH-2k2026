@@ -263,7 +263,10 @@ def run_fusion(
                 # when the next blackout starts.
                 w = 1.0 - blend_remaining / blend_samples
                 position[t] = (1 - w) * blend_from_pos + w * gnss_xy[t]
-                heading[t] = _wrap_angle((1 - w) * blend_from_heading + w * heading[t])
+                # Blend along the shorter arc: a straight weighted average of
+                # e.g. 3.13 and -3.13 rad (both ~due west) passes through 0,
+                # swinging the displayed heading east and back mid-blend.
+                heading[t] = _wrap_angle(blend_from_heading + w * _wrap_angle(heading[t] - blend_from_heading))
                 speed[t] = (1 - w) * blend_from_speed + w * speed[t]
                 modes[t] = FusionMode.BLEND
                 blend_remaining -= 1
@@ -349,7 +352,11 @@ def blackout_drift_pct(result: FusionResult, gnss_xy: np.ndarray, gnss_available
     blackout_idxs = np.where(gnss_available == False)[0]  # noqa: E712
     if len(blackout_idxs) == 0:
         return None
-    start, end = blackout_idxs[0], blackout_idxs[-1]
+    end = blackout_idxs[-1]
+    # Start of the last contiguous span, not the first blackout sample:
+    # with several blackouts, distance must not include the tracked gaps.
+    gaps = np.where(np.diff(blackout_idxs) > 1)[0]
+    start = blackout_idxs[gaps[-1] + 1] if len(gaps) else blackout_idxs[0]
     true_path = gnss_xy[start:end + 1]
     step_dist = np.linalg.norm(np.diff(true_path, axis=0), axis=1)
     distance_travelled = max(step_dist.sum(), 1e-6)

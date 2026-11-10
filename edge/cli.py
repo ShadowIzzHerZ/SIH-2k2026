@@ -28,7 +28,7 @@ import time
 import numpy as np
 
 from .engine import BLACKOUT, EdgeEngine, Fix, OnnxPredictor, ZeroPredictor
-from .io import compass_to_math, load_csv, math_to_compass, write_csv, xy_to_latlon
+from .io import TIME_UNITS, compass_to_math, load_csv, math_to_compass, write_csv, xy_to_latlon
 from .mounting import estimate_mount, rotation_from_axes, rotation_from_rpy
 from .resample import resample
 
@@ -63,11 +63,22 @@ def mount_rotation(args, rec, model_hz: float):
         keep = np.ones(len(rec.t_gnss), dtype=bool)
         for a, b in spans:
             keep &= ~((rec.t_gnss >= a) & (rec.t_gnss <= b))
+        # Interpolate between consecutive fixes rather than holding the last
+        # one: a held 1-5 Hz fix differences to zero between fixes and to a
+        # 2-10x spike at each new one, so estimate_mount's central
+        # differences only saw the receiver's real dv/dt at the fixes.
+        # Linear interpolation makes every 10 Hz difference equal the slope
+        # between the two real fixes around it. Pairs further apart than
+        # --gnss-timeout (a blackout or dropout) are left as gaps.
         tg = rec.t_gnss[keep]
-        idx = np.searchsorted(tg, t10, side="right") - 1
-        fresh = (idx >= 0) & (t10 - tg[np.clip(idx, 0, None)] <= args.gnss_timeout)
-        spd[fresh] = rec.gnss_speed[keep][idx[fresh]]
-        crs[fresh] = rec.gnss_course[keep][idx[fresh]]
+        if len(tg) >= 2:
+            idx = np.searchsorted(tg, t10, side="right") - 1
+            inside = (idx >= 0) & (idx < len(tg) - 1)
+            i0 = np.clip(idx, 0, len(tg) - 2)
+            fresh = inside & (tg[i0 + 1] - tg[i0] <= args.gnss_timeout)
+            spd[fresh] = np.interp(t10[fresh], tg, rec.gnss_speed[keep])
+            unwrapped = np.degrees(np.unwrap(np.radians(rec.gnss_course[keep])))
+            crs[fresh] = np.interp(t10[fresh], tg, unwrapped) % 360
     estimate_yaw = info["method"] == "auto" and args.mount_yaw is None
     R, extra = estimate_mount(a10, 1.0 / model_hz, int(args.level_seconds * model_hz), crs, spd, R_pre=R_pre,
                               estimate_yaw=estimate_yaw, min_yaw_samples=int(args.min_yaw_seconds * model_hz))
@@ -120,7 +131,10 @@ def score(ticks, rec, spans):
             continue
         if has_speed:
             g = (rec.t_gnss >= a) & (rec.t_gnss <= t[sel[-1]])
-            dist = float(np.trapezoid(rec.gnss_speed[g], rec.t_gnss[g]))
+            # np.trapezoid is numpy >= 2.0; requirements.txt allows 1.24+,
+            # which only has np.trapz.
+            trapezoid = getattr(np, "trapezoid", None) or np.trapz
+            dist = float(trapezoid(rec.gnss_speed[g], rec.t_gnss[g]))
         else:
             path = true[sel[0] - 1:sel[-1] + 1] if sel[0] > 0 else true[sel]
             dist = float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum())
@@ -133,9 +147,12 @@ def score(ticks, rec, spans):
 
 
 def cmd_run(args):
-    rec = load_csv(args.input, args.accel_unit, args.gyro_unit)
+    rec = load_csv(args.input, args.accel_unit, args.gyro_unit, args.time_unit)
     if len(rec.t_imu) < 2:
         raise SystemExit("no IMU rows in input")
+    if rec.t_imu[-1] - rec.t_imu[0] < 1.0 / args.model_hz:
+        raise SystemExit(f"IMU rows span {rec.t_imu[-1] - rec.t_imu[0]:.3f} s, less than one "
+                         f"{args.model_hz:g} Hz model tick")
     imu_hz = (len(rec.t_imu) - 1) / (rec.t_imu[-1] - rec.t_imu[0])
     spans = [(rec.t_imu[0] + a, rec.t_imu[0] + b) for a, b in parse_spans(args.blackout)]
     gnss_mask = np.ones(len(rec.t_gnss), dtype=bool)
@@ -251,6 +268,7 @@ def build_parser():
     r.add_argument("--model-highway", default=None, help="optional second ONNX model used at >= 6 m/s (duo mode)")
     r.add_argument("--accel-unit", choices=["m/s2", "g"], default="m/s2")
     r.add_argument("--gyro-unit", choices=["rad/s", "deg/s"], default="rad/s")
+    r.add_argument("--time-unit", choices=list(TIME_UNITS), default="s", help="unit of the t column")
     g = r.add_mutually_exclusive_group()
     g.add_argument("--axes", help='fixed mount as an axis remap, e.g. "x,-y,-z" (vehicle fwd,left,up in sensor axes)')
     g.add_argument("--mount-rpy", help="fixed mount as roll,pitch,yaw degrees")

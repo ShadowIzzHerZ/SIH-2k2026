@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.cache.redis_client import cache_manager
 from app.db.database import init_db
-from app.api.websocket import router as ws_router, queue_worker
+from app.api.websocket import router as ws_router, queue_worker, drain_pending_writes
 from app.api.rest_routes import router as rest_router
 
 logging.basicConfig(
@@ -22,9 +22,28 @@ logging.basicConfig(
 logger = logging.getLogger("sih_backend")
 settings = get_settings()
 
+# Placeholder secrets shipped in .env.example / DEPLOYMENT.md
+_PLACEHOLDER_SECRETS = {
+    "change-me-generate-with-openssl-rand-hex-32",
+    "your_generated_jwt_secret_key_here",
+}
+
+def warn_if_weak_secret_key(secret_key: str) -> bool:
+    """Log a warning for a short or placeholder JWT secret. Startup is not blocked."""
+    if secret_key in _PLACEHOLDER_SECRETS:
+        logger.warning("SECRET_KEY is still the example placeholder; anyone can forge device tokens. "
+                       "Generate one with: openssl rand -hex 32")
+        return True
+    if len(secret_key.encode("utf-8")) < 32:
+        logger.warning(f"SECRET_KEY is only {len(secret_key.encode('utf-8'))} bytes; use at least 32 "
+                       "random bytes for HS256 (openssl rand -hex 32).")
+        return True
+    return False
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing SIH Dead Reckoning Backend...")
+    warn_if_weak_secret_key(settings.SECRET_KEY)
     await cache_manager.connect()
     await init_db()
     
@@ -39,6 +58,7 @@ async def lifespan(app: FastAPI):
         await worker_task
     except asyncio.CancelledError:
         pass
+    await drain_pending_writes()
     await cache_manager.disconnect()
     logger.info("Shutdown complete.")
 
@@ -50,10 +70,16 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+def cors_settings(origins_setting: str) -> dict:
+    """allow_origins/allow_credentials from CORS_ORIGINS. With "*", Starlette would echo
+    any Origin back when credentials are allowed, so credentials are only allowed
+    for an explicit origin list."""
+    origins = [o.strip() for o in origins_setting.split(",") if o.strip()]
+    return {"allow_origins": origins, "allow_credentials": "*" not in origins}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    **cors_settings(settings.CORS_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -281,21 +307,48 @@ DASHBOARD_HTML = """
             ctx.stroke();
         }
 
+        // Page load and the mode buttons both call this. Reuse an open, opening or
+        // in-flight connection so overlapping calls never leave a second socket
+        // for the same device id behind.
+        let connectPromise = null;
         async function connectWebSocket() {
-            if (ws && ws.readyState === WebSocket.OPEN) return;
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+            if (!connectPromise) {
+                connectPromise = openWebSocket().finally(() => { connectPromise = null; });
+            }
+            return connectPromise;
+        }
 
-            const res = await fetch("/auth/token", {
+        // Token for the socket and the REST calls. A server with DEVICE_ENROLL_SECRET
+        // set answers 403 without it, so ask for the secret once and retry.
+        let authToken = null;
+        async function fetchToken() {
+            const body = { device_id: deviceId, expires_minutes: 60 };
+            const post = () => fetch("/auth/token", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ device_id: deviceId, expires_minutes: 60 })
+                body: JSON.stringify(body)
             });
-            const authData = await res.json();
-            const token = authData.access_token;
+            let res = await post();
+            if (res.status === 403) {
+                const secret = window.prompt("This server needs its device enrollment secret (DEVICE_ENROLL_SECRET):");
+                if (!secret) throw new Error("Enrollment secret required");
+                body.secret = secret;
+                res = await post();
+            }
+            if (!res.ok) throw new Error(`Token request failed (HTTP ${res.status})`);
+            authToken = (await res.json()).access_token;
+            return authToken;
+        }
+
+        async function openWebSocket() {
+            const token = await fetchToken();
 
             const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const wsUrl = `${proto}//${window.location.host}/ws/track/${deviceId}?token=${token}`;
-            
-            ws = new WebSocket(wsUrl);
+            const wsUrl = `${proto}//${window.location.host}/ws/track/${deviceId}`;
+
+            // Token goes in Sec-WebSocket-Protocol, not the URL, so proxies do not log it
+            ws = new WebSocket(wsUrl, ["bearer", token]);
 
             ws.onopen = () => {
                 badge.textContent = "CONNECTED (10Hz)";
@@ -441,7 +494,10 @@ DASHBOARD_HTML = """
 
         async function fetchLatestDbState() {
             log("Querying database for latest stored trajectory point & state...", "log-info");
-            const res = await fetch(`/device/${deviceId}/trajectory?limit=5`);
+            if (!authToken) await fetchToken();
+            const res = await fetch(`/device/${deviceId}/trajectory?limit=5`, {
+                headers: { Authorization: `Bearer ${authToken}` }
+            });
             const history = await res.json();
             if (history && history.length > 0) {
                 const latest = history[history.length - 1];

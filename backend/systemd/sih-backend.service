@@ -1,6 +1,23 @@
+# Install (bare-metal / VPS without Docker):
+#   1. Copy the contents of backend/ to /var/www/sih-backend (app/ must sit directly
+#      under it) and create /var/www/sih-backend/.env from .env.example.
+#   2. Create the venv the unit runs from:
+#        sudo python3 -m venv /var/www/sih-backend/venv
+#        sudo /var/www/sih-backend/venv/bin/pip install -r /var/www/sih-backend/requirements.txt
+#   3. The service runs as www-data. With the default SQLite DATABASE_URL the DB file
+#      (and its -journal file) is created in /var/www/sih-backend, so www-data needs
+#      write access to that directory:
+#        sudo chown -R www-data:www-data /var/www/sih-backend
+#   4. sudo cp systemd/sih-backend.service /etc/systemd/system/
+#      sudo systemctl daemon-reload && sudo systemctl enable --now sih-backend
+# Redis and PostgreSQL are pulled in with Wants= (not Requires=), so the service still
+# starts if either is missing: the cache falls back to memory when Redis is
+# unreachable, and the database is whatever DATABASE_URL in .env points at.
+
 [Unit]
 Description=SIH 2026 10Hz Dead Reckoning Backend Service
 After=network.target redis-server.service postgresql.service
+Wants=redis-server.service postgresql.service
 
 [Service]
 Type=simple

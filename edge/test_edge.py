@@ -12,7 +12,8 @@ Checks for the edge engine, in the same plain-assert style as tests/.
    output never jumps.
 4. Parity with src/fusion.py: same chunks, same anchors, same output, for a
    blackout that is a whole number of chunks. Needs torch; skipped without.
-5. The shipped ONNX model loads and has the shape the engine expects.
+5. GNSS reconnect blends heading along the shorter arc across +/-pi.
+6. The shipped ONNX model loads and has the shape the engine expects.
 """
 from __future__ import annotations
 
@@ -38,6 +39,15 @@ def test_resample():
     v = np.sin(2 * np.pi * 27 * t)[:, None]
     assert np.abs(resample(t, v, 10.0, "mean")[1]).max() < 0.15
     assert np.abs(resample(t, v, 10.0, "interp")[1]).max() > 0.8
+    # IMU dropout 3.0-4.5 s: "mean" bridges the empty bins along the ramp
+    # instead of holding the last bin's mean, and still emits every tick
+    t = np.arange(0, 8, 0.005)
+    t = t[(t < 3.0) | (t >= 4.5)]
+    tk, r = resample(t, np.stack([t, -t], axis=1), 10.0, "mean")
+    assert np.allclose(np.diff(tk), 0.1)
+    centre = tk - 0.05
+    assert np.allclose(r[:, 0], centre, atol=0.01) and np.allclose(r[:, 1], -centre, atol=0.01), \
+        np.abs(r[:, 0] - centre).max()
 
 
 def test_mounting():
@@ -69,6 +79,26 @@ def test_mounting():
     R, info = estimate_mount(a_sensor, dt, len(t), crs, v)  # level on the whole drive: horizontal accel averages out
     assert abs(info["yaw_deg"] - 20) < 1.0, info
     assert np.allclose(R @ a_sensor[50], a_vehicle[50], atol=0.05)
+
+
+def test_cli_auto_yaw_1hz_gnss():
+    """edge.cli's auto yaw with a 1 Hz receiver. Holding each fix for ten
+    10 Hz samples differenced speed and course to zero between fixes, which
+    left 166 usable samples on this drive (under the 300 needed) and no yaw."""
+    import tempfile
+    import types
+
+    from edge import cli, synth
+    from edge.io import load_csv
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "drive.csv")
+        synth.generate(path, gnss_hz=1.0, mount_axes=rotation_from_axes("y,-x,z"))
+        rec = load_csv(path, "m/s2", "rad/s")
+    args = types.SimpleNamespace(axes=None, mount_rpy=None, no_level=False, resample="interp", blackout=None,
+                                 gnss_timeout=1.5, mount_yaw=None, level_seconds=2.0, min_yaw_seconds=30.0)
+    _, info = cli.mount_rotation(args, rec, 10.0)
+    assert info["yaw_samples"] >= 300 and abs(info["yaw_deg"] + 90) < 2.0, info
 
 
 def _drive(imu_hz=200.0, duration=60.0, speed=12.0, yaw_rate=0.05):
@@ -261,6 +291,22 @@ def test_parity_with_src_fusion():
     assert [s.mode for s in ticks] == [m.value for m in ref.mode]
 
 
+def test_blend_heading_short_arc():
+    """GNSS returns heading due west from the other side of +/-pi: the blended
+    heading must stay near west, not swing round through east."""
+    core = ModelRateFusion(ZeroPredictor(), dt=0.1)
+    s = np.array([0.0, 0.0, 9.81, 0.0, 0.0, 0.0])
+    for i in range(60):  # fill the window, then one blackout chunk heading ~west
+        core.tick(i * 0.1, s, (-10.0 * i, 0.0, 10.0, np.pi - 0.01) if i < 10 else None)
+    ticks = []
+    for i in range(60, 90):
+        ticks += core.tick(i * 0.1, s, (-10.0 * i, 0.0, 10.0, -np.pi + 0.01))
+    ticks += core.flush()
+    hdg = np.array([st.heading for st in ticks])
+    off_west = np.abs(np.angle(np.exp(1j * (hdg - np.pi))))
+    assert off_west.max() < 0.05, f"blended heading strayed {off_west.max():.2f} rad from west"
+
+
 def test_onnx_model():
     path = "checkpoints/dead_reckoning_model.onnx"
     if not os.path.exists(path):
@@ -270,6 +316,29 @@ def test_onnx_model():
     assert p.window_size == 50
     out = p(np.tile([0, 0, 9.81, 0, 0, 0], (50, 1)))
     assert out.shape == (50, 2) and np.isfinite(out).all()
+
+
+def test_engine_imu_dropout_mean():
+    """A 2 s IMU dropout inside a blackout while braking ends mid-gap. With
+    "mean" resampling the empty bins used to repeat the braking bin, adding
+    1.5 m/s of phantom deceleration and 28 m of error by the blackout's end."""
+    hz = 200.0
+    t = np.arange(0, 50, 1 / hz)
+    a = np.where((t >= 20) & (t < 26), -1.5, 0.0)
+    v = 15 + np.cumsum(a) / hz
+    x = np.cumsum(v) / hz
+    eng = EdgeEngine(ZeroPredictor(), np.eye(3), resample="mean", gnss_timeout_s=0.15)
+    for i in range(len(t)):
+        if 25.0 <= t[i] < 27.0:
+            continue
+        if i % 20 == 0 and not 15 <= t[i] < 45:
+            eng.push_gnss(Fix(t[i], x[i], 0.0, v[i], 0.0))
+        eng.push_imu(t[i], [a[i], 0, 9.81], [0, 0, 0])
+    ticks = eng.finish()
+    assert np.allclose(np.diff([s.t for s in ticks]), 0.1)  # no tick dropped across the gap
+    last = [s for s in ticks if s.mode == BLACKOUT][-1]
+    j = np.searchsorted(t, last.t)
+    assert abs(last.speed - v[j]) < 0.2 and abs(last.x - x[j]) < 2.0, (last.speed, v[j], last.x - x[j])
 
 
 if __name__ == "__main__":

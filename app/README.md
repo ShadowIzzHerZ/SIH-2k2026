@@ -14,9 +14,10 @@ BLEND — but driven by live sensor/location ticks instead of a recorded
 trace, with a **"Simulate GNSS blackout" toggle** for demoing on stage
 without needing to physically walk into a real tunnel on cue. A
 **"Replay real recorded drive" toggle** swaps the live sensor/GPS data
-source for a real, previously-validated comma2k19 segment bundled as an
-asset (the one that measured 2.9% drift in the offline evaluation) — for
-demoing indoors with no GPS reception and no room to drive, using real
+source for one of seven real drives bundled as assets, picked with the
+Demo 1-7 buttons: six Jalandhar drives recorded with the app's Developer
+mode, and the comma2k19 highway segment that measured 2.9% drift in the
+offline evaluation (Demo 7) — for demoing indoors with no GPS reception and no room to drive, using real
 data instead of idealized synthetic motion. It's also how the app's own
 bugs were actually found and fixed on a real device (see FusionEngine.kt's
 docstring).
@@ -52,7 +53,7 @@ street names rendered correctly, e.g. "Law Gate Rd", "NH44").
 | [app/src/main/java/.../BiasCorrectionModel.kt](app/src/main/java/com/sih26168/deadreckoning/BiasCorrectionModel.kt) | ONNX Runtime wrapper for the exported network |
 | [app/src/main/java/.../FusionEngine.kt](app/src/main/java/com/sih26168/deadreckoning/FusionEngine.kt) | The live GNSS↔INS state machine — same design as the fixed `src/fusion.py` |
 | [app/src/main/java/.../RoadMapView.kt](app/src/main/java/com/sih26168/deadreckoning/RoadMapView.kt) | Real OSM-tile map (osmdroid) — "you are here" marker, mode-colored trail polylines, green map-matched overlay, follow/recenter camera |
-| [app/src/main/java/.../ReplayDataSource.kt](app/src/main/java/com/sih26168/deadreckoning/ReplayDataSource.kt) | Reads a bundled real-drive replay asset — MainActivity loads two, `assets/replay_demo1.json`/`replay_demo2.json` (picked via the demoSelector radio buttons, shown once "Replay" is on), both converted from real DevRecorder captures in Jalandhar (`data/own_recordings/openroute_20260909_{1908,1821}.csv`) |
+| [app/src/main/java/.../ReplayDataSource.kt](app/src/main/java/com/sih26168/deadreckoning/ReplayDataSource.kt) | Reads a bundled real-drive replay asset — MainActivity loads seven (picked via the demoSelector radio buttons, shown once "Replay" is on): `assets/replay_demo1.json`/`replay_demo2.json` and `replay_demo_{1305,1332,2117,2142}.json`, converted from real DevRecorder captures in Jalandhar (`data/own_recordings/openroute_20260909_{1908,1821}.csv`, `openroute_20260910_{1305,1332,2117,2142}.csv`), plus `replay_drive.json`, the comma2k19 segment |
 | [app/src/main/java/.../RoadGraph.kt](app/src/main/java/com/sih26168/deadreckoning/RoadGraph.kt) | Loads the bundled pre-fetched OSM road extract (`assets/road_graph.json`) |
 | [app/src/main/java/.../MapMatcher.kt](app/src/main/java/com/sih26168/deadreckoning/MapMatcher.kt) | Live sequential map-matcher — snaps the fused position onto RoadGraph with the same non-holonomic/continuity reasoning as `src/map_matching.py`, simplified for online (not whole-path) matching |
 | [app/src/main/java/.../DevRecorder.kt](app/src/main/java/com/sih26168/deadreckoning/DevRecorder.kt) | Developer mode's data logger — see below |
@@ -84,7 +85,7 @@ code the project's real numbers come from. The actual workflow: record
 on a walk/drive, pull the CSV into `data/own_recordings/`, then really
 retrain with the existing, validated pipeline:
 ```bash
-python -m src.train --config configs/default.yaml --resume checkpoints/best.pt
+python -m src.train --config configs/default.yaml --resume checkpoints/best_v3chain.pt --run_name v3chain
 ```
 
 The app module's `syncModel` Gradle task copies `checkpoints/dead_reckoning_model.onnx`

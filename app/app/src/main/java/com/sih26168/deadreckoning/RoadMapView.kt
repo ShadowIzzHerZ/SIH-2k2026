@@ -16,6 +16,26 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 
 /**
+ * Decides whether RoadMapView's next trail point needs a new polyline, and
+ * if so returns that polyline's starting points (to which the new point is
+ * then added); null means keep extending the current one. A new line
+ * starts when the fusion mode changed (each mode is its own color),
+ * beginning at [modeChangeCarry], the marker's last position, so the legs
+ * join up; or when the current line already holds [maxPoints], beginning
+ * at its own last point so the track stays continuous.
+ */
+internal fun <P> startOfNextTrailLine(
+    current: List<P>,
+    modeChanged: Boolean,
+    maxPoints: Int,
+    modeChangeCarry: P?,
+): ArrayList<P>? = when {
+    modeChanged -> ArrayList<P>().apply { modeChangeCarry?.let { add(it) } }
+    current.size >= maxPoints -> arrayListOf(current.last())
+    else -> null
+}
+
+/**
  * Real OpenStreetMap-tile map view, replacing the earlier abstract scatter
  * plot — same idea as the Zen (DevStorm 2026) project's Leaflet + OSM-tile
  * map: a real "you are here" marker the user immediately understands,
@@ -259,13 +279,16 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
     fun addPoint(lat: Double, lon: Double, mode: FusionMode) {
         val p = GeoPoint(lat, lon)
 
-        if (mode != currentSegmentMode) {
+        val nextLine = startOfNextTrailLine(
+            currentSegmentPoints, mode != currentSegmentMode, MAX_POINTS_PER_LINE, youAreHereMarker?.position,
+        )
+        if (nextLine != null) {
             // Mode changed — start a fresh polyline segment so each leg of
             // the trip is its own solid color, same as the old dot view.
+            // Also starts a new (same-color) polyline once the current one
+            // reaches MAX_POINTS_PER_LINE, see its doc.
             currentSegmentMode = mode
-            currentSegmentPoints = ArrayList()
-            // Carry the last point over so segments connect with no gap.
-            youAreHereMarker?.position?.let { currentSegmentPoints.add(it) }
+            currentSegmentPoints = nextLine
             val line = Polyline(mapView)
             line.outlinePaint.color = modeColor(mode)
             line.outlinePaint.strokeWidth = 9f
@@ -298,6 +321,19 @@ class RoadMapView(context: Context, attrs: AttributeSet? = null) : FrameLayout(c
             segmentCount = 1
         }
         mapView.invalidate()
+    }
+
+    companion object {
+        /** Longest one trail polyline gets. setPoints() hands osmdroid the
+         * whole list on every 10 Hz tick, so a single long stretch in one
+         * mode used to make every tick slower than the last. Past this a
+         * new polyline of the same color continues from the last point:
+         * every point stays on the map, the per-tick cost stays fixed, and
+         * osmdroid can skip whole off-screen pieces when drawing. These
+         * lines count toward addPoint's 200-polyline cap like mode changes
+         * do, so the oldest trail is cleared after about 2.8 hours at 10 Hz
+         * (100k points) instead of growing forever. */
+        private const val MAX_POINTS_PER_LINE = 500
     }
 
     fun addMatchedPoint(lat: Double, lon: Double) {

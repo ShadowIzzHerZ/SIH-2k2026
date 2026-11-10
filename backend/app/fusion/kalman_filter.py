@@ -51,6 +51,11 @@ class IMUKalmanFilter:
         self._last_step_time = 0.0
         self._step_length = 0.68  # Standard pedestrian stride (meters)
 
+        # Complementary roll/pitch correction from gravity: only used while |a| is within
+        # _tilt_gate (m/s^2) of g, pulling toward the accel tilt with time constant _tilt_tau (s)
+        self._tilt_gate = 0.5
+        self._tilt_tau = 2.0
+
     def predict(self, accel_body: np.ndarray, gyro_body: np.ndarray, dt: float, mode: str = "adaptive"):
         """
         Kinematic prediction step over elapsed time dt (seconds).
@@ -67,6 +72,16 @@ class IMUKalmanFilter:
         self.x[7, 0] += gy * dt
         self.x[8, 0] += gz * dt
         self.x[8, 0] = (self.x[8, 0] + np.pi) % (2 * np.pi) - np.pi
+
+        # 1b. Roll/pitch would otherwise be gyro-only and drift with any gyro bias. When the
+        # accelerometer reads about 1 g it is measuring mostly gravity, so blend toward its tilt.
+        ax, ay, az = accel_body[0], accel_body[1], accel_body[2]
+        if abs(float(np.linalg.norm(accel_body)) - GRAVITY) < self._tilt_gate:
+            roll_acc = np.arctan2(ay, az)
+            pitch_acc = np.arctan2(-ax, np.hypot(ay, az))
+            alpha = dt / (self._tilt_tau + dt)
+            self.x[6, 0] += alpha * ((roll_acc - self.x[6, 0] + np.pi) % (2 * np.pi) - np.pi)
+            self.x[7, 0] += alpha * (pitch_acc - self.x[7, 0])
 
         # 2. Transform body acceleration into world navigation frame (gravity-free)
         a_nav = body_to_nav_acceleration(accel_body, roll, pitch, yaw)
@@ -136,7 +151,9 @@ class IMUKalmanFilter:
     def update_magnetometer(self, mag_body: np.ndarray):
         """Measurement update using tilt-compensated compass heading."""
         roll, pitch = float(self.x[6, 0]), float(self.x[7, 0])
-        mag_yaw = calculate_tilt_compensated_heading(mag_body, roll, pitch)
+        # The magnetometer heading is measured from North; the state yaw is measured
+        # from East (vx = cos(yaw) is East), so shift by +90 deg into the state frame.
+        mag_yaw = calculate_tilt_compensated_heading(mag_body, roll, pitch) + np.pi / 2
 
         H = np.zeros((1, 9))
         H[0, 8] = 1.0
@@ -158,6 +175,10 @@ class IMUKalmanFilter:
         Process a single IMU reading packet (at 10Hz) with mode specification.
         """
         current_ts = packet.get("timestamp", 0.0)
+        if "timestamp" in packet and self.last_timestamp is not None and current_ts < self.last_timestamp:
+            # Older than the state (e.g. backlog processed after newer live frames): stepping
+            # with it would run the filter backwards in time, so leave the state untouched.
+            return {**self._fused_state(), "stale": True}
         dt = (current_ts - self.last_timestamp) if self.last_timestamp else 0.10
         dt = max(0.01, min(1.0, dt))
         self.last_timestamp = current_ts
@@ -176,6 +197,9 @@ class IMUKalmanFilter:
             if np.linalg.norm(mag) > 1e-3:
                 self.update_magnetometer(mag)
 
+        return {**self._fused_state(), "stale": False}
+
+    def _fused_state(self) -> Dict[str, Any]:
         return {
             "x": float(self.x[0, 0]),
             "y": float(self.x[1, 0]),
@@ -198,7 +222,8 @@ class IMUKalmanFilter:
             "P": self.P.tolist(),
             "last_timestamp": self.last_timestamp,
             "movement_state": self.movement_state,
-            "step_count": self.step_count
+            "step_count": self.step_count,
+            "last_step_time": self._last_step_time
         }
 
     @classmethod
@@ -211,4 +236,5 @@ class IMUKalmanFilter:
         kf.last_timestamp = state_dict.get("last_timestamp")
         kf.movement_state = state_dict.get("movement_state", "REST")
         kf.step_count = state_dict.get("step_count", 0)
+        kf._last_step_time = state_dict.get("last_step_time", 0.0)
         return kf
