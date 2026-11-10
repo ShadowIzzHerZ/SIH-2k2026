@@ -49,13 +49,16 @@ def test_build_windows_shapes_starts_and_relative_position():
     for w in ws:
         assert w.accel.shape == (50, 3) and w.gyro.shape == (50, 3)
         assert w.speed_gt.shape == (50,) and w.pos_gt.shape == (50, 2)
-        assert w.start % 10 == 0 and w.start + 50 <= seq.n
-        assert np.allclose(w.pos_gt[0], 0.0)
+        # The anchor is the sample before the window's first IMU sample, so
+        # windows start at 1, 11, 21, ... and pos_gt[k] is the truth after
+        # integrating IMU sample start + k (one step at k = 0).
+        assert w.start % 10 == 1 and w.start + 50 <= seq.n
+        assert np.allclose(w.pos_gt[0], [0.0, 1.0], atol=0.01)
         assert np.allclose(w.accel, seq.accel[w.start:w.start + 50])
-        assert w.lat0 == seq.lat[w.start] and w.lon0 == seq.lon[w.start]
+        assert w.lat0 == seq.lat[w.start - 1] and w.lon0 == seq.lon[w.start - 1]
         assert w.v0 == 10.0 and w.dt == DT
-    # due north: 10 m/s for 49 steps
-    assert np.allclose(ws[0].pos_gt[-1], [0.0, 49.0], atol=0.05)
+    # due north: 10 m/s for 50 steps
+    assert np.allclose(ws[0].pos_gt[-1], [0.0, 50.0], atol=0.05)
 
 
 @pytest.mark.parametrize("bearing_deg, theta0", [(0.0, np.pi / 2), (90.0, 0.0), (180.0, -np.pi / 2), (270.0, np.pi)])

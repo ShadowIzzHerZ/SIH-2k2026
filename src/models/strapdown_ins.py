@@ -90,6 +90,17 @@ def dead_reckon_position(speed: torch.Tensor, heading: torch.Tensor, dt: float,
     return torch.stack([x, y], dim=-1)
 
 
+def path_length(gt_pos: torch.Tensor) -> torch.Tensor:
+    """(batch,) length of a (batch, T, 2) path that starts at the origin.
+
+    Positions are relative to the anchor and gt_pos[:, 0] is already one
+    step away from it (see windowing.build_windows), so the first step is
+    measured from the origin, not from gt_pos[:, 0]."""
+    origin = torch.zeros_like(gt_pos[:, :1, :])
+    path = torch.cat([origin, gt_pos], dim=1)
+    return torch.linalg.norm(path[:, 1:, :] - path[:, :-1, :], dim=-1).sum(dim=1)
+
+
 def drift_metric(pred_pos: torch.Tensor, gt_pos: torch.Tensor) -> torch.Tensor:
     """% positional drift at the end of each sequence, relative to distance travelled.
 
@@ -97,15 +108,14 @@ def drift_metric(pred_pos: torch.Tensor, gt_pos: torch.Tensor) -> torch.Tensor:
     distance travelled during GNSS blackout".
 
     Args:
-        pred_pos: (batch, T, 2)
-        gt_pos:   (batch, T, 2)
+        pred_pos: (batch, T, 2), relative to the starting point
+        gt_pos:   (batch, T, 2), relative to the same starting point
 
     Returns:
         (batch,) drift percentage per sequence.
     """
     final_error = torch.linalg.norm(pred_pos[:, -1, :] - gt_pos[:, -1, :], dim=-1)
-    step_dist = torch.linalg.norm(gt_pos[:, 1:, :] - gt_pos[:, :-1, :], dim=-1)
-    distance_travelled = step_dist.sum(dim=1).clamp(min=1e-6)
+    distance_travelled = path_length(gt_pos).clamp(min=1e-6)
     return 100.0 * final_error / distance_travelled
 
 

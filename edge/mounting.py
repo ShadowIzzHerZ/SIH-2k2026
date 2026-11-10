@@ -21,14 +21,11 @@ preference:
      says the vehicle had: longitudinal dv/dt from Doppler speed and
      lateral v * yaw-rate from the change in course over ground.
 
-Why the yaw step does not reuse src.calibration.estimate_yaw_misalignment:
-that function subtracts the sensor-frame accel angle from the *world*
-course angle, so its answer is the vehicle's average compass heading plus
-the mount offset, not the mount offset alone (a perfectly aligned sensor
-on a north-bound road comes out at 90 degrees). Both quantities here are in
-the vehicle frame, so the difference is the mount offset only, and braking
-samples (accel pointing backwards) count correctly instead of voting for
-a 180 degree flip.
+Both quantities in the yaw fit are in the vehicle frame, so the angle
+between them is the mount offset only, and braking samples (accel pointing
+backwards) count correctly instead of voting for a 180 degree flip.
+src.calibration.estimate_yaw_misalignment uses the same fit for the
+training data; this copy also reports the sample count and fit quality.
 
 The vehicle frame is the one the model was trained in: x forward, y left,
 z up, with gravity reading about +9.8 m/s^2 on z.

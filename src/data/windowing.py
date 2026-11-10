@@ -13,7 +13,7 @@ Each window carries everything the training loop needs:
     (network input's physical counterpart, so the residual correction has
     something to be a residual *of*)
   - GT speed at each step (supervises the per-step loss)
-  - GT position relative to the window's start (supervises the drift loss)
+  - GT position relative to the sample just before the window (supervises the drift loss)
   - v0 / theta0: the vehicle's true starting speed and heading for this
     window. A window is a random 5s slice of a drive — the vehicle is
     essentially never stopped and facing due-east right at the slice
@@ -50,10 +50,11 @@ class Window:
     accel: np.ndarray       # (T, 3) calibrated, vehicle frame
     gyro: np.ndarray        # (T, 3) calibrated, vehicle frame
     speed_gt: np.ndarray    # (T,)
-    pos_gt: np.ndarray      # (T, 2) relative to window start
-    v0: float                # true starting speed, m/s
-    theta0: float            # true starting heading, rad (world frame, matches pos_gt's axes)
-    lat0: float               # true starting lat/lon — lets a predicted local-xy trajectory be
+    pos_gt: np.ndarray      # (T, 2) relative to the anchor (the sample before accel[0]);
+                            # pos_gt[k] is where integrating accel/gyro[0..k] should land
+    v0: float                # true speed at the anchor, m/s
+    theta0: float            # true heading at the anchor, rad (world frame, matches pos_gt's axes)
+    lat0: float               # true lat/lon at the anchor — lets a predicted local-xy trajectory be
     lon0: float               # converted back to real coordinates for map-matching against OSM
     dt: float
     # Where this window came from, so chain_eval.py can stitch back-to-back
@@ -69,10 +70,10 @@ def resample_uniform(seq: ImuSequence, target_hz: float) -> ImuSequence:
     the vehicle stream may differ, so this makes both trainable with the
     same window logic."""
     t0, t1 = seq.time[0], seq.time[-1]
-    n = int((t1 - t0) * target_hz)
+    n = int(np.floor((t1 - t0) * target_hz + 1e-6)) + 1  # samples at exactly 1/target_hz, both ends inside [t0, t1]
     if n < 2:
         return seq
-    t_new = np.linspace(t0, t1, n)
+    t_new = t0 + np.arange(n) / target_hz
 
     def interp(arr):
         if arr is None:
@@ -134,7 +135,9 @@ def calibrate_sequence(seq: ImuSequence, stationary_samples: int = 20,
                 warnings.filterwarnings("ignore", category=RuntimeWarning)  # see note below
                 level_accel = seq.accel @ R_level.T
             heading_xy = compass_deg_to_xy_unit(seq.heading_gt)
-            psi_yaw = estimate_yaw_misalignment(level_accel[confident, :2], heading_xy[confident])
+            dt = float(np.median(np.diff(seq.time)))
+            psi_yaw = estimate_yaw_misalignment(level_accel[:, :2], heading_xy, seq.speed_gt, dt,
+                                                min_speed_mps=min_speed_mps)
 
     # macOS's Accelerate BLAS backend emits spurious "divide by zero" /
     # "invalid value" RuntimeWarnings on these small (Nx3 @ 3x3) matmuls —
@@ -183,17 +186,32 @@ def build_windows(seq: ImuSequence, window_size: int, stride: int, dt: float,
         speed_gt = None
 
     windows = []
-    for start in range(0, n - window_size, stride):
+    # Ground truth is aligned with the integrator (strapdown_ins's cumsum,
+    # FusionEngine.kt, edge/engine.py, fusion.run_fusion): from a state at
+    # sample `start - 1`, integrating IMU sample `start + k` gives the state
+    # at sample `start + k`. So the anchor (v0, theta0, origin, lat0/lon0)
+    # is the sample BEFORE the window's first IMU sample, and pos_gt[k] /
+    # speed_gt[k] are the truth at the sample whose IMU reading was just
+    # integrated. (Before this, pos_gt was relative to the window's own
+    # first sample, one step behind the prediction: a perfect constant-
+    # velocity prediction scored ~2% drift at T=50, and chained windows
+    # dropped one true step per chunk boundary.)
+    # + 1 so the last window that fits exactly (end == n) is kept.
+    for start in range(1, n - window_size + 1, stride):
         end = start + window_size
+        anchor = start - 1
         w_accel = seq.accel[start:end]
         w_gyro = seq.gyro[start:end]
         w_speed = speed_gt[start:end] if speed_gt is not None else None
-        w_pos = (xy[start:end] - xy[start]) if xy is not None else None
+        # path[0] is the anchor (origin), path[1:] the T integrated samples
+        path = (xy[anchor:end] - xy[anchor]) if xy is not None else None
+        w_pos = path[1:] if path is not None else None
 
         if w_speed is None or w_pos is None:
             continue  # can't supervise this window without GT — skip
 
-        if not np.isfinite(w_speed).all() or not np.isfinite(w_pos).all():
+        v_anchor = speed_gt[anchor]
+        if not np.isfinite(w_speed).all() or not np.isfinite(path).all() or not np.isfinite(v_anchor):
             # Window overlaps a real GPS blackout gap (blank lat/lon/speed
             # fields -> NaN, see io_vnbd_loader.load_sequence) — no ground
             # truth to supervise it. Found the hard way: NaN comparisons
@@ -208,32 +226,32 @@ def build_windows(seq: ImuSequence, window_size: int, stride: int, dt: float,
             # useful per that folder's README) got mixed into training.
             continue
 
-        step_dist = np.linalg.norm(np.diff(w_pos, axis=0), axis=1)
+        step_dist = np.linalg.norm(np.diff(path, axis=0), axis=1)
         if step_dist.sum() < min_distance_m:
             continue  # essentially stationary — see docstring
 
-        v0 = float(w_speed[0])
+        v0 = float(v_anchor)
         # true starting heading: prefer the GPS-orientation field (GPS
         # chip's own course-over-ground, confirmed smooth — see
-        # calibrate_sequence) at the window's start sample when the
+        # calibrate_sequence) at the anchor sample when the
         # vehicle's actually moving there. Falls back to bearing from the
         # position track's own first ~1s (short lookahead approximates
         # instantaneous direction of travel; the full window's endpoint
         # would blend in whatever turning happens later in the window,
         # which isn't "starting" heading) if heading_gt isn't available or
         # the window happens to start from a near-stop.
-        if seq.heading_gt is not None and w_speed[0] > 1.0:
-            unit = compass_deg_to_xy_unit(seq.heading_gt[start])
+        if seq.heading_gt is not None and v_anchor > 1.0:
+            unit = compass_deg_to_xy_unit(seq.heading_gt[anchor])
             theta0 = float(np.arctan2(unit[1], unit[0]))
         else:
-            lookahead = min(10, window_size - 1)
-            d = w_pos[lookahead] - w_pos[0]
+            lookahead = min(10, window_size)
+            d = path[lookahead] - path[0]
             if np.linalg.norm(d) < 0.5:  # too little motion in that short a span — widen it
-                d = w_pos[-1] - w_pos[0]
+                d = path[-1] - path[0]
             theta0 = float(np.arctan2(d[1], d[0]))
 
-        lat0 = float(seq.lat[start]) if seq.lat is not None else float("nan")
-        lon0 = float(seq.lon[start]) if seq.lon is not None else float("nan")
+        lat0 = float(seq.lat[anchor]) if seq.lat is not None else float("nan")
+        lon0 = float(seq.lon[anchor]) if seq.lon is not None else float("nan")
 
         windows.append(Window(accel=w_accel, gyro=w_gyro, speed_gt=w_speed, pos_gt=w_pos,
                                v0=v0, theta0=theta0, lat0=lat0, lon0=lon0, dt=dt,
@@ -377,12 +395,41 @@ def compute_channel_norm_stats(windows: list[Window], extra_features: bool) -> t
     return mean.astype(np.float32), std.astype(np.float32)
 
 
+def recording_key(path: str) -> str:
+    """IO-VNBD ships the same drive in more than one folder (e.g.
+    "Categorised .../Vw08/S-Vw8.csv" and "Uncategorised .../S-Dataset/S-Vw8.csv"
+    hold the same samples), so a drive is identified by its file name,
+    case-insensitive, not by its path."""
+    return Path(path).name.lower()
+
+
+def split_recordings(csv_paths: list[str], train_split: float, val_split: float,
+                     seed: int = 0) -> dict[str, list[str]]:
+    """Shuffle and split at the recording level: every copy of one drive
+    lands in the same split. The fractions apply to distinct recordings."""
+    by_key: dict[str, list[str]] = {}
+    for p in sorted(csv_paths):
+        by_key.setdefault(recording_key(p), []).append(p)
+    keys = np.array(sorted(by_key))
+    np.random.default_rng(seed).shuffle(keys)
+    n = len(keys)
+    n_train = int(n * train_split)
+    n_val = int(n * val_split)
+    key_splits = {
+        "train": keys[:n_train],
+        "val": keys[n_train:n_train + n_val],
+        "test": keys[n_train + n_val:],
+    }
+    return {split: [p for k in ks for p in by_key[k]] for split, ks in key_splits.items()}
+
+
 def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_rate_hz: float,
                          window_size: int, window_stride: int,
                          train_split: float, val_split: float, seed: int = 0,
                          file_prefix: str = "", extra_features: bool = False):
     """Discover CSV files, load+calibrate+resample each sequence, window
-    them, then split at the *file* level into train/val/test.
+    them, then split at the *recording* level into train/val/test (all
+    copies of one drive share a split, see split_recordings).
 
     file_prefix filters by filename prefix — set to "S-" (see config) to
     train only on smartphone recordings. IO-VNBD mixes vehicle CAN-bus
@@ -396,17 +443,7 @@ def load_dataset_splits(data_root: str, variant: str, column_map: dict, sample_r
     if not csv_paths:
         raise FileNotFoundError(f"No CSVs found under {root} matching prefix '{file_prefix}' — check data_root/variant/file_prefix in config.")
 
-    rng = np.random.default_rng(seed)
-    paths = np.array(csv_paths)
-    rng.shuffle(paths)
-    n = len(paths)
-    n_train = int(n * train_split)
-    n_val = int(n * val_split)
-    split_paths = {
-        "train": paths[:n_train],
-        "val": paths[n_train:n_train + n_val],
-        "test": paths[n_train + n_val:],
-    }
+    split_paths = split_recordings(csv_paths, train_split, val_split, seed)
 
     dt = 1.0 / sample_rate_hz
     split_windows: dict[str, list[Window]] = {}

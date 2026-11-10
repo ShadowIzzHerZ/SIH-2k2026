@@ -115,10 +115,10 @@ def load_folder(csv_path: Path, target_hz: float = 10.0, min_duration_s: float =
     if t1 - t0 < min_duration_s:
         return None
 
-    n = int((t1 - t0) * target_hz)
+    n = int(np.floor((t1 - t0) * target_hz + 1e-6)) + 1  # samples at exactly 1/target_hz, both ends inside [t0, t1]
     if n < 20:
         return None
-    t_new = np.linspace(t0, t1, n)
+    t_new = t0 + np.arange(n) / target_hz
 
     def interp_vec(t_src, v_src):
         return np.stack([np.interp(t_new, t_src, v_src[:, i]) for i in range(v_src.shape[1])], axis=1)

@@ -24,7 +24,7 @@ from torch.utils.data import DataLoader
 
 from src.data.windowing import load_combined_dataset_splits
 from src.models.bias_correction_net import BiasCorrectionNet
-from src.models.strapdown_ins import drift_metric
+from src.models.strapdown_ins import drift_metric, path_length
 from src.train import forward_pass, pick_device
 
 
@@ -75,8 +75,7 @@ def main():
             speed_pred, pos_pred, speed_gt, pos_gt = forward_pass(model, batch, dt, device)
             drift_pct = drift_metric(pos_pred, pos_gt).cpu().numpy()
 
-            step_dist = torch.linalg.norm(pos_gt[:, 1:, :] - pos_gt[:, :-1, :], dim=-1).cpu().numpy()
-            distance_m = step_dist.sum(axis=1)
+            distance_m = path_length(pos_gt).cpu().numpy()
 
             gyro_z = imu[..., 5].numpy()  # (B, T) yaw rate, rad/s
             max_yaw_rate = np.abs(gyro_z).max(axis=1)

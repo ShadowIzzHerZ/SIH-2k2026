@@ -154,10 +154,14 @@ def match_trajectory(map_con: InMemMap, latlon_path: list[tuple[float, float]],
                                avoid_goingback=True)
     states, last_idx = matcher.match(latlon_path)
 
+    # lattice_best is the best state sequence, and with non_emitting_states=True
+    # it also holds the in-between (non-emitting) states the matcher inserts
+    # between two observations, so its i-th entry is generally NOT observation
+    # i. Index by each emitting state's own observation number instead.
     snapped: list[tuple[float, float] | None] = [None] * len(latlon_path)
-    for i, m in enumerate(matcher.lattice_best[:len(latlon_path)]):
-        if m is not None and m.edge_m is not None:
-            snapped[i] = m.edge_m.pi
+    for m in matcher.lattice_best or []:
+        if m is not None and m.is_emitting() and m.edge_m is not None and 0 <= m.obs < len(latlon_path):
+            snapped[m.obs] = m.edge_m.pi
 
     route_nodes = list(matcher.path_pred_onlynodes) if hasattr(matcher, "path_pred_onlynodes") else []
     return MapMatchResult(
