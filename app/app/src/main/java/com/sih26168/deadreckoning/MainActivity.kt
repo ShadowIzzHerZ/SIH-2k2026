@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -41,8 +42,9 @@ private var modelUpdateCheckStarted = false
  * Live on-device demo of the whole pipeline this repo trains and
  * validates in Python: SensorReader (raw IMU) -> CalibrationManager
  * (Calibration.kt, matching src/calibration.py) -> FusionEngine (matching
- * the fixed src/fusion.py) -> BiasCorrectionModel (ONNX Runtime, the
- * checkpoints/dead_reckoning_model.onnx export) -> RoadMapView (a real
+ * the fixed src/fusion.py) -> EnsembleModel (two BiasCorrectionModels on
+ * ONNX Runtime, the checkpoints/model_slow.onnx and model_fast.onnx exports,
+ * gated on speed) -> RoadMapView (a real
  * OpenStreetMap-tile map).
  *
  * UI is a pixel-match of the Stitch "Zen Civic" mockups (each screen's
@@ -83,9 +85,12 @@ class MainActivity : AppCompatActivity() {
         R.id.demo4Radio, R.id.demo5Radio, R.id.demo6Radio, R.id.demo7Radio,
     )
     private var replayIndex = 0
+    // True on the tick that read replay row 0, i.e. right after the replay
+    // looped from its last row back to its first.
+    private var replayRestarted = false
 
     private var calibration = CalibrationManager()
-    private lateinit var model: BiasCorrectionModel
+    private lateinit var model: EnsembleModel
     private lateinit var fusion: FusionEngine
     // Null until the road graph (about 460 KB of JSON) has been parsed on a
     // background thread at startup; until then nothing is map-matched.
@@ -225,17 +230,23 @@ class MainActivity : AppCompatActivity() {
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickIntervalMs = 100L  // 10Hz — matches configs/default.yaml's sample_rate_hz
     private var ticking = false
+    // Live ticks since the calibration prior was last saved.
+    private var ticksSincePriorSave = 0
+    // Which model ran and how far each blackout drifted, to logcat
+    // (`adb logcat -s DriveSelfCheck`). Reset with the fusion engine.
+    private var selfCheck = newSelfCheck()
 
     // How long calibration can run before we tell the user it's taking a
     // while. NOT 2s: leveling alone (CalibrationManager's levelSamples=20
     // @ 10Hz) needs 2.0s minimum just to collect its stillness window, so a
     // 2s trigger would fire on essentially every real calibration, not just
-    // stuck ones. Yaw alignment on top of that needs minConfidentSamples
-    // (30) valid GPS-backed samples, which under ordinary driving takes
-    // several seconds more. 10s gives a normal calibration room to finish
-    // while still catching real stalls (phone not held still, no GPS fix,
-    // vehicle stationary) with a clear, actionable notice.
-    private val calibrationSlowNoticeMs = 10_000L
+    // stuck ones. Yaw alignment on top of that needs 100 usable samples
+    // above 3 m/s plus three agreeing checkpoints (CalibrationManager's
+    // minYawSamples), so at least ~12 s of driving. 20s gives a normal
+    // calibration room to finish while still catching real stalls (phone
+    // not held still, no GPS fix, vehicle stationary) before the 30 s
+    // wait cap ends calibration anyway.
+    private val calibrationSlowNoticeMs = 20_000L
 
     // Real "location access needed" screen (Zen Civic restyle) — replaces
     // the old dead-end status-text swap on denial with three real actions.
@@ -401,6 +412,7 @@ class MainActivity : AppCompatActivity() {
         continueDemoLink = findViewById(R.id.continueDemoLink)
 
         sensorReader = SensorReader(this)
+        calibration = newCalibration(usingReplay = false)
         locationReader = LocationReader(this)
         replaySources = listOf(
             "replay_demo1.json",
@@ -412,8 +424,8 @@ class MainActivity : AppCompatActivity() {
             "replay_drive.json",
         ).map { name -> lazy { ReplayDataSource(applicationContext, name) } }
         Thread({ replaySources.forEach { it.value } }, "replay-prefetch").start()
-        model = BiasCorrectionModel(this)
-        // Fetches a newer model if one is published; it takes effect on the
+        model = BiasCorrectionModel.loadEnsemble(this)
+        // Fetches newer models if any are published; they take effect on the
         // next app start. See ModelUpdater.
         if (!modelUpdateCheckStarted) {
             modelUpdateCheckStarted = true
@@ -515,6 +527,7 @@ class MainActivity : AppCompatActivity() {
      * filter" button semantics exactly, just also reachable from the nav. */
     private fun performResetFilter() {
         fusion.reset()
+        selfCheck = newSelfCheck()
         mapMatcher?.reset()
         roadMapView.clear()
         previousFusionMode = null
@@ -697,6 +710,7 @@ class MainActivity : AppCompatActivity() {
     private fun readSample(usingReplay: Boolean, demo: Int): Sample {
         if (usingReplay) {
             val replayData = replaySources[demo - 1].value
+            replayRestarted = replayIndex == 0
             val row = replayData.rows[replayIndex]
             replayIndex = (replayIndex + 1) % replayData.rows.size
             return Sample(row.accel, row.gyro, true, true, row.lat, row.lon, row.speed, row.bearingRad, true)
@@ -753,8 +767,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (usingReplay != wasReplaying || (usingReplay && demo != wasDemo)) {
-            calibration = CalibrationManager()
+            saveCalibrationPrior()
+            calibration = newCalibration(usingReplay)
             fusion.reset()
+            selfCheck = newSelfCheck()
             mapMatcher?.reset()
             roadMapView.clear()
             replayIndex = 0
@@ -849,14 +865,20 @@ class MainActivity : AppCompatActivity() {
         val demoBlackout = blackoutToggle.isChecked
         val available = sample.hasFix && !demoBlackout
 
+        // Forward-axis calibration reads GNSS speed, before lock-in and
+        // after (it keeps refining over the drive — see CalibrationManager).
+        // Only while GNSS is really available to the pipeline: during a
+        // demo blackout the real fix must not leak into the calibration.
+        if (available) {
+            // A looping replay jumps from its last row to its first: no
+            // dv/dt may be taken across that.
+            if (usingReplay && replayRestarted) calibration.yawStretchBreak()
+            calibration.addYawSample(sample.rawAccel, sample.rawGyro, sample.speed)
+        } else {
+            calibration.yawGnssLost()
+        }
+
         if (!calibration.isReady) {
-            // hasBearing() too, not just hasFix — see minHeadingLockSpeedMps's
-            // doc: without it a rough/stationary fix's stale or default
-            // bearing could get fed into yaw alignment as if it were real.
-            if (sample.hasFix && sample.hasBearing) {
-                calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
-            }
-            calibration.tickYawWait()
             showCalibrating(
                 getString(
                     if (usingReplay) R.string.calib_yaw_replay else R.string.calib_yaw_live
@@ -865,6 +887,10 @@ class MainActivity : AppCompatActivity() {
             tickHandler.postDelayed(::tick, tickIntervalMs)
             return
         }
+
+        // Save this drive's mount for the next app start's warm start (see
+        // CalibrationManager's prior), every 30 s and on pause.
+        if (!usingReplay && ++ticksSincePriorSave >= PRIOR_SAVE_TICKS) saveCalibrationPrior()
 
         if (!calibrationUiSwitched) {
             calibrationUiSwitched = true
@@ -886,12 +912,6 @@ class MainActivity : AppCompatActivity() {
         roughCalibrationText.visibility =
             if (calibration.isRoughCalibration) View.VISIBLE else View.GONE
 
-        // Yaw timed out to a best-effort estimate: keep offering it real
-        // moving samples so it can still lock in properly mid-trip.
-        if (!calibration.yawLocked && sample.hasFix && sample.hasBearing) {
-            calibration.addYawSample(sample.rawAccel, sample.speed, sample.bearingRad)
-        }
-
         val calAccel = calibration.calibrate(sample.rawAccel)
         val calGyro = calibration.calibrate(sample.rawGyro)
 
@@ -910,6 +930,11 @@ class MainActivity : AppCompatActivity() {
         )
 
         val s = fusion.state
+        // The real fix, when there is one, in fusion's local frame: during
+        // a demo blackout or a replay GNSS is still there, so the
+        // self-check can score the drift live.
+        val truth = if (sample.hasFix) fusion.latLonToLocalXY(sample.lat, sample.lon) else null
+        selfCheck.tick(s.mode, floatArrayOf(s.x, s.y), truth, model)
         fusion.localXYToLatLon(s.x, s.y)?.let { (lat, lon) ->
             roadMapView.addPoint(lat, lon, s.mode)
             mapMatcher?.match(lat, lon, s.heading)?.let { m ->
@@ -1153,6 +1178,18 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         roadMapView.onPause()
+        if (::sensorReader.isInitialized && !wasReplaying) saveCalibrationPrior()
+    }
+
+    /** Live sensors start from the last live drive's mount; replays never
+     * do (other phones, other mounts). */
+    private fun newCalibration(usingReplay: Boolean) =
+        CalibrationManager(prior = if (usingReplay) null else CalibrationPriorStore.load(this))
+
+    private fun saveCalibrationPrior() {
+        ticksSincePriorSave = 0
+        if (wasReplaying) return
+        calibration.currentPrior()?.let { CalibrationPriorStore.save(this, it) }
     }
 
     // Set when onStop() paused a running pipeline, so onStart() resumes it.
@@ -1218,5 +1255,11 @@ class MainActivity : AppCompatActivity() {
         // Same cleanup AuthActivity's own activityScope gets. Recording
         // uploads run in AppScope instead, so this doesn't cut them off.
         activityScope.cancel()
+    }
+
+    private fun newSelfCheck() = DriveSelfCheck({ Log.i("DriveSelfCheck", it) })
+
+    companion object {
+        private const val PRIOR_SAVE_TICKS = 300  // 30 s at 10 Hz
     }
 }
