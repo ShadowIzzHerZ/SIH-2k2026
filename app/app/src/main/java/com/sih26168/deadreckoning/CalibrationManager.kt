@@ -1,6 +1,9 @@
 package com.sih26168.deadreckoning
 
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
@@ -102,6 +105,29 @@ class CalibrationManager(
     // under ~17 degrees even at 0.3 g; a phone picked up or re-mounted
     // turns it much further.
     private val gravityGateRad: Float = 0.52f,
+    // Warm start from an earlier drive in the same mount — see
+    // applyPrior. Null on the first drive, in replay mode, and after
+    // "skip calibration".
+    private val prior: CalibrationPrior? = null,
+    // The prior is only used if leveling's gravity direction is within
+    // this of the prior's: the same mount, give or take how a car
+    // accelerating tilts a 2 s window (1.5 degrees on the bundled drive).
+    private val priorMountTolRad: Float = 0.087f,
+    // How many samples' worth of weight the prior's gravity gets in the
+    // drive-long mean, so a few seconds of a new drive can't tilt it.
+    private val priorGravityWeight: Int = 300,
+    // Most usable samples a prior counts as when blended with this
+    // drive's fit (see addYawSample): one minute of driving, so an old
+    // prior never outweighs a long new drive.
+    private val maxPriorWeight: Int = 600,
+    // A settled, coherent live fit further than this from the prior
+    // replaces it outright: the phone was turned in the same mount.
+    // Wide, because a live estimate over a short stretch wanders (44
+    // degrees over the bundled drive's first minute).
+    private val priorConflictRad: Float = 0.7f,
+    // Usable samples before a drive's own fit is worth saving as the
+    // next drive's prior.
+    private val minSavedPriorSamples: Int = 300,
 ) {
     private val levelBuf = ArrayList<FloatArray>(levelSamples)
     private val forwardAxis = ForwardAxisEstimator(dt)
@@ -114,6 +140,12 @@ class CalibrationManager(
     private var lastYawCheckpointSamples = 0
     private var yawAgreementStreak = 0
     private var yawWaitTicks = 0
+
+    private var skipped = false
+
+    /** True while psiYaw comes from [prior] rather than this drive. */
+    var usingPrior: Boolean = false
+        private set
 
     /** The latest forward-axis fit, null until there is one. */
     var yawFit: ForwardAxisFit? = null
@@ -182,6 +214,7 @@ class CalibrationManager(
             rLevel = Calibration.levelingRotation(Calibration.estimateGravityVector(levelBuf))
             levelConverged = stationary
             for (a in levelBuf) addGravity(a)
+            applyPrior()
         }
     }
 
@@ -215,6 +248,34 @@ class CalibrationManager(
         yawFit = fit
         val coherent = fit.coherence >= minYawCoherence
 
+        val agreesWithLast = lastYawEstimate?.let { angleDiff(fit.psi, it) < yawStabilityThreshRad } == true
+        yawAgreementStreak = if (agreesWithLast) yawAgreementStreak + 1 else 0
+        lastYawEstimate = fit.psi
+        val settled = yawAgreementStreak >= yawRequiredAgreements - 1 && coherent
+
+        if (usingPrior) {
+            // Blend the prior with this drive's fit, each weighted by the
+            // usable samples behind it, so a short stretch of this drive
+            // only nudges an answer a longer drive settled on. A settled
+            // fit that clearly contradicts the prior (the phone was turned
+            // in the same mount) replaces it outright.
+            val p = prior!!
+            if (!settled) return
+            if (angleDiff(fit.psi, p.psi) > priorConflictRad) {
+                usingPrior = false
+                psiYaw = fit.psi
+                return
+            }
+            val wp = minOf(p.samples, maxPriorWeight).toDouble()
+            val wl = n.toDouble()
+            psiYaw = atan2(
+                wp * sin(p.psi.toDouble()) + wl * sin(fit.psi.toDouble()),
+                wp * cos(p.psi.toDouble()) + wl * cos(fit.psi.toDouble()),
+            ).toFloat()
+            if (wl >= wp) usingPrior = false  // this drive now outweighs the prior
+            return
+        }
+
         if (isReady) {
             // Refining: follow the whole-drive estimate, and upgrade a
             // rough lock once the data supports it. Never downgrade —
@@ -231,16 +292,57 @@ class CalibrationManager(
             return
         }
 
-        val agreesWithLast = lastYawEstimate?.let { angleDiff(fit.psi, it) < yawStabilityThreshRad } == true
-        yawAgreementStreak = if (agreesWithLast) yawAgreementStreak + 1 else 0
-        lastYawEstimate = fit.psi
-        val settled = yawAgreementStreak >= yawRequiredAgreements - 1 && coherent
         val giveUp = n >= maxYawSamples
         if (settled || giveUp) {
             psiYaw = fit.psi
             yawConverged = settled
             isReady = true
         }
+    }
+
+    /**
+     * Warm start: if leveling finds the phone in the same mount as the
+     * drive [prior] came from (gravity within priorMountTolRad), start
+     * from that drive's answer instead of waiting for this one's. Its
+     * gravity joins the drive-long mean with priorGravityWeight samples'
+     * weight, its psi is used straight away, and calibration is ready at
+     * once. This drive's own fit is blended in by sample count as it
+     * settles (see addYawSample), so on a short drive — where the live
+     * estimate is still wandering — the earlier, longer drive's answer
+     * dominates.
+     */
+    private fun applyPrior() {
+        val p = prior ?: return
+        if (gravityCount == 0) return
+        val gx = gravitySum[0]; val gy = gravitySum[1]; val gz = gravitySum[2]
+        val gn = sqrt(gx * gx + gy * gy + gz * gz)
+        if (gn < 1e-9) return
+        val cosAng = (gx * p.gravity[0] + gy * p.gravity[1] + gz * p.gravity[2]) / gn
+        if (cosAng < kotlin.math.cos(priorMountTolRad.toDouble())) return
+        val mag = gn / gravityCount
+        for (i in 0 until 3) gravitySum[i] = gravitySum[i] + p.gravity[i] * mag * priorGravityWeight
+        gravityCount += priorGravityWeight
+        relevel()
+        psiYaw = p.psi
+        yawConverged = true
+        isReady = true
+        usingPrior = true
+    }
+
+    /** This drive's answer, worth saving as the next drive's [prior]: only
+     * once at least minSavedPriorSamples usable samples of this drive
+     * back a converged, coherent fit — never a timed-out guess, a skipped
+     * calibration, or the prior passed back before this drive added
+     * anything. While blended with a prior, the blend is what's saved,
+     * with the combined (capped) weight. */
+    fun currentPrior(): CalibrationPrior? {
+        val fit = yawFit ?: return null
+        if (skipped || !isReady || !yawConverged) return null
+        if (fit.samples < minSavedPriorSamples || fit.coherence < minYawCoherence || gravityCount == 0) return null
+        val weight = if (usingPrior) minOf(prior!!.samples, maxPriorWeight) + fit.samples else fit.samples
+        val n = sqrt(gravitySum.sumOf { it * it })
+        if (n < 1e-9) return null
+        return CalibrationPrior(FloatArray(3) { (gravitySum[it] / n).toFloat() }, psiYaw, weight)
     }
 
     /**
@@ -349,6 +451,7 @@ class CalibrationManager(
             }
             levelConverged = false
         }
+        skipped = true
         if (!isReady) {
             psiYaw = 0f
             yawConverged = false
