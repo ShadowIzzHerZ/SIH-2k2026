@@ -63,6 +63,17 @@ def ecef_to_lla(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> tuple[np.ndarray
     return np.degrees(lat), np.degrees(lon), alt
 
 
+def _sorted_unique(t: np.ndarray, *values: np.ndarray):
+    """Sort a stream by time and keep the first sample of each repeated
+    timestamp. np.interp needs strictly increasing sample times; the gyro
+    stream repeats timestamps, and np.interp silently returns wrong values
+    for repeated or unsorted ones. edge/comma2k19.py does the same."""
+    order = np.argsort(t, kind="stable")
+    t = t[order]
+    keep = np.concatenate([[True], np.diff(t) > 0])
+    return (t[keep], *(v[order][keep] for v in values))
+
+
 def load_segment(row, target_hz: float = 10.0, min_duration_s: float = 5.0) -> ImuSequence | None:
     """One parquet row = one ~1-minute segment. Returns None for a segment
     too short/sparse to be usable (a few streams occasionally drop out)."""
@@ -82,6 +93,10 @@ def load_segment(row, target_hz: float = 10.0, min_duration_s: float = 5.0) -> I
         pos_t = arr("global_pose__frame_times")
         pos_ecef = arr2("global_pose__frame_positions")
         vel_ecef = arr2("global_pose__frame_velocities")
+        acc_t, acc_v = _sorted_unique(acc_t, acc_v)
+        gyro_t, gyro_v = _sorted_unique(gyro_t, gyro_v)
+        speed_t, speed_v = _sorted_unique(speed_t, speed_v)
+        pos_t, pos_ecef, vel_ecef = _sorted_unique(pos_t, pos_ecef, vel_ecef)
     except Exception:
         return None
 
