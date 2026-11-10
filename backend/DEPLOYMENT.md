@@ -143,13 +143,13 @@ sudo certbot --nginx -d YOUR_ACTUAL_DOMAIN.com
 
 ## 5. Option D: 1-Click Cloud Hosting (Render / PaaS)
 
-This repository includes a native [`render.yaml`](file:///C:/Users/manis/OneDrive/Desktop/Sih-Backend/render.yaml) blueprint.
+This repository includes a native [`render.yaml`](render.yaml) blueprint in `backend/`.
 
 ### Deploying to Render:
 1. Push this repository to GitHub or GitLab.
 2. Open the [Render Dashboard](https://dashboard.render.com).
 3. Click **New +** -> **Blueprint**.
-4. Connect your repository.
+4. Connect your repository and set the Blueprint file path to `backend/render.yaml` (it is not at the repo root). The service uses `rootDir: backend`.
 5. Render will automatically provision:
    - Web Service (`uvicorn app.main:app --host 0.0.0.0 --port $PORT --ws websockets`)
    - Managed PostgreSQL database for TimescaleDB / trajectory persistence.
