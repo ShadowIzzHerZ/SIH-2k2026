@@ -8,7 +8,7 @@ failure families, from the loaders' own output (the exact arrays windowing.py
 trains on), so the next one is found by measurement, not by luck.
 
 Per sequence it measures:
-  speed_ratio  GPS path length / integral of speed_gt, median over 60 s blocks.
+  speed_ratio  GPS path length / integral of speed_gt, median over 30 s blocks.
                ~1.0 = consistent. ~3.6 = speed_gt is in km/h-as-m/s (or the
                reverse, ~0.28). Anything far from 1 means speed_gt and
                position disagree about how far the vehicle went.
