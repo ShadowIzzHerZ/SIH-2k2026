@@ -284,9 +284,16 @@ def load_sequence(path: Path, column_map: dict[str, str | None] | None = None) -
 
 def latlon_to_local_xy(lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
     """Equirectangular projection to local metres, referenced to the first
-    point in the sequence. Good enough over a single trip's extent (a few
-    km at most) — not meant for anything requiring true geodesy."""
-    lat0, lon0 = lat[0], lon[0]
+    valid fix in the sequence. Good enough over a single trip's extent (a few
+    km at most) — not meant for anything requiring true geodesy.
+
+    The first valid fix, not row 0: own recordings usually start logging
+    before the GPS has a fix, and a NaN origin made the whole track NaN, so
+    build_windows dropped every window of the file. Rows without a fix stay
+    NaN."""
+    ok = np.flatnonzero(np.isfinite(lat) & np.isfinite(lon))
+    i0 = ok[0] if len(ok) else 0
+    lat0, lon0 = lat[i0], lon[i0]
     R = 6371000.0
     lat0_rad = np.radians(lat0)
     x = np.radians(lon - lon0) * R * np.cos(lat0_rad)
