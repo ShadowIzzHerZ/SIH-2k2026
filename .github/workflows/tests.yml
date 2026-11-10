@@ -58,6 +58,20 @@ jobs:
           name: android-test-reports
           path: app/app/build/reports/tests/
 
+      # An installable build of every push and pull request, so a change can
+      # be tried on a phone without a local Android toolchain. Each run signs
+      # with its own debug key: uninstall the previous build before
+      # installing a new one.
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
