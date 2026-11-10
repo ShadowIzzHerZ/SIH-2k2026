@@ -12,6 +12,18 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// A Gradle property (-Pname=..., or ~/.gradle/gradle.properties) or, failing
+// that, an environment variable of the same name — so CI can pass secrets
+// as env vars and a developer can keep them out of the repo.
+fun buildSetting(name: String): String? =
+    (project.findProperty(name) as String?) ?: System.getenv(name)
+
+// Release signing is set up only when all four are present; otherwise
+// assembleRelease builds an unsigned APK, as it always has.
+val releaseSigning = listOf(
+    "RELEASE_STORE_FILE", "RELEASE_STORE_PASSWORD", "RELEASE_KEY_ALIAS", "RELEASE_KEY_PASSWORD",
+).associateWith { buildSetting(it) }.takeIf { values -> values.values.all { it != null } }
+
 android {
     namespace = "com.sih26168.deadreckoning"
     compileSdk = 34
@@ -20,7 +32,9 @@ android {
         applicationId = "com.sih26168.deadreckoning"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        // Must go up for every build installed over an older one (and for
+        // every Play upload): ./gradlew assembleRelease -PVERSION_CODE=2
+        versionCode = buildSetting("VERSION_CODE")?.toInt() ?: 1
         versionName = "1.0"
 
         // Every realistic demo/judging device is arm64 — bundling
@@ -43,9 +57,26 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        if (releaseSigning != null) {
+            create("release") {
+                storeFile = file(releaseSigning.getValue("RELEASE_STORE_FILE")!!)
+                storePassword = releaseSigning.getValue("RELEASE_STORE_PASSWORD")
+                keyAlias = releaseSigning.getValue("RELEASE_KEY_ALIAS")
+                keyPassword = releaseSigning.getValue("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // TODO: turn on (with isShrinkResources) once there are keep
+            // rules for ONNX Runtime's JNI classes and osmdroid, and the
+            // shrunk release build has been tried on a device.
             isMinifyEnabled = false
+            if (releaseSigning != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
